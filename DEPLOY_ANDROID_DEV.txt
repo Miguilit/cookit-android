@@ -1,0 +1,7 @@
+Suggested Hostinger path:
+  /home/u683350338/domains/allmart.be/public_html/_private_source/cookit-android
+
+Suggested Git branch:
+  feature/android-pos-n0-n2
+
+This is source code only. Hostinger does not build Android; GitHub Actions builds the APK.
