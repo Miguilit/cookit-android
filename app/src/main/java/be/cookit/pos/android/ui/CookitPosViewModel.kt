@@ -43,6 +43,8 @@ data class PosUiState(
     val draftOrderType: OrderType = OrderType.DINE_IN,
     val draftTableId: Long? = null,
     val pendingRemoteOrderId: Long? = null,
+    val resumedRemoteOrderId: Long? = null,
+    val resumedRemoteOrderTotal: Double? = null,
     val openedOrderCode: String? = null,
     val orderLoadBusy: Boolean = false,
     val orderLoadError: String? = null,
@@ -287,20 +289,34 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun guardPendingOrderEdit(): Boolean {
-        val pendingId = _ui.value.pendingRemoteOrderId ?: return false
-        _ui.update {
-            it.copy(
-                paymentSheetOpen = true,
-                checkoutError = "La commande #$pendingId existe déjà sur Cookit. Terminez son paiement avant de modifier le panier."
-            )
+        val state = _ui.value
+        if (state.resumedRemoteOrderId != null) {
+            _ui.update {
+                it.copy(
+                    checkoutError = "${state.openedOrderCode ?: "Commande"} est chargée depuis Cookit. Encaissez-la, rafraîchissez-la ou utilisez Nouvelle commande.",
+                    paymentSheetOpen = false
+                )
+            }
+            return true
         }
-        return true
+
+        if (state.pendingRemoteOrderId != null) {
+            _ui.update {
+                it.copy(
+                    checkoutError = "Une commande a déjà été créée sur Cookit et attend la fin de l'encaissement. Réessayez le paiement ou démarrez une nouvelle commande après synchronisation.",
+                    paymentSheetOpen = false
+                )
+            }
+            return true
+        }
+        return false
     }
 
     fun requestCheckout() {
         val state = _ui.value
-        if (state.draftCart.isEmpty()) return
-        if (state.draftOrderType == OrderType.DINE_IN && state.draftTableId == null) {
+        val resumed = state.resumedRemoteOrderId != null
+        if (state.draftCart.isEmpty() && (!resumed || (state.resumedRemoteOrderTotal ?: 0.0) <= 0.0)) return
+        if (!resumed && state.draftOrderType == OrderType.DINE_IN && state.draftTableId == null) {
             _ui.update { it.copy(checkoutMessage = "table_required", checkoutError = null) }
             return
         }
@@ -322,9 +338,18 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun confirmPayment(method: PosPaymentMethod, tenderedAmount: Double? = null) {
         val state = _ui.value
         val lines = state.draftCart
-        if (lines.isEmpty()) return
+        val resumed = state.resumedRemoteOrderId != null
+        if (lines.isEmpty() && !resumed) return
 
-        val amountDue = lines.sumOf { it.total }
+        val amountDue = if (resumed) {
+            state.resumedRemoteOrderTotal?.takeIf { it > 0 } ?: lines.sumOf { it.total }
+        } else {
+            lines.sumOf { it.total }
+        }
+        if (amountDue <= 0.0) {
+            _ui.update { it.copy(checkoutError = "Montant de la commande indisponible. Rafraîchissez la commande avant l'encaissement.") }
+            return
+        }
         if (method == PosPaymentMethod.CASH) {
             val tendered = tenderedAmount ?: amountDue
             if (tendered + 0.0001 < amountDue) {
@@ -365,7 +390,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             runCatching {
-                val existingOrderId = _ui.value.pendingRemoteOrderId
+                val existingOrderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId
                 val orderId = if (existingOrderId != null) {
                     existingOrderId
                 } else {
@@ -434,6 +459,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 it.copy(
                     draftCart = emptyList(),
                     pendingRemoteOrderId = null,
+                    resumedRemoteOrderId = null,
+                    resumedRemoteOrderTotal = null,
                     openedOrderCode = null,
                     checkoutMessage = "sent_to_kitchen"
                 )
@@ -445,7 +472,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _ui.update { it.copy(checkoutBusy = true, checkoutError = null, error = null) }
             runCatching {
-                val orderId = _ui.value.pendingRemoteOrderId ?: api.createOrder(
+                val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId ?: api.createOrder(
                     currentToken,
                     _ui.value.draftOrderType,
                     _ui.value.draftCart,
@@ -470,6 +497,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         draftOrderType = OrderType.DINE_IN,
                         draftTableId = it.tables.firstOrNull { table -> table.available }?.id,
                         pendingRemoteOrderId = null,
+                        resumedRemoteOrderId = null,
+                        resumedRemoteOrderTotal = null,
                         openedOrderCode = null,
                         orders = freshOrders,
                         kots = freshKots,
@@ -488,56 +517,145 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun openOrderForPos(order: PosOrder) {
-        if (order.settlementStatus.lowercase() == "paid") {
-            _ui.update { it.copy(orderLoadError = "Cette commande est déjà payée.") }
+        if (isTerminalSettlement(order.settlementStatus)) {
+            _ui.update { it.copy(orderLoadError = "Cette commande est déjà soldée ou annulée.") }
             return
         }
         val currentToken = token ?: return
         viewModelScope.launch {
-            _ui.update { it.copy(orderLoadBusy = true, orderLoadError = null) }
-            runCatching { api.orderDraft(currentToken, order.id) }
-                .onSuccess { remote ->
-                    val lines = remote.lines.map { line ->
-                        val product = _ui.value.products.firstOrNull { it.id == line.menuItemId }
-                            ?: Product(
-                                id = line.menuItemId,
-                                categoryId = 0,
-                                name = line.name ?: "Article ${line.menuItemId}",
-                                description = "",
-                                price = line.price,
-                                emoji = "🍽️"
-                            )
-                        CartLine(
-                            product = if (line.price > 0 && product.price != line.price) product.copy(price = line.price) else product,
-                            quantity = line.quantity
+            loadRemoteOrderForPos(currentToken, order.id, order.code)
+        }
+    }
+
+    fun refreshOpenedOrder() {
+        val currentToken = token ?: return
+        val state = _ui.value
+        val orderId = state.resumedRemoteOrderId ?: return
+        val code = state.openedOrderCode ?: state.orders.firstOrNull { it.id == orderId }?.code ?: "Commande"
+        viewModelScope.launch {
+            loadRemoteOrderForPos(currentToken, orderId, code)
+        }
+    }
+
+    private suspend fun loadRemoteOrderForPos(currentToken: String, orderId: Long, code: String) {
+        _ui.update { it.copy(orderLoadBusy = true, orderLoadError = null, checkoutError = null) }
+        runCatching { api.orderDraft(currentToken, orderId) }
+            .onSuccess { remote ->
+                if (isTerminalSettlement(remote.settlementStatus)) {
+                    startFreshDraftInternal(message = "remote_settled")
+                    val freshOrders = runCatching { api.orders(currentToken) }.getOrDefault(_ui.value.orders)
+                    _ui.update { it.copy(orders = freshOrders, orderLoadBusy = false) }
+                    return@onSuccess
+                }
+
+                val lines = remote.lines.map { line ->
+                    val product = _ui.value.products.firstOrNull { it.id == line.menuItemId }
+                        ?: Product(
+                            id = line.menuItemId,
+                            categoryId = 0,
+                            name = line.name ?: "Article ${line.menuItemId}",
+                            description = "",
+                            price = line.price,
+                            emoji = "🍽️"
                         )
-                    }
-                    persistedDraft = PersistedDraft(
-                        entries = lines.map { DraftEntry(it.product.id, it.quantity) },
-                        orderType = remote.type,
-                        tableId = remote.tableId,
-                        pendingOrderId = remote.orderId
+                    CartLine(
+                        product = if (line.price > 0 && product.price != line.price) product.copy(price = line.price) else product,
+                        quantity = line.quantity
                     )
-                    _ui.update {
-                        it.copy(
-                            orderLoadBusy = false,
-                            draftCart = lines,
-                            draftOrderType = remote.type,
-                            draftTableId = remote.tableId,
-                            pendingRemoteOrderId = remote.orderId,
-                            openedOrderCode = order.code,
-                            paymentSheetOpen = false,
-                            checkoutError = null,
-                            checkoutMessage = null
-                        )
+                }
+
+                // A reopened server order is not an idempotency-pending local checkout.
+                // Do not persist its database id in DraftOrderStore: that was the source of
+                // the permanent payment-modal lock after returning to the POS.
+                draftStore.clear()
+                persistedDraft = PersistedDraft()
+                _ui.update {
+                    it.copy(
+                        orderLoadBusy = false,
+                        draftCart = lines,
+                        draftOrderType = remote.type,
+                        draftTableId = remote.tableId,
+                        pendingRemoteOrderId = null,
+                        resumedRemoteOrderId = remote.orderId,
+                        resumedRemoteOrderTotal = remote.total,
+                        openedOrderCode = code,
+                        paymentSheetOpen = false,
+                        checkoutError = null,
+                        checkoutMessage = null,
+                        orderLoadError = if (lines.isEmpty() && remote.total <= 0.0) {
+                            "La commande ne contient ni lignes ni montant exploitable. Utilisez Rafraîchir après le correctif API."
+                        } else null
+                    )
+                }
+            }
+            .onFailure { e ->
+                _ui.update { it.copy(orderLoadBusy = false, orderLoadError = readableError(e)) }
+            }
+    }
+
+    fun startNewOrder() {
+        val state = _ui.value
+        if (state.resumedRemoteOrderId != null) {
+            startFreshDraftInternal()
+            return
+        }
+
+        val pendingId = state.pendingRemoteOrderId
+        if (pendingId == null || state.demoMode) {
+            startFreshDraftInternal()
+            return
+        }
+
+        val currentToken = token ?: return
+        viewModelScope.launch {
+            _ui.update { it.copy(orderLoadBusy = true, checkoutError = null) }
+            runCatching { api.orderDraft(currentToken, pendingId) }
+                .onSuccess { remote ->
+                    if (isTerminalSettlement(remote.settlementStatus)) {
+                        startFreshDraftInternal(message = "remote_settled")
+                    } else {
+                        _ui.update {
+                            it.copy(
+                                orderLoadBusy = false,
+                                paymentSheetOpen = false,
+                                checkoutError = "La commande serveur en attente n'est pas encore soldée. Terminez son paiement avant de l'abandonner."
+                            )
+                        }
                     }
-                    persistCurrentDraft()
                 }
                 .onFailure { e ->
-                    _ui.update { it.copy(orderLoadBusy = false, orderLoadError = readableError(e)) }
+                    _ui.update { it.copy(orderLoadBusy = false, checkoutError = readableError(e)) }
                 }
         }
     }
+
+    private fun startFreshDraftInternal(message: String? = null) {
+        draftStore.clear()
+        persistedDraft = PersistedDraft()
+        _ui.update {
+            it.copy(
+                orderLoadBusy = false,
+                paymentSheetOpen = false,
+                draftCart = emptyList(),
+                draftOrderType = OrderType.DINE_IN,
+                draftTableId = it.tables.firstOrNull { table -> table.available }?.id,
+                pendingRemoteOrderId = null,
+                resumedRemoteOrderId = null,
+                resumedRemoteOrderTotal = null,
+                openedOrderCode = null,
+                checkoutError = null,
+                orderLoadError = null,
+                checkoutMessage = message,
+                lastCashChange = null
+            )
+        }
+    }
+
+    private fun isTerminalSettlement(status: String?): Boolean = status
+        ?.lowercase()
+        ?.let { it in setOf("paid", "cancelled", "canceled", "refunded", "completed") }
+        ?: false
+
 
     private fun finishSuccessfulCheckout(freshOrders: List<PosOrder>, freshKots: List<KotTicket> = _ui.value.kots, cashChange: Double? = null) {
         draftStore.clear()
@@ -553,6 +671,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 draftOrderType = OrderType.DINE_IN,
                 draftTableId = it.tables.firstOrNull { table -> table.available }?.id,
                 pendingRemoteOrderId = null,
+                resumedRemoteOrderId = null,
+                resumedRemoteOrderTotal = null,
                 openedOrderCode = null,
                 orders = if (freshOrders.isEmpty()) it.orders else freshOrders,
                 kots = freshKots,
@@ -695,6 +815,14 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             ?.takeIf { id -> tables.any { it.id == id } }
             ?: tables.firstOrNull { it.available }?.id
 
+        val restoredPendingId = persistedDraft.pendingOrderId ?: _ui.value.pendingRemoteOrderId
+        val pendingServerOrder = restoredPendingId?.let { id -> liveOrders.firstOrNull { it.id == id } }
+        val clearStalePending = pendingServerOrder != null && isTerminalSettlement(pendingServerOrder.settlementStatus)
+        if (clearStalePending) {
+            draftStore.clear()
+            persistedDraft = PersistedDraft()
+        }
+
         _ui.update {
             it.copy(
                 authenticated = true,
@@ -707,10 +835,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 orders = liveOrders,
                 kots = liveKots,
                 tables = tables,
-                draftCart = restoredCart,
-                draftOrderType = if (restoredCart.isNotEmpty()) persistedDraft.orderType else it.draftOrderType,
+                draftCart = if (clearStalePending) emptyList() else restoredCart,
+                draftOrderType = if (!clearStalePending && restoredCart.isNotEmpty()) persistedDraft.orderType else it.draftOrderType,
                 draftTableId = restoredTableId,
-                pendingRemoteOrderId = persistedDraft.pendingOrderId ?: it.pendingRemoteOrderId,
+                pendingRemoteOrderId = if (clearStalePending) null else restoredPendingId,
+                resumedRemoteOrderId = if (clearStalePending) null else it.resumedRemoteOrderId,
+                resumedRemoteOrderTotal = if (clearStalePending) null else it.resumedRemoteOrderTotal,
+                openedOrderCode = if (clearStalePending) null else it.openedOrderCode,
                 cashRegisters = cashRegisters,
                 cashDenominations = denominations.ifEmpty { DemoRepository.denominations },
                 activeCashSession = activeCash,
@@ -740,12 +871,23 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         if (newInboundIds.isNotEmpty()) runCatching { tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 240) }
                         knownOrderIds.addAll(fresh.map { it.id })
                         _ui.update { state ->
+                            val resumedSettled = state.resumedRemoteOrderId
+                                ?.let { id -> fresh.firstOrNull { it.id == id } }
+                                ?.let { isTerminalSettlement(it.settlementStatus) }
+                                ?: false
                             state.copy(
                                 online = true,
                                 orders = fresh.map { it.copy(unread = it.id in newInboundIds) },
                                 kots = freshKots,
                                 unreadInbound = state.unreadInbound + newInboundIds.size,
                                 lastSyncEpochMs = System.currentTimeMillis(),
+                                draftCart = if (resumedSettled) emptyList() else state.draftCart,
+                                pendingRemoteOrderId = if (resumedSettled) null else state.pendingRemoteOrderId,
+                                resumedRemoteOrderId = if (resumedSettled) null else state.resumedRemoteOrderId,
+                                resumedRemoteOrderTotal = if (resumedSettled) null else state.resumedRemoteOrderTotal,
+                                openedOrderCode = if (resumedSettled) null else state.openedOrderCode,
+                                paymentSheetOpen = if (resumedSettled) false else state.paymentSheetOpen,
+                                checkoutMessage = if (resumedSettled) "remote_settled" else state.checkoutMessage,
                                 error = null
                             )
                         }

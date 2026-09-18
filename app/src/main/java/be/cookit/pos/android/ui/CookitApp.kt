@@ -516,7 +516,15 @@ private fun PosScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(t.newOrder, fontWeight = FontWeight.Black, fontSize = 26.sp)
+            Text(state.openedOrderCode ?: t.newOrder, fontWeight = FontWeight.Black, fontSize = 26.sp)
+            if (state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null) {
+                Spacer(Modifier.width(10.dp))
+                OutlinedButton(onClick = vm::startNewOrder, enabled = !state.orderLoadBusy) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(t.newOrder, fontWeight = FontWeight.Bold)
+                }
+            }
             Spacer(Modifier.weight(1f))
             OrderTypeChip(t.dineIn, orderType == OrderType.DINE_IN) { vm.setDraftOrderType(OrderType.DINE_IN) }
             OrderTypeChip(t.takeaway, orderType == OrderType.TAKEAWAY) { vm.setDraftOrderType(OrderType.TAKEAWAY) }
@@ -541,6 +549,8 @@ private fun PosScreen(
             Text("${t.chooseTable}: ${t.selectionRequired}", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
         } else if (state.checkoutMessage == "paid") {
             Text(t.orderPaid, color = CookitGreen, fontWeight = FontWeight.Bold)
+        } else if (state.checkoutMessage == "remote_settled") {
+            Text("La commande a été soldée sur Cookit. La caisse est prête pour une nouvelle commande.", color = CookitGreen, fontWeight = FontWeight.Bold)
         }
 
         if (!state.checkoutError.isNullOrBlank() && !state.paymentSheetOpen) {
@@ -565,9 +575,22 @@ private fun PosScreen(
                 color = CookitSoftOrange
             ) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Lock, null, tint = CookitOrange)
+                    Icon(Icons.Default.ReceiptLong, null, tint = CookitOrange)
                     Spacer(Modifier.width(8.dp))
-                    Text("Commande $code chargée • panier verrouillé • paiement ou renvoi KOT disponible", fontWeight = FontWeight.Bold)
+                    Column(Modifier.weight(1f)) {
+                        Text("Commande $code chargée depuis Cookit", fontWeight = FontWeight.Bold)
+                        Text("Montant canonique : ${String.format(Locale.FRANCE, "%.2f €", state.resumedRemoteOrderTotal ?: cart.sumOf { it.total })}", color = CookitMuted, fontSize = 12.sp)
+                    }
+                    TextButton(onClick = vm::refreshOpenedOrder, enabled = !state.orderLoadBusy) {
+                        Icon(Icons.Default.Refresh, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Rafraîchir")
+                    }
+                    TextButton(onClick = vm::startNewOrder, enabled = !state.orderLoadBusy) {
+                        Icon(Icons.Default.Add, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Nouvelle commande")
+                    }
                 }
             }
         }
@@ -611,6 +634,8 @@ private fun PosScreen(
                     t = t,
                     busy = state.checkoutBusy,
                     tableLabel = state.tables.firstOrNull { it.id == selectedTableId }?.label,
+                    canonicalTotal = state.resumedRemoteOrderTotal,
+                    locked = state.resumedRemoteOrderId != null,
                     onPlus = vm::incrementProduct,
                     onMinus = vm::decrementProduct,
                     onSendKitchen = vm::sendDraftToKitchen,
@@ -619,20 +644,23 @@ private fun PosScreen(
             }
         } else {
             Box(Modifier.fillMaxSize()) {
+                val showMobileCartBar = cart.isNotEmpty() || ((state.resumedRemoteOrderTotal ?: 0.0) > 0.0 && state.resumedRemoteOrderId != null)
                 ProductPane(
-                    modifier = Modifier.fillMaxSize().padding(bottom = if (cart.isEmpty()) 0.dp else 84.dp),
+                    modifier = Modifier.fillMaxSize().padding(bottom = if (!showMobileCartBar) 0.dp else 84.dp),
                     categories = categories,
                     products = products,
                     selectedCategory = selectedCategory,
                     onCategory = { selectedCategory = it },
                     onAdd = vm::addProduct
                 )
-                if (cart.isNotEmpty()) {
+                if (showMobileCartBar) {
                     MobileCartBar(
                         modifier = Modifier.align(Alignment.BottomCenter),
                         cart = cart,
                         t = t,
                         busy = state.checkoutBusy,
+                        canonicalTotal = state.resumedRemoteOrderTotal,
+                        locked = state.resumedRemoteOrderId != null,
                         onSendKitchen = vm::sendDraftToKitchen,
                         onCheckout = vm::requestCheckout
                     )
@@ -659,7 +687,8 @@ private fun PaymentMethodDialog(
     onConfirm: (PosPaymentMethod, Double?) -> Unit
 ) {
     var selected by remember(state.paymentSheetOpen) { mutableStateOf(PosPaymentMethod.CASH) }
-    val total = state.draftCart.sumOf { it.total }
+    val total = state.resumedRemoteOrderTotal?.takeIf { state.resumedRemoteOrderId != null && it > 0 }
+        ?: state.draftCart.sumOf { it.total }
     var tenderedText by remember(state.paymentSheetOpen, total) {
         mutableStateOf(String.format(Locale.US, "%.2f", total))
     }
@@ -683,10 +712,10 @@ private fun PaymentMethodDialog(
                     )
                 }
 
-                if (state.pendingRemoteOrderId != null) {
+                if (state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null) {
                     Surface(shape = RoundedCornerShape(12.dp), color = CookitSoftOrange) {
                         Text(
-                            "${t.pendingOrder} #${state.pendingRemoteOrderId}",
+                            state.openedOrderCode?.let { "${t.pendingOrder} $it" } ?: t.pendingOrder,
                             Modifier.padding(10.dp),
                             color = CookitOrange,
                             fontWeight = FontWeight.Bold
@@ -751,7 +780,7 @@ private fun PaymentMethodDialog(
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (state.pendingRemoteOrderId != null) t.retryPayment else t.confirmPayment)
+                Text(if (state.pendingRemoteOrderId != null || state.resumedRemoteOrderId != null) t.retryPayment else t.confirmPayment)
             }
         },
         dismissButton = {
@@ -792,10 +821,13 @@ private fun MobileCartBar(
     cart: List<CartLine>,
     t: UiStrings,
     busy: Boolean,
+    canonicalTotal: Double? = null,
+    locked: Boolean = false,
     onSendKitchen: () -> Unit,
     onCheckout: () -> Unit
 ) {
-    val total = cart.sumOf { it.total }
+    val lineTotal = cart.sumOf { it.total }
+    val total = canonicalTotal?.takeIf { it > 0 } ?: lineTotal
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = Color.White,
@@ -810,13 +842,15 @@ private fun MobileCartBar(
                 Text("${cart.sumOf { it.quantity }} articles", color = CookitMuted, fontSize = 12.sp)
                 Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 20.sp, fontWeight = FontWeight.Black)
             }
-            OutlinedButton(onClick = onSendKitchen, enabled = !busy, shape = RoundedCornerShape(14.dp)) {
-                Icon(Icons.Default.SoupKitchen, null)
-                Spacer(Modifier.width(6.dp))
-                Text("KOT", fontWeight = FontWeight.Black)
+            if (!locked) {
+                OutlinedButton(onClick = onSendKitchen, enabled = !busy && cart.isNotEmpty(), shape = RoundedCornerShape(14.dp)) {
+                    Icon(Icons.Default.SoupKitchen, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("KOT", fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.width(8.dp))
             }
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = onCheckout, enabled = !busy, shape = RoundedCornerShape(14.dp)) {
+            Button(onClick = onCheckout, enabled = !busy && (cart.isNotEmpty() || total > 0), shape = RoundedCornerShape(14.dp)) {
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                 else Icon(Icons.Default.Payments, null)
                 Spacer(Modifier.width(8.dp))
@@ -969,6 +1003,8 @@ private fun CartPane(
     t: UiStrings,
     busy: Boolean,
     tableLabel: String?,
+    canonicalTotal: Double? = null,
+    locked: Boolean = false,
     onPlus: (Long) -> Unit,
     onMinus: (Long) -> Unit,
     onSendKitchen: () -> Unit,
@@ -1006,9 +1042,9 @@ private fun CartPane(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            FilledTonalIconButton(onClick = { onMinus(line.product.id) }) { Icon(Icons.Default.Remove, null) }
+                            FilledTonalIconButton(onClick = { onMinus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Remove, null) }
                             Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
-                            FilledTonalIconButton(onClick = { onPlus(line.product.id) }) { Icon(Icons.Default.Add, null) }
+                            FilledTonalIconButton(onClick = { onPlus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Add, null) }
                         }
                         HorizontalDivider(color = CookitLine)
                     }
@@ -1016,34 +1052,37 @@ private fun CartPane(
             }
 
             val subtotal = cart.sumOf { it.total }
+            val displayTotal = canonicalTotal?.takeIf { it > 0 } ?: subtotal
             SummaryLine(t.subtotal, subtotal)
-            SummaryLine(t.vatIncluded, subtotal * 0.12, muted = true)
+            if (!locked) SummaryLine(t.vatIncluded, subtotal * 0.12, muted = true)
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = CookitLine)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(t.total, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.weight(1f))
                 Text(
-                    String.format(Locale.FRANCE, "%.2f €", subtotal),
+                    String.format(Locale.FRANCE, "%.2f €", displayTotal),
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Black,
                     color = CookitGreen
                 )
             }
             Spacer(Modifier.height(14.dp))
-            OutlinedButton(
-                onClick = onSendKitchen,
-                enabled = cart.isNotEmpty() && !busy,
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(17.dp)
-            ) {
-                Icon(Icons.Default.SoupKitchen, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Envoyer en cuisine (KOT)", fontWeight = FontWeight.Black)
+            if (!locked) {
+                OutlinedButton(
+                    onClick = onSendKitchen,
+                    enabled = cart.isNotEmpty() && !busy,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(17.dp)
+                ) {
+                    Icon(Icons.Default.SoupKitchen, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Envoyer en cuisine (KOT)", fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = onCheckout,
-                enabled = cart.isNotEmpty() && !busy,
+                enabled = !busy && (cart.isNotEmpty() || displayTotal > 0),
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(17.dp)
             ) {
@@ -1088,7 +1127,7 @@ private fun OrdersScreen(
         Spacer(Modifier.height(16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(state.orders, key = { it.id }) { order ->
-                val paid = order.settlementStatus.lowercase(Locale.ROOT) == "paid"
+                val paid = order.settlementStatus.lowercase(Locale.ROOT) in setOf("paid", "cancelled", "canceled", "refunded", "completed")
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()

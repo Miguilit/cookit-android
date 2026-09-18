@@ -1,0 +1,13 @@
+Cookit Android A12.1 — POS recovery hotfix
+
+Apply at Android repository root:
+  unzip -o CookitAndroid_A12_1_POS_RECOVERY_PATCH_20260918.zip -d .
+
+Then:
+  git diff --check
+  git status --short
+  git add app docs DEPLOY_A12_1.txt README.md SHA256SUMS_A12_1.txt
+  git commit -m "Cookit Android A12.1: fix order recovery totals and POS lock"
+  git push origin main
+
+Deploy the companion backend A12.1 hotfix before validating order reopen/payment.

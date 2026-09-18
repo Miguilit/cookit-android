@@ -115,3 +115,10 @@ A11 stabilise le contrat de paiement RestApi (compatibilité `amount/method` et 
 - Real relative timestamps
 - Cash tendered amount + change calculation
 - Separate settlement status from operational order status
+
+
+## A12.1 — POS recovery hotfix
+- Reopened orders use canonical detail items and total.
+- Reopened order and idempotency-pending order states are separated.
+- Refresh/new-order controls prevent permanent checkout lock.
+- Explicit settlement/operational API axes supported.

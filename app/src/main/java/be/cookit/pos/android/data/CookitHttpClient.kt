@@ -151,20 +151,30 @@ class CookitHttpClient {
                 val channel = channelLabel(obj.optText("placed_via", "channel", "source") ?: "POS")
                 val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
 
-                // Cookit has two independent axes:
-                // - status: settlement/billing (kot, billed, paid, payment_due...)
-                // - order_status: operational progress (confirmed, preparing, food_ready...)
-                val operationalStatus = (obj.optText("order_status") ?: "placed").lowercase(Locale.ROOT)
-                val settlementStatus = (obj.optText("status") ?: "unknown").lowercase(Locale.ROOT)
+                // Cookit has two independent axes. A12.1 prefers the explicit API aliases
+                // and remains backward-compatible with older RestApi payloads.
+                val operationalStatus = (
+                    obj.optText("operational_status", "order_status") ?: "placed"
+                ).lowercase(Locale.ROOT)
+                val settlementStatus = (
+                    obj.optText("settlement_status", "status") ?: "unknown"
+                ).lowercase(Locale.ROOT)
 
-                val total = obj.doubleAny("grand_total", "total", "amount", "total_amount") ?: 0.0
+                val cartSummary = obj.optJSONObject("cart")?.optJSONObject("summary")
+                val financials = obj.optJSONObject("financials")
+                val total = obj.doubleAny("grand_total", "total", "total_amount")
+                    ?: cartSummary?.doubleAny("grand_total", "total")
+                    ?: financials?.doubleAny("total", "grand_total")
+                    ?: obj.doubleAny("amount")
+                    ?: 0.0
                 val customerObj = obj.optJSONObject("customer")
                 val tableObj = obj.optJSONObject("table")
                 val customer = customerObj?.optText("name", "full_name")
                     ?: obj.optText("customer_name")
-                    ?: tableObj?.optText("table_name", "name")
+                    ?: tableObj?.optText("table_name", "table_code", "name")
                     ?: "Client"
-                val table = tableObj?.optText("table_name", "name") ?: obj.optText("table_name")
+                val table = tableObj?.optText("table_name", "table_code", "name")
+                    ?: obj.optText("table_name", "table_code")
 
                 val createdRaw = obj.optText("created_at", "date_time", "order_date", "createdAt")
                 val createdEpoch = parseServerEpochMs(createdRaw)
@@ -192,19 +202,33 @@ class CookitHttpClient {
 
     suspend fun orderDraft(token: String, orderId: Long): RemoteOrderDraft = withContext(Dispatchers.IO) {
         val json = request("pos/orders/$orderId", token = token)
-        val obj = findObjectDeep(json, setOf("order", "data")) ?: json
 
-        val rawItems = findArrayDeep(obj, setOf("items", "order_items")) ?: JSONArray()
+        // Current RestApi returns the detailed order at the root and also includes an
+        // `order` raw-row object. A12 incorrectly descended into that raw object, which
+        // discarded root-level items/financials and reopened orders as an empty basket.
+        val obj = when {
+            json.has("id") || json.has("items") || json.has("financials") -> json
+            json.optJSONObject("data") != null -> json.optJSONObject("data")!!
+            json.optJSONObject("order") != null -> json.optJSONObject("order")!!
+            else -> json
+        }
+
+        val rawItems = obj.optJSONArray("items")
+            ?: obj.optJSONObject("cart")?.optJSONArray("items")
+            ?: JSONArray()
         val lines = buildList {
             for (i in 0 until rawItems.length()) {
                 val item = rawItems.optJSONObject(i) ?: continue
                 val nestedMenu = item.optJSONObject("menu_item") ?: item.optJSONObject("menuItem")
-                val menuItemId = item.longAny("menu_item_id", "item_id", "id")
+                val menuItemId = item.longAny("menu_item_id", "item_id")
                     ?: nestedMenu?.longAny("id", "menu_item_id")
                     ?: continue
                 val qty = (item.longAny("quantity", "qty") ?: 1L).toInt().coerceAtLeast(1)
-                val price = item.doubleAny("price", "unit_price", "amount")
-                    ?: nestedMenu?.doubleAny("price", "selling_price", "base_price")
+                val amount = item.doubleAny("amount", "total")
+                val directPrice = item.doubleAny("price", "unit_price")
+                    ?: nestedMenu?.doubleAny("price", "selling_price", "final_price", "base_price")
+                val price = directPrice?.takeIf { it > 0 }
+                    ?: amount?.takeIf { it > 0 }?.div(qty)
                     ?: 0.0
                 val name = item.optText("menu_item_name", "item_name", "name")
                     ?: nestedMenu?.optText("item_name", "name")
@@ -212,14 +236,25 @@ class CookitHttpClient {
             }
         }
 
+        val financials = obj.optJSONObject("financials")
+        val cartSummary = obj.optJSONObject("cart")?.optJSONObject("summary")
+        val effectiveTotal = obj.doubleAny("grand_total", "total", "total_amount")
+            ?: financials?.doubleAny("total", "grand_total")
+            ?: cartSummary?.doubleAny("grand_total", "total")
+            ?: lines.sumOf { it.price * it.quantity }
+
         val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
         RemoteOrderDraft(
-            orderId = orderId,
+            orderId = obj.longAny("id", "order_id") ?: orderId,
             type = type,
             tableId = obj.longAny("table_id", "dining_table_id"),
-            total = obj.doubleAny("grand_total", "total", "total_amount") ?: lines.sumOf { it.price * it.quantity },
-            settlementStatus = (obj.optText("status") ?: "unknown").lowercase(Locale.ROOT),
-            operationalStatus = (obj.optText("order_status") ?: "placed").lowercase(Locale.ROOT),
+            total = effectiveTotal,
+            settlementStatus = (
+                obj.optText("settlement_status", "status") ?: "unknown"
+            ).lowercase(Locale.ROOT),
+            operationalStatus = (
+                obj.optText("operational_status", "order_status") ?: "placed"
+            ).lowercase(Locale.ROOT),
             lines = lines
         )
     }
@@ -307,6 +342,7 @@ class CookitHttpClient {
         lines.forEach { line ->
             items.put(
                 JSONObject()
+                    .put("id", line.product.id)
                     .put("menu_item_id", line.product.id)
                     .put("quantity", line.quantity)
                     .put("price", line.product.price)
