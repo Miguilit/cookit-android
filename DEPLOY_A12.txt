@@ -1,0 +1,11 @@
+Cookit Android A12 — POS Core
+
+Apply at repository root:
+  unzip -o CookitAndroid_A12_POS_CORE_PATCH_20260918.zip -d .
+
+Then:
+  git diff --check
+  git status --short
+  git add app docs DEPLOY_A12.txt README.md SHA256SUMS_A12.txt
+  git commit -m "Cookit Android A12: consolidate POS KOT reopen cash change and real KDS"
+  git push origin main

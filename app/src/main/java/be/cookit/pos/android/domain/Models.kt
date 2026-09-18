@@ -64,7 +64,47 @@ data class PosOrder(
     val table: String? = null,
     val minutesAgo: Int = 0,
     val unread: Boolean = false,
-    val remoteStatus: String = "placed"
+    val remoteStatus: String = "placed",
+    val settlementStatus: String = "unknown",
+    val createdAtEpochMs: Long? = null
+)
+
+data class RemoteOrderLine(
+    val menuItemId: Long,
+    val quantity: Int,
+    val price: Double,
+    val name: String? = null
+)
+
+data class RemoteOrderDraft(
+    val orderId: Long,
+    val type: OrderType,
+    val tableId: Long?,
+    val total: Double,
+    val settlementStatus: String,
+    val operationalStatus: String,
+    val lines: List<RemoteOrderLine>
+)
+
+data class KotItem(
+    val id: Long,
+    val menuItemId: Long?,
+    val name: String,
+    val quantity: Int,
+    val status: String,
+    val note: String? = null
+)
+
+data class KotTicket(
+    val id: Long,
+    val orderId: Long,
+    val orderCode: String,
+    val type: OrderType,
+    val tableName: String?,
+    val kitchenPlace: String?,
+    val status: String,
+    val items: List<KotItem>,
+    val createdAtEpochMs: Long? = null
 )
 
 data class DiningTable(

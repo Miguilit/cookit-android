@@ -1,0 +1,8 @@
+bc77f5a4004844b3ec40605e62aa31a63a8a8ee9a5aa69bd5016368dc7be30ca  DEPLOY_A12.txt
+27e82cce8044805aaeebb586247a6118d9c0737fa076f88f329d547dac73c88a  README.md
+ca8bbbf7b11807d671a977ae4adb9ebae02fbd9e58c1fce43b4a2d7a5be12498  app/build.gradle.kts
+64665a9f2c608dbfd99e3cc9e3c28fcfd9b1ace253d5423bb1d6d263360884ea  app/src/main/java/be/cookit/pos/android/data/CookitHttpClient.kt
+8d296a0d8955beaafb26e73d3597983874f405f42579efb2d428cdd7eec4def3  app/src/main/java/be/cookit/pos/android/domain/Models.kt
+e2da06e5f8bbc54687abef60ac557650979378f2e0481aeecb5bdf559e4ae0a5  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+bdd62b43b8d02c76b9007e4688d75bb3577c4316920cb4b6a6cabd75d2c9345c  app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+e948395ab8f5fbd08a14fa51b87950ebebe0388e0bed369b38c904df4b54225f  docs/A12_POS_CORE.md

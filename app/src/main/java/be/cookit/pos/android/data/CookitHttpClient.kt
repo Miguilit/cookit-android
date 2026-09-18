@@ -11,6 +11,12 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import java.util.Locale
 
 class CookitApiException(
@@ -141,11 +147,16 @@ class CookitHttpClient {
             for (i in 0 until array.length()) {
                 val obj = array.optJSONObject(i) ?: continue
                 val id = obj.longAny("id", "order_id") ?: continue
-                val codeRaw = obj.optText("order_number", "order_no", "code", "uuid") ?: id.toString()
+                val codeRaw = obj.optText("formatted_order_number", "order_number", "order_no", "code", "uuid") ?: id.toString()
                 val channel = channelLabel(obj.optText("placed_via", "channel", "source") ?: "POS")
                 val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
-                val remoteStatus = (obj.optText("order_status", "status") ?: "placed").lowercase(Locale.ROOT)
-                val status = humanStatus(remoteStatus)
+
+                // Cookit has two independent axes:
+                // - status: settlement/billing (kot, billed, paid, payment_due...)
+                // - order_status: operational progress (confirmed, preparing, food_ready...)
+                val operationalStatus = (obj.optText("order_status") ?: "placed").lowercase(Locale.ROOT)
+                val settlementStatus = (obj.optText("status") ?: "unknown").lowercase(Locale.ROOT)
+
                 val total = obj.doubleAny("grand_total", "total", "amount", "total_amount") ?: 0.0
                 val customerObj = obj.optJSONObject("customer")
                 val tableObj = obj.optJSONObject("table")
@@ -155,23 +166,115 @@ class CookitHttpClient {
                     ?: "Client"
                 val table = tableObj?.optText("table_name", "name") ?: obj.optText("table_name")
 
+                val createdRaw = obj.optText("created_at", "date_time", "order_date", "createdAt")
+                val createdEpoch = parseServerEpochMs(createdRaw)
+
                 add(
                     PosOrder(
                         id = id,
                         code = if (codeRaw.startsWith("#")) codeRaw else "#$codeRaw",
                         channel = channel,
                         type = type,
-                        status = status,
-                        remoteStatus = remoteStatus,
+                        status = humanStatus(operationalStatus),
+                        remoteStatus = operationalStatus,
+                        settlementStatus = settlementStatus,
                         total = total,
                         customer = customer,
                         table = table,
-                        minutesAgo = 0,
+                        minutesAgo = minutesSince(createdEpoch),
+                        createdAtEpochMs = createdEpoch,
                         unread = false
                     )
                 )
             }
         }
+    }
+
+    suspend fun orderDraft(token: String, orderId: Long): RemoteOrderDraft = withContext(Dispatchers.IO) {
+        val json = request("pos/orders/$orderId", token = token)
+        val obj = findObjectDeep(json, setOf("order", "data")) ?: json
+
+        val rawItems = findArrayDeep(obj, setOf("items", "order_items")) ?: JSONArray()
+        val lines = buildList {
+            for (i in 0 until rawItems.length()) {
+                val item = rawItems.optJSONObject(i) ?: continue
+                val nestedMenu = item.optJSONObject("menu_item") ?: item.optJSONObject("menuItem")
+                val menuItemId = item.longAny("menu_item_id", "item_id", "id")
+                    ?: nestedMenu?.longAny("id", "menu_item_id")
+                    ?: continue
+                val qty = (item.longAny("quantity", "qty") ?: 1L).toInt().coerceAtLeast(1)
+                val price = item.doubleAny("price", "unit_price", "amount")
+                    ?: nestedMenu?.doubleAny("price", "selling_price", "base_price")
+                    ?: 0.0
+                val name = item.optText("menu_item_name", "item_name", "name")
+                    ?: nestedMenu?.optText("item_name", "name")
+                add(RemoteOrderLine(menuItemId, qty, price, name))
+            }
+        }
+
+        val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
+        RemoteOrderDraft(
+            orderId = orderId,
+            type = type,
+            tableId = obj.longAny("table_id", "dining_table_id"),
+            total = obj.doubleAny("grand_total", "total", "total_amount") ?: lines.sumOf { it.price * it.quantity },
+            settlementStatus = (obj.optText("status") ?: "unknown").lowercase(Locale.ROOT),
+            operationalStatus = (obj.optText("order_status") ?: "placed").lowercase(Locale.ROOT),
+            lines = lines
+        )
+    }
+
+    suspend fun kots(token: String): List<KotTicket> = withContext(Dispatchers.IO) {
+        val json = request("pos/kots?limit=100", token = token)
+        val array = findArrayDeep(json, setOf("data", "kots")) ?: JSONArray()
+
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val id = obj.longAny("id", "kot_id") ?: continue
+                val orderId = obj.longAny("order_id") ?: continue
+                val codeRaw = obj.optText("formatted_order_number", "order_number") ?: orderId.toString()
+                val itemsJson = obj.optJSONArray("items") ?: JSONArray()
+                val items = buildList {
+                    for (j in 0 until itemsJson.length()) {
+                        val item = itemsJson.optJSONObject(j) ?: continue
+                        add(
+                            KotItem(
+                                id = item.longAny("id", "kot_item_id") ?: j.toLong(),
+                                menuItemId = item.longAny("menu_item_id"),
+                                name = item.optText("name", "item_name") ?: "Article",
+                                quantity = (item.longAny("quantity", "qty") ?: 1L).toInt().coerceAtLeast(1),
+                                status = item.optText("status") ?: "pending",
+                                note = item.optText("note")
+                            )
+                        )
+                    }
+                }
+                add(
+                    KotTicket(
+                        id = id,
+                        orderId = orderId,
+                        orderCode = if (codeRaw.startsWith("#")) codeRaw else "#$codeRaw",
+                        type = mapOrderType(obj.optText("order_type") ?: "dine_in"),
+                        tableName = obj.optText("table_name"),
+                        kitchenPlace = obj.optText("kitchen_place"),
+                        status = (obj.optText("status") ?: "pending_confirmation").lowercase(Locale.ROOT),
+                        items = items,
+                        createdAtEpochMs = parseServerEpochMs(obj.optText("created_at"))
+                    )
+                )
+            }
+        }
+    }
+
+    suspend fun updateKotStatus(token: String, kotId: Long, status: String) = withContext(Dispatchers.IO) {
+        request(
+            "pos/kots/$kotId/status",
+            method = "PUT",
+            token = token,
+            body = JSONObject().put("status", status)
+        )
+        Unit
     }
 
 
@@ -341,6 +444,35 @@ class CookitHttpClient {
         val obj = findObjectDeep(json, setOf("session", "data")) ?: json
         val id = obj.longAny("id", "session_id") ?: throw CookitApiException(200, "Session ouverte mais identifiant introuvable.")
         CashSession(id, obj.longAny("cash_register_id", "register_id") ?: registerId, obj.optText("status") ?: "active", openingAmount)
+    }
+
+    private fun parseServerEpochMs(raw: String?): Long? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() && it != "null" } ?: return null
+        runCatching { return Instant.parse(value).toEpochMilli() }
+        runCatching { return OffsetDateTime.parse(value).toInstant().toEpochMilli() }
+
+        val candidates = listOf(
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS")
+        )
+        for (formatter in candidates) {
+            try {
+                return LocalDateTime.parse(value, formatter)
+                    .atZone(ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli()
+            } catch (_: DateTimeParseException) {
+            }
+        }
+        return null
+    }
+
+    private fun minutesSince(epochMs: Long?): Int {
+        if (epochMs == null) return 0
+        return ((System.currentTimeMillis() - epochMs).coerceAtLeast(0L) / 60_000L)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
     }
 
     private fun extractMediaCandidate(obj: JSONObject): String? {

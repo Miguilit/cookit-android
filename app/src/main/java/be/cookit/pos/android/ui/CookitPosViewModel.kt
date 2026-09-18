@@ -43,8 +43,13 @@ data class PosUiState(
     val draftOrderType: OrderType = OrderType.DINE_IN,
     val draftTableId: Long? = null,
     val pendingRemoteOrderId: Long? = null,
-    val kdsBusyOrderIds: Set<Long> = emptySet(),
+    val openedOrderCode: String? = null,
+    val orderLoadBusy: Boolean = false,
+    val orderLoadError: String? = null,
+    val kots: List<KotTicket> = emptyList(),
+    val kdsBusyKotIds: Set<Long> = emptySet(),
     val kdsError: String? = null,
+    val lastCashChange: Double? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
     val printerPort: Int = 9100,
@@ -314,10 +319,19 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         _ui.update { it.copy(paymentSheetOpen = false, checkoutError = null) }
     }
 
-    fun confirmPayment(method: PosPaymentMethod) {
+    fun confirmPayment(method: PosPaymentMethod, tenderedAmount: Double? = null) {
         val state = _ui.value
         val lines = state.draftCart
         if (lines.isEmpty()) return
+
+        val amountDue = lines.sumOf { it.total }
+        if (method == PosPaymentMethod.CASH) {
+            val tendered = tenderedAmount ?: amountDue
+            if (tendered + 0.0001 < amountDue) {
+                _ui.update { it.copy(checkoutError = "Montant reçu insuffisant.") }
+                return
+            }
+        }
 
         if (state.policy.cashSessionRequired && state.activeCashSession == null) {
             _ui.update {
@@ -331,7 +345,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         if (state.demoMode) {
-            finishSuccessfulCheckout(emptyList())
+            finishSuccessfulCheckout(emptyList(), cashChange = if (method == PosPaymentMethod.CASH) ((tenderedAmount ?: amountDue) - amountDue).coerceAtLeast(0.0) else null)
             return
         }
 
@@ -379,7 +393,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     api.payOrder(
                         currentToken,
                         orderId,
-                        _ui.value.draftCart.sumOf { it.total },
+                        amountDue,
                         method
                     )
                 } catch (e: Throwable) {
@@ -387,8 +401,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 val fresh = api.orders(currentToken)
+                val freshKots = runCatching { api.kots(currentToken) }.getOrDefault(_ui.value.kots)
                 knownOrderIds.addAll(fresh.map { it.id })
-                finishSuccessfulCheckout(fresh)
+                val change = if (method == PosPaymentMethod.CASH) {
+                    ((tenderedAmount ?: amountDue) - amountDue).coerceAtLeast(0.0)
+                } else null
+                finishSuccessfulCheckout(fresh, freshKots, change)
             }.onFailure { e ->
                 _ui.update {
                     it.copy(
@@ -401,7 +419,127 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun finishSuccessfulCheckout(freshOrders: List<PosOrder>) {
+
+    fun sendDraftToKitchen() {
+        val state = _ui.value
+        if (state.draftCart.isEmpty()) return
+        if (state.draftOrderType == OrderType.DINE_IN && state.draftTableId == null) {
+            _ui.update { it.copy(checkoutMessage = "table_required", checkoutError = null) }
+            return
+        }
+        if (state.demoMode) {
+            draftStore.clear()
+            persistedDraft = PersistedDraft()
+            _ui.update {
+                it.copy(
+                    draftCart = emptyList(),
+                    pendingRemoteOrderId = null,
+                    openedOrderCode = null,
+                    checkoutMessage = "sent_to_kitchen"
+                )
+            }
+            return
+        }
+
+        val currentToken = token ?: return
+        viewModelScope.launch {
+            _ui.update { it.copy(checkoutBusy = true, checkoutError = null, error = null) }
+            runCatching {
+                val orderId = _ui.value.pendingRemoteOrderId ?: api.createOrder(
+                    currentToken,
+                    _ui.value.draftOrderType,
+                    _ui.value.draftCart,
+                    _ui.value.draftTableId
+                ).also { createdId -> updateDraft(pendingOrderId = createdId) }
+
+                api.ensureKot(currentToken, orderId)
+
+                val freshOrders = api.orders(currentToken)
+                val freshKots = api.kots(currentToken)
+                knownOrderIds.addAll(freshOrders.map { it.id })
+
+                draftStore.clear()
+                persistedDraft = PersistedDraft()
+                _ui.update {
+                    it.copy(
+                        checkoutBusy = false,
+                        checkoutMessage = "sent_to_kitchen",
+                        checkoutError = null,
+                        paymentSheetOpen = false,
+                        draftCart = emptyList(),
+                        draftOrderType = OrderType.DINE_IN,
+                        draftTableId = it.tables.firstOrNull { table -> table.available }?.id,
+                        pendingRemoteOrderId = null,
+                        openedOrderCode = null,
+                        orders = freshOrders,
+                        kots = freshKots,
+                        online = true
+                    )
+                }
+            }.onFailure { e ->
+                _ui.update {
+                    it.copy(
+                        checkoutBusy = false,
+                        checkoutError = "Envoi en cuisine — ${readableError(e)}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun openOrderForPos(order: PosOrder) {
+        if (order.settlementStatus.lowercase() == "paid") {
+            _ui.update { it.copy(orderLoadError = "Cette commande est déjà payée.") }
+            return
+        }
+        val currentToken = token ?: return
+        viewModelScope.launch {
+            _ui.update { it.copy(orderLoadBusy = true, orderLoadError = null) }
+            runCatching { api.orderDraft(currentToken, order.id) }
+                .onSuccess { remote ->
+                    val lines = remote.lines.map { line ->
+                        val product = _ui.value.products.firstOrNull { it.id == line.menuItemId }
+                            ?: Product(
+                                id = line.menuItemId,
+                                categoryId = 0,
+                                name = line.name ?: "Article ${line.menuItemId}",
+                                description = "",
+                                price = line.price,
+                                emoji = "🍽️"
+                            )
+                        CartLine(
+                            product = if (line.price > 0 && product.price != line.price) product.copy(price = line.price) else product,
+                            quantity = line.quantity
+                        )
+                    }
+                    persistedDraft = PersistedDraft(
+                        entries = lines.map { DraftEntry(it.product.id, it.quantity) },
+                        orderType = remote.type,
+                        tableId = remote.tableId,
+                        pendingOrderId = remote.orderId
+                    )
+                    _ui.update {
+                        it.copy(
+                            orderLoadBusy = false,
+                            draftCart = lines,
+                            draftOrderType = remote.type,
+                            draftTableId = remote.tableId,
+                            pendingRemoteOrderId = remote.orderId,
+                            openedOrderCode = order.code,
+                            paymentSheetOpen = false,
+                            checkoutError = null,
+                            checkoutMessage = null
+                        )
+                    }
+                    persistCurrentDraft()
+                }
+                .onFailure { e ->
+                    _ui.update { it.copy(orderLoadBusy = false, orderLoadError = readableError(e)) }
+                }
+        }
+    }
+
+    private fun finishSuccessfulCheckout(freshOrders: List<PosOrder>, freshKots: List<KotTicket> = _ui.value.kots, cashChange: Double? = null) {
         draftStore.clear()
         persistedDraft = PersistedDraft()
         _ui.update {
@@ -415,7 +553,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 draftOrderType = OrderType.DINE_IN,
                 draftTableId = it.tables.firstOrNull { table -> table.available }?.id,
                 pendingRemoteOrderId = null,
+                openedOrderCode = null,
                 orders = if (freshOrders.isEmpty()) it.orders else freshOrders,
+                kots = freshKots,
+                lastCashChange = cashChange,
                 online = true
             )
         }
@@ -463,27 +604,29 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
     }
 
-    fun advanceKitchenOrder(order: PosOrder) {
+    fun advanceKitchenTicket(ticket: KotTicket) {
         val currentToken = token ?: return
-        val nextStatus = nextKitchenStatus(order) ?: return
+        val nextStatus = when (ticket.status.lowercase()) {
+            "pending", "pending_confirmation" -> "in_kitchen"
+            "in_kitchen", "cooking" -> "food_ready"
+            "food_ready", "ready" -> "served"
+            else -> null
+        } ?: return
 
         viewModelScope.launch {
-            _ui.update {
-                it.copy(
-                    kdsBusyOrderIds = it.kdsBusyOrderIds + order.id,
-                    kdsError = null
-                )
-            }
-
+            _ui.update { it.copy(kdsBusyKotIds = it.kdsBusyKotIds + ticket.id, kdsError = null) }
             runCatching {
-                api.updateOrderStatus(currentToken, order.id, nextStatus)
-                api.orders(currentToken)
-            }.onSuccess { fresh ->
-                knownOrderIds.addAll(fresh.map { it.id })
+                api.updateKotStatus(currentToken, ticket.id, nextStatus)
+                val freshKots = api.kots(currentToken)
+                val freshOrders = api.orders(currentToken)
+                freshKots to freshOrders
+            }.onSuccess { (freshKots, freshOrders) ->
+                knownOrderIds.addAll(freshOrders.map { it.id })
                 _ui.update {
                     it.copy(
-                        orders = fresh,
-                        kdsBusyOrderIds = it.kdsBusyOrderIds - order.id,
+                        kots = freshKots,
+                        orders = freshOrders,
+                        kdsBusyKotIds = it.kdsBusyKotIds - ticket.id,
                         kdsError = null,
                         online = true
                     )
@@ -491,7 +634,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }.onFailure { error ->
                 _ui.update {
                     it.copy(
-                        kdsBusyOrderIds = it.kdsBusyOrderIds - order.id,
+                        kdsBusyKotIds = it.kdsBusyKotIds - ticket.id,
                         kdsError = readableError(error)
                     )
                 }
@@ -499,23 +642,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun nextKitchenStatus(order: PosOrder): String? {
-        return when (order.remoteStatus.lowercase()) {
-            "placed", "new", "pending", "pending_verification", "pending_confirmation" -> "confirmed"
-            "confirmed" -> "preparing"
-            "preparing", "in_kitchen", "cooking" -> when (order.type) {
-                OrderType.TAKEAWAY -> "ready_for_pickup"
-                else -> "food_ready"
-            }
-            "food_ready", "ready" -> when (order.type) {
-                OrderType.DINE_IN -> "served"
-                OrderType.TAKEAWAY -> "delivered"
-                OrderType.DELIVERY -> null
-            }
-            "ready_for_pickup" -> "delivered"
-            else -> null
-        }
-    }
 
     fun openCashSession(openingAmount: Double) {
         val currentToken = token ?: return
@@ -543,6 +669,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val platform = api.platform(currentToken, email)
         val catalog = api.catalog(currentToken)
         val liveOrders = api.orders(currentToken)
+        val liveKots = runCatching { api.kots(currentToken) }.getOrDefault(emptyList())
         val tables = runCatching { api.tables(currentToken) }.getOrDefault(emptyList())
         val cashRegisters = runCatching { api.cashRegisters(currentToken) }.getOrDefault(emptyList())
         val denominations = runCatching { api.cashDenominations(currentToken) }.getOrDefault(emptyList())
@@ -578,6 +705,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 categories = catalog.categories.ifEmpty { DemoRepository.categories },
                 products = liveProducts,
                 orders = liveOrders,
+                kots = liveKots,
                 tables = tables,
                 draftCart = restoredCart,
                 draftOrderType = if (restoredCart.isNotEmpty()) persistedDraft.orderType else it.draftOrderType,
@@ -599,8 +727,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             while (true) {
                 delay(2_000)
                 val currentToken = token ?: break
-                runCatching { api.orders(currentToken) }
-                    .onSuccess { fresh ->
+                runCatching {
+                    val freshOrders = api.orders(currentToken)
+                    val freshKots = runCatching { api.kots(currentToken) }.getOrDefault(_ui.value.kots)
+                    freshOrders to freshKots
+                }
+                    .onSuccess { (fresh, freshKots) ->
                         val newInboundIds = fresh
                             .filter { it.id !in knownOrderIds && !it.channel.equals("POS", ignoreCase = true) }
                             .map { it.id }
@@ -611,6 +743,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                             state.copy(
                                 online = true,
                                 orders = fresh.map { it.copy(unread = it.id in newInboundIds) },
+                                kots = freshKots,
                                 unreadInbound = state.unreadInbound + newInboundIds.size,
                                 lastSyncEpochMs = System.currentTimeMillis(),
                                 error = null

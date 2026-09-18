@@ -106,3 +106,12 @@ A10 moves the active POS draft into the ViewModel and persists it locally, intro
 ## A11 — paiement canonique + KDS client-visible
 
 A11 stabilise le contrat de paiement RestApi (compatibilité `amount/method` et `payments[]`), sépare strictement l'état de paiement de l'état opérationnel de préparation et rend le KDS Android actionnable. Les changements de statut KDS utilisent l'`order_status` canonique Cookit afin que les commandes QR et les autres clients puissent suivre la même progression. Les erreurs d'encaissement sont désormais qualifiées par étape (création, envoi cuisine, paiement) au lieu d'afficher une clé de traduction brute. Voir `docs/A11_PAYMENT_KDS.md`.
+
+
+## A12 — POS Core consolidation
+- Real KOT feed for KDS
+- Send order to kitchen without payment
+- Reopen unpaid orders in POS
+- Real relative timestamps
+- Cash tendered amount + change calculation
+- Separate settlement status from operational order status
