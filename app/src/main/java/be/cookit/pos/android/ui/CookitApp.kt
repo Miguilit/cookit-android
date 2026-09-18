@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -547,10 +549,6 @@ private fun PosScreen(
             Text(t.openCashFirst, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
         } else if (state.checkoutMessage == "table_required") {
             Text("${t.chooseTable}: ${t.selectionRequired}", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
-        } else if (state.checkoutMessage == "paid") {
-            Text(t.orderPaid, color = CookitGreen, fontWeight = FontWeight.Bold)
-        } else if (state.checkoutMessage == "remote_settled") {
-            Text("La commande a été soldée sur Cookit. La caisse est prête pour une nouvelle commande.", color = CookitGreen, fontWeight = FontWeight.Bold)
         }
 
         if (!state.checkoutError.isNullOrBlank() && !state.paymentSheetOpen) {
@@ -569,55 +567,32 @@ private fun PosScreen(
         }
 
         state.openedOrderCode?.let { code ->
-            Surface(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = CookitSoftOrange
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.ReceiptLong, null, tint = CookitOrange)
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Commande $code chargée depuis Cookit", fontWeight = FontWeight.Bold)
-                        Text("Montant canonique : ${String.format(Locale.FRANCE, "%.2f €", state.resumedRemoteOrderTotal ?: cart.sumOf { it.total })}", color = CookitMuted, fontSize = 12.sp)
-                    }
-                    TextButton(onClick = vm::refreshOpenedOrder, enabled = !state.orderLoadBusy) {
-                        Icon(Icons.Default.Refresh, null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Rafraîchir")
-                    }
-                    TextButton(onClick = vm::startNewOrder, enabled = !state.orderLoadBusy) {
-                        Icon(Icons.Default.Add, null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Nouvelle commande")
-                    }
-                }
-            }
-        }
-        if (state.checkoutMessage == "sent_to_kitchen") {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = CookitSoftGreen
-            ) {
-                Text("Commande envoyée en cuisine sans encaissement.", Modifier.padding(12.dp), color = CookitGreen, fontWeight = FontWeight.Bold)
-            }
-        }
-        state.lastCashChange?.takeIf { it > 0.0001 }?.let { change ->
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                color = CookitSoftGreen
-            ) {
+                Icon(Icons.Default.ReceiptLong, null, tint = CookitOrange)
+                Spacer(Modifier.width(8.dp))
+                Text("Commande $code", fontWeight = FontWeight.Black)
+                Spacer(Modifier.width(10.dp))
                 Text(
-                    "Monnaie à rendre : ${String.format(Locale.FRANCE, "%.2f €", change)}",
-                    Modifier.padding(12.dp),
+                    String.format(Locale.FRANCE, "%.2f €", state.resumedRemoteOrderTotal ?: cart.sumOf { it.total }),
                     color = CookitGreen,
                     fontWeight = FontWeight.Black
                 )
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = vm::refreshOpenedOrder, enabled = !state.orderLoadBusy) {
+                    Icon(Icons.Default.Refresh, null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Rafraîchir")
+                }
+                TextButton(onClick = vm::startNewOrder, enabled = !state.orderLoadBusy) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Nouvelle commande")
+                }
             }
         }
-
         if (wide) {
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 ProductPane(
@@ -639,7 +614,12 @@ private fun PosScreen(
                     onPlus = vm::incrementProduct,
                     onMinus = vm::decrementProduct,
                     onSendKitchen = vm::sendDraftToKitchen,
-                    onCheckout = vm::requestCheckout
+                    onBillingTools = vm::openBillingTools,
+                    onCheckout = {
+                        val billing = state.billingContext
+                        if (billing != null && (billing.splitBills.isNotEmpty() || billing.groupOrders.size > 1)) vm.openBillingTools()
+                        else vm.requestCheckout()
+                    }
                 )
             }
         } else {
@@ -662,7 +642,12 @@ private fun PosScreen(
                         canonicalTotal = state.resumedRemoteOrderTotal,
                         locked = state.resumedRemoteOrderId != null,
                         onSendKitchen = vm::sendDraftToKitchen,
-                        onCheckout = vm::requestCheckout
+                        onBillingTools = vm::openBillingTools,
+                        onCheckout = {
+                            val billing = state.billingContext
+                            if (billing != null && (billing.splitBills.isNotEmpty() || billing.groupOrders.size > 1)) vm.openBillingTools()
+                            else vm.requestCheckout()
+                        }
                     )
                 }
             }
@@ -675,6 +660,21 @@ private fun PosScreen(
             t = t,
             onDismiss = vm::dismissPaymentSheet,
             onConfirm = vm::confirmPayment
+        )
+    }
+
+    if (state.billingSheetOpen) {
+        BillingToolsDialog(
+            state = state,
+            onDismiss = vm::dismissBillingTools,
+            onSplitEqual = vm::splitBillEqual,
+            onSplitCustom = vm::splitBillCustom,
+            onSplitItems = vm::splitBillItems,
+            onCancelSplit = vm::cancelSplitBill,
+            onPaySplit = vm::paySplitBill,
+            onMergeTables = vm::mergeBillingTables,
+            onUnmergeTables = vm::unmergeBillingTables,
+            onPayGroup = vm::payMergedGroup
         )
     }
 }
@@ -816,6 +816,425 @@ private fun PaymentChoice(
 }
 
 @Composable
+private fun BillingToolsDialog(
+    state: PosUiState,
+    onDismiss: () -> Unit,
+    onSplitEqual: (Int) -> Unit,
+    onSplitCustom: (List<Double>) -> Unit,
+    onSplitItems: (Map<Long, Int>) -> Unit,
+    onCancelSplit: () -> Unit,
+    onPaySplit: (Long, PosPaymentMethod) -> Unit,
+    onMergeTables: (List<Long>) -> Unit,
+    onUnmergeTables: (List<Long>) -> Unit,
+    onPayGroup: (PosPaymentMethod, Double?) -> Unit
+) {
+    val context = state.billingContext
+    var equalParts by remember(context?.orderId) { mutableIntStateOf(2) }
+    var customAmounts by remember(context?.orderId) { mutableStateOf("") }
+    val selectedItems = remember(context?.orderId) { mutableStateMapOf<Long, Int>() }
+    val selectedTables = remember(context?.orderId) { mutableStateMapOf<Long, Boolean>() }
+    var groupMethod by remember(context?.orderId) { mutableStateOf(PosPaymentMethod.CASH) }
+    var groupTenderedText by remember(context?.orderId, context?.groupAmountDue) {
+        mutableStateOf(String.format(Locale.US, "%.2f", context?.groupAmountDue ?: 0.0))
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.9f)
+                .widthIn(max = 980.dp),
+            shape = RoundedCornerShape(26.dp),
+            color = Color.White,
+            shadowElevation = 18.dp
+        ) {
+            Column(Modifier.fillMaxSize().padding(22.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CallSplit, null, tint = CookitOrange)
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text("Addition • Split & Merge", fontSize = 24.sp, fontWeight = FontWeight.Black)
+                        context?.let {
+                            Text(
+                                "Commande #${it.orderNumber} • ${String.format(Locale.FRANCE, "%.2f €", it.amountDue)} restant",
+                                color = CookitMuted,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, enabled = !state.billingBusy) {
+                        Icon(Icons.Default.Close, contentDescription = null)
+                    }
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 12.dp), color = CookitLine)
+
+                if (state.billingBusy && context == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    return@Column
+                }
+
+                state.billingError?.let { error ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Text(
+                            error,
+                            Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                if (context == null) {
+                    Text("Données d’addition indisponibles.", color = CookitMuted)
+                    return@Column
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        BillingMetric("Total", context.total, Modifier.weight(1f))
+                        BillingMetric("Déjà payé", context.amountPaid, Modifier.weight(1f))
+                        BillingMetric("Reste dû", context.amountDue, Modifier.weight(1f), emphasize = true)
+                        if (context.groupOrders.size > 1) {
+                            BillingMetric("Groupe", context.groupAmountDue, Modifier.weight(1f), emphasize = true)
+                        }
+                    }
+
+                    if (context.splitBills.isNotEmpty()) {
+                        BillingSection("Parts existantes") {
+                            context.splitBills.forEach { bill ->
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = CookitCanvas,
+                                    border = BorderStroke(1.dp, CookitLine)
+                                ) {
+                                    Row(
+                                        Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(bill.label, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "${String.format(Locale.FRANCE, "%.2f €", bill.amountDue)} restant • ${bill.status}",
+                                                color = CookitMuted,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                        if (bill.amountDue > 0.0001) {
+                                            OutlinedButton(
+                                                onClick = { onPaySplit(bill.id, PosPaymentMethod.CASH) },
+                                                enabled = !state.billingBusy
+                                            ) { Text("Espèces") }
+                                            Spacer(Modifier.width(6.dp))
+                                            Button(
+                                                onClick = { onPaySplit(bill.id, PosPaymentMethod.CARD_TERMINAL) },
+                                                enabled = !state.billingBusy
+                                            ) { Text("Carte") }
+                                        } else {
+                                            Text("PAYÉ", color = CookitGreen, fontWeight = FontWeight.Black)
+                                        }
+                                    }
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = onCancelSplit,
+                                enabled = !state.billingBusy,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Default.Undo, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Annuler la division")
+                            }
+                        }
+                    }
+
+                    if (context.capabilities.splitEqual) {
+                        BillingSection("Division égale") {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                FilledTonalIconButton(
+                                    onClick = { equalParts = (equalParts - 1).coerceAtLeast(2) },
+                                    enabled = !state.billingBusy
+                                ) { Icon(Icons.Default.Remove, null) }
+                                Text(
+                                    "$equalParts parts",
+                                    modifier = Modifier.padding(horizontal = 18.dp),
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 18.sp
+                                )
+                                FilledTonalIconButton(
+                                    onClick = { equalParts = (equalParts + 1).coerceAtMost(20) },
+                                    enabled = !state.billingBusy
+                                ) { Icon(Icons.Default.Add, null) }
+                                Spacer(Modifier.weight(1f))
+                                Button(
+                                    onClick = { onSplitEqual(equalParts) },
+                                    enabled = !state.billingBusy
+                                ) {
+                                    Text("Diviser")
+                                }
+                            }
+                        }
+                    }
+
+                    if (context.capabilities.splitCustom) {
+                        BillingSection("Division par montants") {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = customAmounts,
+                                    onValueChange = { customAmounts = it },
+                                    modifier = Modifier.weight(1f),
+                                    label = { Text("Montants séparés par virgule") },
+                                    placeholder = { Text("20, 20, 25") },
+                                    singleLine = true
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Button(
+                                    onClick = {
+                                        onSplitCustom(parseSplitAmounts(customAmounts))
+                                    },
+                                    enabled = !state.billingBusy
+                                ) { Text("Créer les parts") }
+                            }
+                        }
+                    }
+
+                    if (context.capabilities.splitItems && context.items.isNotEmpty()) {
+                        BillingSection("Division par articles") {
+                            context.items.forEach { line ->
+                                val selectedQty = selectedItems[line.orderItemId] ?: 0
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = selectedQty > 0,
+                                        onCheckedChange = { checked ->
+                                            if (checked) selectedItems[line.orderItemId] = line.quantity
+                                            else selectedItems.remove(line.orderItemId)
+                                        },
+                                        enabled = !state.billingBusy
+                                    )
+                                    Column(Modifier.weight(1f)) {
+                                        Text(line.name, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            "${line.quantity} × ${String.format(Locale.FRANCE, "%.2f €", line.unitPrice)}",
+                                            color = CookitMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    if (selectedQty > 0 && line.quantity > 1) {
+                                        FilledTonalIconButton(
+                                            onClick = {
+                                                val next = selectedQty - 1
+                                                if (next <= 0) selectedItems.remove(line.orderItemId)
+                                                else selectedItems[line.orderItemId] = next
+                                            },
+                                            enabled = !state.billingBusy
+                                        ) { Icon(Icons.Default.Remove, null) }
+                                        Text("$selectedQty", Modifier.padding(horizontal = 6.dp), fontWeight = FontWeight.Black)
+                                        FilledTonalIconButton(
+                                            onClick = { selectedItems[line.orderItemId] = (selectedQty + 1).coerceAtMost(line.quantity) },
+                                            enabled = !state.billingBusy
+                                        ) { Icon(Icons.Default.Add, null) }
+                                    }
+                                }
+                            }
+                            Button(
+                                onClick = { onSplitItems(selectedItems.toMap()) },
+                                enabled = !state.billingBusy && selectedItems.isNotEmpty()
+                            ) {
+                                Icon(Icons.Default.Restaurant, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Créer une part avec la sélection")
+                            }
+                        }
+                    }
+
+                    if (context.capabilities.mergeTables && context.tableId != null) {
+                        BillingSection("Fusion de tables") {
+                            if (context.sessionTables.size > 1) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    context.sessionTables.forEach { table ->
+                                        AssistChip(
+                                            onClick = {},
+                                            label = { Text(table.label) },
+                                            leadingIcon = { Icon(Icons.Default.TableRestaurant, null, Modifier.size(16.dp)) }
+                                        )
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        val remove = context.sessionTables
+                                            .filter { it.id != context.tableId }
+                                            .map { it.id }
+                                        onUnmergeTables(remove)
+                                    },
+                                    enabled = !state.billingBusy
+                                ) {
+                                    Icon(Icons.Default.CallSplit, null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Dissocier les tables")
+                                }
+                            }
+
+                            context.mergeCandidates
+                                .filter { !it.alreadyMerged }
+                                .forEach { candidate ->
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            checked = selectedTables[candidate.tableId] == true,
+                                            onCheckedChange = { checked -> selectedTables[candidate.tableId] = checked },
+                                            enabled = !state.billingBusy
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text(candidate.label, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "${candidate.orderIds.size} commande(s) • ${String.format(Locale.FRANCE, "%.2f €", candidate.amountDue)} restant",
+                                                color = CookitMuted,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                            Button(
+                                onClick = {
+                                    onMergeTables(
+                                        selectedTables.filterValues { it }.keys.toList()
+                                    )
+                                },
+                                enabled = !state.billingBusy && selectedTables.any { it.value }
+                            ) {
+                                Icon(Icons.Default.MergeType, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Fusionner les tables sélectionnées")
+                            }
+                        }
+                    }
+
+                    if (context.groupOrders.size > 1 && context.groupAmountDue > 0.0001) {
+                        BillingSection("Paiement groupé") {
+                            context.groupOrders.forEach { row ->
+                                Row(Modifier.fillMaxWidth()) {
+                                    Text(
+                                        listOfNotNull(row.tableLabel, "#${row.orderNumber}").joinToString(" • "),
+                                        modifier = Modifier.weight(1f),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(String.format(Locale.FRANCE, "%.2f €", row.amountDue))
+                                }
+                            }
+                            HorizontalDivider(color = CookitLine)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                FilterChip(
+                                    selected = groupMethod == PosPaymentMethod.CASH,
+                                    onClick = { groupMethod = PosPaymentMethod.CASH },
+                                    label = { Text("Espèces") },
+                                    leadingIcon = { Icon(Icons.Default.Payments, null) }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                FilterChip(
+                                    selected = groupMethod == PosPaymentMethod.CARD_TERMINAL,
+                                    onClick = { groupMethod = PosPaymentMethod.CARD_TERMINAL },
+                                    label = { Text("Carte / terminal") },
+                                    leadingIcon = { Icon(Icons.Default.CreditCard, null) }
+                                )
+                            }
+                            if (groupMethod == PosPaymentMethod.CASH) {
+                                OutlinedTextField(
+                                    value = groupTenderedText,
+                                    onValueChange = { groupTenderedText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
+                                    label = { Text("Montant reçu") },
+                                    singleLine = true
+                                )
+                                val tendered = groupTenderedText.replace(',', '.').toDoubleOrNull() ?: 0.0
+                                Text(
+                                    "Monnaie : ${String.format(Locale.FRANCE, "%.2f €", (tendered - context.groupAmountDue).coerceAtLeast(0.0))}",
+                                    fontWeight = FontWeight.Bold,
+                                    color = CookitGreen
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    val tendered = if (groupMethod == PosPaymentMethod.CASH) {
+                                        groupTenderedText.replace(',', '.').toDoubleOrNull()
+                                    } else null
+                                    onPayGroup(groupMethod, tendered)
+                                },
+                                enabled = !state.billingBusy
+                            ) {
+                                Icon(Icons.Default.Payments, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Encaisser le groupe • ${String.format(Locale.FRANCE, "%.2f €", context.groupAmountDue)}")
+                            }
+                        }
+                    }
+                }
+
+                if (state.billingBusy) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 10.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BillingMetric(label: String, amount: Double, modifier: Modifier = Modifier, emphasize: Boolean = false) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = if (emphasize) CookitSoftOrange else CookitCanvas
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(label, color = CookitMuted, fontSize = 11.sp)
+            Text(
+                String.format(Locale.FRANCE, "%.2f €", amount),
+                fontWeight = FontWeight.Black,
+                fontSize = 18.sp,
+                color = if (emphasize) CookitOrange else CookitInk
+            )
+        }
+    }
+}
+
+@Composable
+private fun BillingSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, CookitLine)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            this.content()
+        }
+    }
+}
+
+@Composable
 private fun MobileCartBar(
     modifier: Modifier,
     cart: List<CartLine>,
@@ -824,6 +1243,7 @@ private fun MobileCartBar(
     canonicalTotal: Double? = null,
     locked: Boolean = false,
     onSendKitchen: () -> Unit,
+    onBillingTools: () -> Unit,
     onCheckout: () -> Unit
 ) {
     val lineTotal = cart.sumOf { it.total }
@@ -847,6 +1267,13 @@ private fun MobileCartBar(
                     Icon(Icons.Default.SoupKitchen, null)
                     Spacer(Modifier.width(6.dp))
                     Text("KOT", fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.width(8.dp))
+            } else {
+                OutlinedButton(onClick = onBillingTools, enabled = !busy, shape = RoundedCornerShape(14.dp)) {
+                    Icon(Icons.Default.CallSplit, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Split / Merge", fontWeight = FontWeight.Black)
                 }
                 Spacer(Modifier.width(8.dp))
             }
@@ -920,40 +1347,47 @@ private fun ProductCard(product: Product, onAdd: (Product) -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(190.dp)
+            .height(226.dp)
             .clickable { onAdd(product) },
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, CookitLine)
     ) {
-        Column(Modifier.fillMaxSize().padding(14.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
-                ProductImage(product)
-                Spacer(Modifier.weight(1f))
-                Icon(Icons.Default.AddCircle, null, tint = CookitOrange)
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().height(142.dp)) {
+                ProductImage(
+                    product = product,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                    shape = RoundedCornerShape(30.dp),
+                    color = CookitOrange
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.padding(7.dp).size(18.dp)
+                    )
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                product.name,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 16.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                product.description,
-                color = CookitMuted,
-                fontSize = 12.sp,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                String.format(Locale.FRANCE, "%.2f €", product.price),
-                color = CookitGreen,
-                fontWeight = FontWeight.Black,
-                fontSize = 17.sp
-            )
+            Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Text(
+                    product.name,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    String.format(Locale.FRANCE, "%.2f €", product.price),
+                    color = CookitGreen,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 18.sp
+                )
+            }
         }
     }
 }
@@ -973,14 +1407,14 @@ private suspend fun loadRemoteBitmap(url: String?): androidx.compose.ui.graphics
 }
 
 @Composable
-private fun ProductImage(product: Product) {
+private fun ProductImage(product: Product, modifier: Modifier = Modifier.size(62.dp)) {
     val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, product.imageUrl) {
         value = loadRemoteBitmap(product.imageUrl)
     }
 
     Surface(
-        modifier = Modifier.size(62.dp),
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier,
+        shape = RoundedCornerShape(0.dp),
         color = CookitCanvas
     ) {
         if (bitmap != null) {
@@ -1008,6 +1442,7 @@ private fun CartPane(
     onPlus: (Long) -> Unit,
     onMinus: (Long) -> Unit,
     onSendKitchen: () -> Unit,
+    onBillingTools: () -> Unit,
     onCheckout: () -> Unit
 ) {
     Card(
@@ -1077,6 +1512,18 @@ private fun CartPane(
                     Icon(Icons.Default.SoupKitchen, null)
                     Spacer(Modifier.width(8.dp))
                     Text("Envoyer en cuisine (KOT)", fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.height(8.dp))
+            } else {
+                OutlinedButton(
+                    onClick = onBillingTools,
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(17.dp)
+                ) {
+                    Icon(Icons.Default.CallSplit, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Diviser / Fusionner", fontWeight = FontWeight.Black)
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -1210,6 +1657,13 @@ private fun relativeAge(minutes: Int): String = when {
     minutes < 60 -> "il y a $minutes min"
     minutes < 1440 -> "il y a ${minutes / 60} h"
     else -> "il y a ${minutes / 1440} j"
+}
+
+private fun parseSplitAmounts(raw: String): List<Double> {
+    val chunks = if (';' in raw) raw.split(';') else raw.split(',')
+    return chunks
+        .mapNotNull { it.trim().replace(',', '.').toDoubleOrNull() }
+        .filter { it > 0.0 }
 }
 
 

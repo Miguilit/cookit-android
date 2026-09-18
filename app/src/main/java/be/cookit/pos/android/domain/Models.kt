@@ -113,6 +113,75 @@ data class DiningTable(
     val available: Boolean = true
 )
 
+data class BillingLine(
+    val orderItemId: Long,
+    val menuItemId: Long?,
+    val name: String,
+    val quantity: Int,
+    val unitPrice: Double,
+    val amount: Double
+)
+
+data class SplitBillInfo(
+    val id: Long,
+    val label: String,
+    val amount: Double,
+    val paidAmount: Double,
+    val amountDue: Double,
+    val status: String
+)
+
+data class SessionTableInfo(
+    val id: Long,
+    val label: String
+)
+
+data class MergeCandidate(
+    val tableId: Long,
+    val label: String,
+    val orderIds: List<Long>,
+    val amountDue: Double,
+    val alreadyMerged: Boolean = false
+)
+
+data class GroupOrderDue(
+    val orderId: Long,
+    val orderNumber: String,
+    val tableId: Long?,
+    val tableLabel: String?,
+    val total: Double,
+    val amountPaid: Double,
+    val amountDue: Double,
+    val status: String
+)
+
+data class BillingCapabilities(
+    val splitEqual: Boolean = false,
+    val splitCustom: Boolean = false,
+    val splitItems: Boolean = false,
+    val splitPay: Boolean = false,
+    val mergeTables: Boolean = false
+)
+
+data class BillingContext(
+    val orderId: Long,
+    val orderNumber: String,
+    val total: Double,
+    val amountPaid: Double,
+    val amountDue: Double,
+    val settlementStatus: String,
+    val operationalStatus: String,
+    val tableId: Long?,
+    val diningSessionId: Long?,
+    val items: List<BillingLine>,
+    val splitBills: List<SplitBillInfo>,
+    val sessionTables: List<SessionTableInfo>,
+    val groupOrders: List<GroupOrderDue>,
+    val groupAmountDue: Double,
+    val mergeCandidates: List<MergeCandidate>,
+    val capabilities: BillingCapabilities
+)
+
 data class DiscoveredPrinter(
     val identifier: String,
     val interfaceType: StarInterfaceType

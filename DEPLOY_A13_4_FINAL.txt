@@ -1,0 +1,17 @@
+Cookit Android A13.4 final patch
+================================
+
+Prerequisite: deploy Cookit backend A13.4 native split/merge facade first.
+
+At repository root:
+
+unzip -o CookitAndroid_A13_4_FINAL_PATCH_20260918.zip -d .
+
+git diff --check
+git status --short
+
+git add app docs DEPLOY_A13_4_FINAL.txt README.md SHA256SUMS_A13_4_FINAL.txt
+git commit -m "Cookit Android A13.4: final POS split merge and UI consolidation"
+git push origin main
+
+GitHub Actions should build version 0.13.4 / versionCode 7.

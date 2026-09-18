@@ -2,8 +2,8 @@
 <resources>
     <style name="Theme.CookitAndroid" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#FAFAF7</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#141F18</item>
         <item name="android:navigationBarColor">#FAFAF7</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>

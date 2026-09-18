@@ -428,6 +428,223 @@ class CookitHttpClient {
         Unit
     }
 
+    suspend fun billingContext(token: String, orderId: Long): BillingContext = withContext(Dispatchers.IO) {
+        parseBillingContext(request("pos/orders/$orderId/billing-context", token = token))
+    }
+
+    suspend fun splitEqual(token: String, orderId: Long, parts: Int): BillingContext = withContext(Dispatchers.IO) {
+        parseBillingContext(
+            request(
+                "pos/orders/$orderId/split/equal",
+                method = "POST",
+                token = token,
+                body = JSONObject().put("parts", parts)
+            )
+        )
+    }
+
+    suspend fun splitCustom(token: String, orderId: Long, amounts: List<Double>): BillingContext = withContext(Dispatchers.IO) {
+        val array = JSONArray()
+        amounts.forEach { array.put(it) }
+        parseBillingContext(
+            request(
+                "pos/orders/$orderId/split/custom",
+                method = "POST",
+                token = token,
+                body = JSONObject().put("amounts", array)
+            )
+        )
+    }
+
+    suspend fun splitItems(token: String, orderId: Long, items: Map<Long, Int>): BillingContext = withContext(Dispatchers.IO) {
+        val array = JSONArray()
+        items.forEach { (orderItemId, quantity) ->
+            array.put(
+                JSONObject()
+                    .put("order_item_id", orderItemId)
+                    .put("quantity", quantity)
+            )
+        }
+        parseBillingContext(
+            request(
+                "pos/orders/$orderId/split/items",
+                method = "POST",
+                token = token,
+                body = JSONObject().put("items", array)
+            )
+        )
+    }
+
+    suspend fun cancelSplit(token: String, orderId: Long): BillingContext = withContext(Dispatchers.IO) {
+        parseBillingContext(
+            request(
+                "pos/orders/$orderId/split",
+                method = "DELETE",
+                token = token
+            )
+        )
+    }
+
+    suspend fun paySplitBill(
+        token: String,
+        billId: Long,
+        amount: Double,
+        method: PosPaymentMethod
+    ): BillingContext = withContext(Dispatchers.IO) {
+        parseBillingContext(
+            request(
+                "pos/split-bills/$billId/pay",
+                method = "POST",
+                token = token,
+                body = JSONObject()
+                    .put("amount", amount)
+                    .put("method", method.apiValue)
+            )
+        )
+    }
+
+    suspend fun mergeTables(token: String, orderId: Long, tableIds: List<Long>): BillingContext = withContext(Dispatchers.IO) {
+        val ids = JSONArray()
+        tableIds.forEach { ids.put(it) }
+        parseBillingContext(
+            request(
+                "pos/orders/$orderId/merge-tables",
+                method = "POST",
+                token = token,
+                body = JSONObject().put("table_ids", ids)
+            )
+        )
+    }
+
+    suspend fun unmergeTables(token: String, orderId: Long, tableIds: List<Long> = emptyList()): BillingContext = withContext(Dispatchers.IO) {
+        val ids = JSONArray()
+        tableIds.forEach { ids.put(it) }
+        parseBillingContext(
+            request(
+                "pos/orders/$orderId/unmerge-tables",
+                method = "POST",
+                token = token,
+                body = JSONObject().put("table_ids", ids)
+            )
+        )
+    }
+
+    private fun parseBillingContext(json: JSONObject): BillingContext {
+        val itemsJson = json.optJSONArray("items") ?: JSONArray()
+        val lines = buildList {
+            for (i in 0 until itemsJson.length()) {
+                val row = itemsJson.optJSONObject(i) ?: continue
+                val id = row.longAny("order_item_id", "id") ?: continue
+                add(
+                    BillingLine(
+                        orderItemId = id,
+                        menuItemId = row.longAny("menu_item_id"),
+                        name = row.optText("name") ?: "Article #$id",
+                        quantity = (row.longAny("quantity", "qty") ?: 1L).toInt().coerceAtLeast(1),
+                        unitPrice = row.doubleAny("unit_price", "price") ?: 0.0,
+                        amount = row.doubleAny("amount", "total") ?: 0.0
+                    )
+                )
+            }
+        }
+
+        val billsJson = json.optJSONArray("split_bills") ?: JSONArray()
+        val bills = buildList {
+            for (i in 0 until billsJson.length()) {
+                val row = billsJson.optJSONObject(i) ?: continue
+                val id = row.longAny("id", "split_bill_id") ?: continue
+                add(
+                    SplitBillInfo(
+                        id = id,
+                        label = row.optText("label", "name") ?: "Part ${i + 1}",
+                        amount = row.doubleAny("amount", "total") ?: 0.0,
+                        paidAmount = row.doubleAny("paid_amount", "amount_paid") ?: 0.0,
+                        amountDue = row.doubleAny("amount_due", "due") ?: 0.0,
+                        status = row.optText("status") ?: "pending"
+                    )
+                )
+            }
+        }
+
+        val tablesJson = json.optJSONArray("session_tables") ?: JSONArray()
+        val sessionTables = buildList {
+            for (i in 0 until tablesJson.length()) {
+                val row = tablesJson.optJSONObject(i) ?: continue
+                val id = row.longAny("id", "table_id") ?: continue
+                add(SessionTableInfo(id, row.optText("label", "name") ?: "Table $id"))
+            }
+        }
+
+        val candidatesJson = json.optJSONArray("merge_candidates") ?: JSONArray()
+        val candidates = buildList {
+            for (i in 0 until candidatesJson.length()) {
+                val row = candidatesJson.optJSONObject(i) ?: continue
+                val tableId = row.longAny("table_id", "id") ?: continue
+                val orderIdsJson = row.optJSONArray("order_ids") ?: JSONArray()
+                val orderIds = buildList {
+                    for (j in 0 until orderIdsJson.length()) {
+                        orderIdsJson.optLong(j).takeIf { it > 0 }?.let { add(it) }
+                    }
+                }
+                add(
+                    MergeCandidate(
+                        tableId = tableId,
+                        label = row.optText("label", "name") ?: "Table $tableId",
+                        orderIds = orderIds,
+                        amountDue = row.doubleAny("amount_due", "due") ?: 0.0,
+                        alreadyMerged = row.optBoolean("already_merged", false)
+                    )
+                )
+            }
+        }
+
+        val groupJson = json.optJSONArray("group_orders") ?: JSONArray()
+        val groupOrders = buildList {
+            for (i in 0 until groupJson.length()) {
+                val row = groupJson.optJSONObject(i) ?: continue
+                val orderId = row.longAny("order_id", "id") ?: continue
+                add(
+                    GroupOrderDue(
+                        orderId = orderId,
+                        orderNumber = row.optText("order_number", "code") ?: orderId.toString(),
+                        tableId = row.longAny("table_id"),
+                        tableLabel = row.optText("table_label"),
+                        total = row.doubleAny("total", "grand_total") ?: 0.0,
+                        amountPaid = row.doubleAny("amount_paid") ?: 0.0,
+                        amountDue = row.doubleAny("amount_due", "due") ?: 0.0,
+                        status = row.optText("status") ?: "unknown"
+                    )
+                )
+            }
+        }
+
+        val caps = json.optJSONObject("capabilities") ?: JSONObject()
+        return BillingContext(
+            orderId = json.longAny("order_id", "id") ?: 0L,
+            orderNumber = json.optText("order_number", "code") ?: "",
+            total = json.doubleAny("total", "grand_total") ?: 0.0,
+            amountPaid = json.doubleAny("amount_paid") ?: 0.0,
+            amountDue = json.doubleAny("amount_due", "due") ?: 0.0,
+            settlementStatus = json.optText("settlement_status", "status") ?: "unknown",
+            operationalStatus = json.optText("operational_status", "order_status") ?: "placed",
+            tableId = json.longAny("table_id"),
+            diningSessionId = json.longAny("dining_session_id", "session_id"),
+            items = lines,
+            splitBills = bills,
+            sessionTables = sessionTables,
+            groupOrders = groupOrders,
+            groupAmountDue = json.doubleAny("group_amount_due") ?: groupOrders.sumOf { it.amountDue },
+            mergeCandidates = candidates,
+            capabilities = BillingCapabilities(
+                splitEqual = caps.optBoolean("split_equal", false),
+                splitCustom = caps.optBoolean("split_custom", false),
+                splitItems = caps.optBoolean("split_items", false),
+                splitPay = caps.optBoolean("split_pay", false),
+                mergeTables = caps.optBoolean("merge_tables", false)
+            )
+        )
+    }
+
     suspend fun cashRegisters(token: String): List<CashRegister> = withContext(Dispatchers.IO) {
         val json = request("pos/cash-register/registers", token = token)
         val array = findArrayDeep(json, setOf("registers", "data")) ?: JSONArray()

@@ -51,6 +51,10 @@ data class PosUiState(
     val kots: List<KotTicket> = emptyList(),
     val kdsBusyKotIds: Set<Long> = emptySet(),
     val kdsError: String? = null,
+    val billingSheetOpen: Boolean = false,
+    val billingBusy: Boolean = false,
+    val billingError: String? = null,
+    val billingContext: BillingContext? = null,
     val lastCashChange: Double? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
@@ -580,6 +584,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         resumedRemoteOrderTotal = remote.total,
                         openedOrderCode = code,
                         paymentSheetOpen = false,
+                        billingSheetOpen = false,
+                        billingContext = null,
+                        billingError = null,
                         checkoutError = null,
                         checkoutMessage = null,
                         orderLoadError = if (lines.isEmpty() && remote.total <= 0.0) {
@@ -591,6 +598,167 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             .onFailure { e ->
                 _ui.update { it.copy(orderLoadBusy = false, orderLoadError = readableError(e)) }
             }
+    }
+
+    fun openBillingTools() {
+        val orderId = _ui.value.resumedRemoteOrderId ?: return
+        val currentToken = token ?: return
+        _ui.update { it.copy(billingSheetOpen = true, billingBusy = true, billingError = null) }
+        viewModelScope.launch {
+            runCatching { api.billingContext(currentToken, orderId) }
+                .onSuccess { context ->
+                    _ui.update { it.copy(billingBusy = false, billingContext = context, billingError = null) }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(billingBusy = false, billingError = readableError(error)) }
+                }
+        }
+    }
+
+    fun dismissBillingTools() {
+        if (_ui.value.billingBusy) return
+        _ui.update { it.copy(billingSheetOpen = false, billingError = null) }
+    }
+
+    private fun mutateBilling(action: suspend (String, Long) -> BillingContext) {
+        val orderId = _ui.value.resumedRemoteOrderId ?: return
+        val currentToken = token ?: return
+        viewModelScope.launch {
+            _ui.update { it.copy(billingBusy = true, billingError = null) }
+            runCatching { action(currentToken, orderId) }
+                .onSuccess { context ->
+                    _ui.update {
+                        it.copy(
+                            billingBusy = false,
+                            billingContext = context,
+                            resumedRemoteOrderTotal = context.amountDue.takeIf { due -> due > 0.0 } ?: context.total,
+                            billingError = null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(billingBusy = false, billingError = readableError(error)) }
+                }
+        }
+    }
+
+    fun splitBillEqual(parts: Int) {
+        mutateBilling { currentToken, orderId -> api.splitEqual(currentToken, orderId, parts) }
+    }
+
+    fun splitBillCustom(amounts: List<Double>) {
+        if (amounts.size < 2 || amounts.any { it <= 0.0 }) {
+            _ui.update { it.copy(billingError = "Saisissez au moins deux montants positifs.") }
+            return
+        }
+        mutateBilling { currentToken, orderId -> api.splitCustom(currentToken, orderId, amounts) }
+    }
+
+    fun splitBillItems(items: Map<Long, Int>) {
+        if (items.isEmpty()) {
+            _ui.update { it.copy(billingError = "Sélectionnez au moins un article.") }
+            return
+        }
+        mutateBilling { currentToken, orderId -> api.splitItems(currentToken, orderId, items) }
+    }
+
+    fun cancelSplitBill() {
+        mutateBilling { currentToken, orderId -> api.cancelSplit(currentToken, orderId) }
+    }
+
+    fun paySplitBill(billId: Long, method: PosPaymentMethod) {
+        val currentToken = token ?: return
+        val context = _ui.value.billingContext ?: return
+        val bill = context.splitBills.firstOrNull { it.id == billId } ?: return
+        if (bill.amountDue <= 0.0) return
+
+        viewModelScope.launch {
+            _ui.update { it.copy(billingBusy = true, billingError = null) }
+            runCatching { api.paySplitBill(currentToken, billId, bill.amountDue, method) }
+                .onSuccess { refreshed ->
+                    val freshOrders = runCatching { api.orders(currentToken) }.getOrDefault(_ui.value.orders)
+                    _ui.update {
+                        it.copy(
+                            billingBusy = false,
+                            billingContext = refreshed,
+                            orders = freshOrders,
+                            resumedRemoteOrderTotal = refreshed.amountDue.takeIf { due -> due > 0.0 } ?: refreshed.total,
+                            billingError = null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(billingBusy = false, billingError = readableError(error)) }
+                }
+        }
+    }
+
+    fun mergeBillingTables(tableIds: List<Long>) {
+        if (tableIds.isEmpty()) {
+            _ui.update { it.copy(billingError = "Sélectionnez au moins une table à fusionner.") }
+            return
+        }
+        mutateBilling { currentToken, orderId -> api.mergeTables(currentToken, orderId, tableIds) }
+    }
+
+    fun unmergeBillingTables(tableIds: List<Long> = emptyList()) {
+        mutateBilling { currentToken, orderId -> api.unmergeTables(currentToken, orderId, tableIds) }
+    }
+
+    fun payMergedGroup(method: PosPaymentMethod, tenderedAmount: Double? = null) {
+        val state = _ui.value
+        val context = state.billingContext ?: return
+        val currentToken = token ?: return
+        val openOrders = context.groupOrders.filter { it.amountDue > 0.0001 }
+        if (openOrders.isEmpty()) return
+
+        val groupDue = openOrders.sumOf { it.amountDue }
+        if (method == PosPaymentMethod.CASH) {
+            val tendered = tenderedAmount ?: groupDue
+            if (tendered + 0.0001 < groupDue) {
+                _ui.update { it.copy(billingError = "Montant reçu insuffisant pour le groupe de tables.") }
+                return
+            }
+        }
+
+        if (state.policy.cashSessionRequired && state.activeCashSession == null) {
+            _ui.update { it.copy(billingError = "Ouvrez d'abord le fond de caisse.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update { it.copy(billingBusy = true, billingError = null) }
+            runCatching {
+                openOrders.forEach { row ->
+                    api.payOrder(currentToken, row.orderId, row.amountDue, method)
+                }
+                val freshOrders = api.orders(currentToken)
+                val freshKots = runCatching { api.kots(currentToken) }.getOrDefault(_ui.value.kots)
+                freshOrders to freshKots
+            }.onSuccess { (freshOrders, freshKots) ->
+                draftStore.clear()
+                persistedDraft = PersistedDraft()
+                _ui.update {
+                    it.copy(
+                        billingBusy = false,
+                        billingSheetOpen = false,
+                        billingContext = null,
+                        billingError = null,
+                        orders = freshOrders,
+                        kots = freshKots,
+                        draftCart = emptyList(),
+                        pendingRemoteOrderId = null,
+                        resumedRemoteOrderId = null,
+                        resumedRemoteOrderTotal = null,
+                        openedOrderCode = null,
+                        paymentSheetOpen = false,
+                        lastCashChange = null
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update { it.copy(billingBusy = false, billingError = readableError(error)) }
+            }
+        }
     }
 
     fun startNewOrder() {
@@ -645,6 +813,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 openedOrderCode = null,
                 checkoutError = null,
                 orderLoadError = null,
+                billingSheetOpen = false,
+                billingBusy = false,
+                billingError = null,
+                billingContext = null,
                 checkoutMessage = message,
                 lastCashChange = null
             )
@@ -674,6 +846,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 resumedRemoteOrderId = null,
                 resumedRemoteOrderTotal = null,
                 openedOrderCode = null,
+                billingSheetOpen = false,
+                billingBusy = false,
+                billingError = null,
+                billingContext = null,
                 orders = if (freshOrders.isEmpty()) it.orders else freshOrders,
                 kots = freshKots,
                 lastCashChange = cashChange,

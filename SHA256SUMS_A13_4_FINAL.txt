@@ -1,0 +1,10 @@
+0bbcb7af4acd07094fb2bbdc461de6adad594dd5790754a959a809dff234fafe  docs/A13_4_FINAL_POS.md
+12e1c02165c5bbf83812284e115b9282b0955c38ced2c7e0fc02f875661ca022  app/src/main/res/values/styles.xml
+318f88305fc3226781deca4d5ebd2220ff62dbcacf7bd27fdbd07a8cfa61b3e0  app/build.gradle.kts
+6bdf83382621b9c344eb5299c39bdd74df8df725764cc6c35f48e520282aab84  app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+9be586f8baa930ea15f56a0c88f9d8af92db90592aa6d705dc4bd94319e1b046  README.md
+a7125a3c63fc9817cdd4b8bd53815a148dc7df39a86de7427fb006f287606ea0  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+a7a7be837094433bf63af8f9c5e1b3fdb08ad9df9d536d97061f92c4b1f59a1e  app/src/main/java/be/cookit/pos/android/MainActivity.kt
+a9a2e5b88249a2bc5164d2a99c1242b33b521e5c171ab50fb68ec5d6ed5b9e7a  app/src/main/java/be/cookit/pos/android/data/CookitHttpClient.kt
+b693cc1f5a256f451961c614d9a2515fe1e9c0eb40ae94a7cc1ed35a0ceb5d90  DEPLOY_A13_4_FINAL.txt
+e284d992f0d5d7ccf8269b4d2c5067c02de9673bea1ad1e1bcdcc5411a801ecc  app/src/main/java/be/cookit/pos/android/domain/Models.kt

@@ -122,3 +122,14 @@ A11 stabilise le contrat de paiement RestApi (compatibilité `amount/method` et 
 - Reopened order and idempotency-pending order states are separated.
 - Refresh/new-order controls prevent permanent checkout lock.
 - Explicit settlement/operational API axes supported.
+
+## A13.4 — final POS split/merge consolidation
+
+- dark readable Android system status bar;
+- larger food photography and compact POS product cards;
+- removed permanent success/change banners;
+- native split-bill UI: equal, custom amount, items/quantities;
+- per-split cash/card settlement;
+- dining-session table merge/unmerge;
+- grouped payment for merged tables;
+- normal checkout is protected while split/merge billing is active.
