@@ -87,3 +87,14 @@ APK:
 
 ## GitHub Actions
 Le workflow `.github/workflows/android-build.yml` produit l'APK debug comme artefact.
+
+
+## A8–A9 parity update
+- compact tablet navigation rail
+- restaurant logo/brand header from Cookit platform config
+- canonical `item_photo_url` support
+- KDS and Delivery operational surfaces
+- StarIO10 native Android provider + discovery/test/drawer
+- RBAC-aware navigation
+
+See `docs/A8_A9_PARITY.md`.

@@ -37,8 +37,13 @@ data class PosUiState(
     val checkoutBusy: Boolean = false,
     val checkoutMessage: String? = null,
     val checkoutNonce: Long = 0,
+    val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
     val printerPort: Int = 9100,
+    val starIdentifier: String = "",
+    val starInterface: StarInterfaceType = StarInterfaceType.LAN,
+    val discoveredPrinters: List<DiscoveredPrinter> = emptyList(),
+    val printerDiscoveryBusy: Boolean = false,
     val printerMessage: String? = null
 )
 
@@ -47,12 +52,17 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val sessionStore = SessionStore(application)
     private val printerStore = PrinterSettingsStore(application)
     private val printerService = EscPosPrinterService()
+    private val starPrinterService = StarPrinterService(application)
+    private val starDiscoveryService = StarDiscoveryService(application)
 
     private val _ui = MutableStateFlow(
         PosUiState(
             language = sessionStore.language(),
+            printerProvider = printerStore.provider(),
             printerHost = printerStore.host(),
-            printerPort = printerStore.port()
+            printerPort = printerStore.port(),
+            starIdentifier = printerStore.starIdentifier(),
+            starInterface = printerStore.starInterface()
         )
     )
     val ui: StateFlow<PosUiState> = _ui.asStateFlow()
@@ -100,8 +110,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 demoMode = true,
                 online = true,
                 language = it.language,
+                printerProvider = it.printerProvider,
                 printerHost = it.printerHost,
-                printerPort = it.printerPort
+                printerPort = it.printerPort,
+                starIdentifier = it.starIdentifier,
+                starInterface = it.starInterface
             )
         }
     }
@@ -114,8 +127,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         _ui.update {
             PosUiState(
                 language = it.language,
+                printerProvider = it.printerProvider,
                 printerHost = it.printerHost,
-                printerPort = it.printerPort
+                printerPort = it.printerPort,
+                starIdentifier = it.starIdentifier,
+                starInterface = it.starInterface
             )
         }
     }
@@ -127,16 +143,62 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (token != null) refresh()
     }
 
+    fun setPrinterProvider(provider: PrinterProviderType) {
+        printerStore.saveProvider(provider)
+        _ui.update { it.copy(printerProvider = provider, printerMessage = null) }
+    }
+
     fun savePrinter(host: String, portText: String) {
         val port = portText.toIntOrNull()?.coerceIn(1, 65535) ?: 9100
-        printerStore.save(host, port)
+        printerStore.saveEscPos(host, port)
         _ui.update { it.copy(printerHost = host.trim(), printerPort = port, printerMessage = null) }
+    }
+
+    fun saveStarPrinter(identifier: String, interfaceType: StarInterfaceType) {
+        printerStore.saveStar(identifier, interfaceType)
+        _ui.update {
+            it.copy(
+                starIdentifier = identifier.trim(),
+                starInterface = interfaceType,
+                printerMessage = null
+            )
+        }
+    }
+
+    fun discoverStarPrinters(interfaceType: StarInterfaceType) {
+        viewModelScope.launch {
+            _ui.update { it.copy(printerDiscoveryBusy = true, discoveredPrinters = emptyList(), printerMessage = null) }
+            runCatching { starDiscoveryService.discover(interfaceType) }
+                .onSuccess { printers ->
+                    _ui.update {
+                        it.copy(
+                            printerDiscoveryBusy = false,
+                            discoveredPrinters = printers,
+                            printerMessage = if (printers.isEmpty()) "discovery_empty" else "discovery_ok"
+                        )
+                    }
+                }
+                .onFailure {
+                    _ui.update { it.copy(printerDiscoveryBusy = false, printerMessage = "failed") }
+                }
+        }
+    }
+
+    fun selectDiscoveredPrinter(printer: DiscoveredPrinter) {
+        saveStarPrinter(printer.identifier, printer.interfaceType)
+        _ui.update { it.copy(printerMessage = "selected") }
     }
 
     fun testPrinter() {
         val state = _ui.value
         viewModelScope.launch {
-            val ok = runCatching { printerService.test(state.printerHost, state.printerPort) }.getOrDefault(false)
+            val ok = when (state.printerProvider) {
+                PrinterProviderType.ESC_POS ->
+                    runCatching { printerService.test(state.printerHost, state.printerPort) }.getOrDefault(false)
+
+                PrinterProviderType.STAR ->
+                    runCatching { starPrinterService.test(state.starIdentifier, state.starInterface) }.getOrDefault(false)
+            }
             _ui.update { it.copy(printerMessage = if (ok) "ok" else "failed") }
         }
     }
@@ -144,7 +206,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun openDrawer() {
         val state = _ui.value
         viewModelScope.launch {
-            val ok = runCatching { printerService.pulseDrawer(state.printerHost, state.printerPort) }.getOrDefault(false)
+            val ok = when (state.printerProvider) {
+                PrinterProviderType.ESC_POS ->
+                    runCatching { printerService.pulseDrawer(state.printerHost, state.printerPort) }.getOrDefault(false)
+
+                PrinterProviderType.STAR ->
+                    runCatching { starPrinterService.pulseDrawer(state.starIdentifier, state.starInterface) }.getOrDefault(false)
+            }
             _ui.update { it.copy(printerMessage = if (ok) "drawer_ok" else "failed") }
         }
     }

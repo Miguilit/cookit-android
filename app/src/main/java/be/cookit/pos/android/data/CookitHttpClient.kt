@@ -55,6 +55,11 @@ class CookitHttpClient {
             ?: json.optText("restaurant_name")
             ?: "Cookit Restaurant"
 
+        val restaurantLogoUrl = normalizeMediaUrl(
+            restaurantObj?.optText("logo_url", "logoUrl", "logo")
+                ?: json.optText("restaurant_logo_url")
+        )
+
         val branchName = branchObj?.optText("name", "branch_name")
             ?: firstBranch?.optText("name", "branch_name")
             ?: json.optText("branch_name")
@@ -76,7 +81,8 @@ class CookitHttpClient {
                 name = userName,
                 role = role,
                 restaurant = restaurantName,
-                branch = branchName
+                branch = branchName,
+                restaurantLogoUrl = restaurantLogoUrl
             ),
             policy = defaultPolicy(role)
         )
@@ -290,7 +296,10 @@ class CookitHttpClient {
     }
 
     private fun extractMediaCandidate(obj: JSONObject): String? {
-        obj.optText("image_url", "imageUrl", "item_image", "itemImage", "photo_url", "thumbnail_url")?.let { return it }
+        obj.optText(
+            "item_photo_url", "itemPhotoUrl", "item_photo", "itemPhoto",
+            "image_url", "imageUrl", "item_image", "itemImage", "photo_url", "thumbnail_url"
+        )?.let { return it }
         for (key in listOf("image", "photo", "thumbnail", "media")) {
             val nested = obj.optJSONObject(key)
             nested?.optText("url", "full_url", "path", "src", "original_url")?.let { return it }

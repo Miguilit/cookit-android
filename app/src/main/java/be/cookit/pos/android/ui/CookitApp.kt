@@ -1,6 +1,9 @@
 package be.cookit.pos.android.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.os.Build
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -20,6 +23,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import be.cookit.pos.android.data.DemoRepository
 import be.cookit.pos.android.domain.*
@@ -49,6 +56,32 @@ private fun screenLabel(screen: Screen, t: UiStrings): String = when (screen) {
     Screen.SETTINGS -> t.settings
 }
 
+private fun allowedTabletScreens(policy: NativePolicy): List<Screen> = buildList {
+    add(Screen.DASHBOARD)
+    if (policy.canUsePos) add(Screen.POS)
+    add(Screen.ORDERS)
+    if (policy.canViewKds) add(Screen.KDS)
+    if (policy.canViewDelivery) add(Screen.DELIVERY)
+    if (policy.canUsePos) add(Screen.CASH)
+    add(Screen.SETTINGS)
+}
+
+private fun defaultScreen(policy: NativePolicy): Screen = when {
+    policy.canUsePos -> Screen.POS
+    policy.canViewKds -> Screen.KDS
+    policy.canViewDelivery -> Screen.DELIVERY
+    else -> Screen.ORDERS
+}
+
+private fun mobileScreens(policy: NativePolicy): List<Screen> = buildList {
+    if (policy.canUsePos) add(Screen.POS)
+    add(Screen.ORDERS)
+    if (!policy.canUsePos && policy.canViewKds) add(Screen.KDS)
+    if (!policy.canUsePos && policy.canViewDelivery) add(Screen.DELIVERY)
+    if (policy.canUsePos) add(Screen.CASH)
+    add(Screen.SETTINGS)
+}.distinct()
+
 @Composable
 fun CookitApp(vm: CookitPosViewModel = viewModel()) {
     val state by vm.ui.collectAsState()
@@ -64,13 +97,13 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
         return
     }
 
-    var screen by remember { mutableStateOf(Screen.POS) }
+    var screen by remember(state.user.role, state.policy) { mutableStateOf(defaultScreen(state.policy)) }
     val widthDp = LocalConfiguration.current.screenWidthDp
     val tablet = widthDp >= 840
 
     if (tablet) {
         Row(Modifier.fillMaxSize().background(CookitCanvas)) {
-            SideNavigation(screen = screen, t = t, onSelect = { screen = it })
+            SideNavigation(screen = screen, state = state, t = t, onSelect = { screen = it })
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 TopBar(state = state, t = t)
                 ScreenContent(screen, state, vm, t)
@@ -81,7 +114,7 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
             topBar = { TopBar(state = state, t = t, compact = true) },
             bottomBar = {
                 NavigationBar {
-                    listOf(Screen.POS, Screen.ORDERS, Screen.CASH, Screen.SETTINGS).forEach {
+                    mobileScreens(state.policy).forEach {
                         NavigationBarItem(
                             selected = screen == it,
                             onClick = { screen = it },
@@ -135,7 +168,7 @@ private fun LoginScreen(
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text("Cookit POS", fontSize = 26.sp, fontWeight = FontWeight.Black)
-                        Text("Android • A3–A5 Live", color = CookitMuted)
+                        Text("Android • A8–A9 Parité CookitPad", color = CookitMuted)
                     }
                 }
                 HorizontalDivider(color = CookitLine)
@@ -196,55 +229,84 @@ private fun LoginScreen(
 }
 
 @Composable
-private fun SideNavigation(screen: Screen, t: UiStrings, onSelect: (Screen) -> Unit) {
+private fun SideNavigation(screen: Screen, state: PosUiState, t: UiStrings, onSelect: (Screen) -> Unit) {
+    val screens = allowedTabletScreens(state.policy)
+    val settings = Screen.SETTINGS
+    val mainScreens = screens.filterNot { it == settings }
+
     Surface(
-        modifier = Modifier.width(104.dp).fillMaxHeight(),
+        modifier = Modifier.width(88.dp).fillMaxHeight(),
         color = Color(0xFF152019)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(vertical = 18.dp),
+            modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Surface(
-                modifier = Modifier.size(54.dp),
-                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = CookitOrange
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 28.sp)
+                    Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 25.sp)
                 }
             }
-            Spacer(Modifier.height(24.dp))
-            listOf(
-                Screen.DASHBOARD, Screen.POS, Screen.ORDERS,
-                Screen.KDS, Screen.DELIVERY, Screen.CASH, Screen.SETTINGS
-            ).forEach { item ->
-                val selected = item == screen
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(if (selected) Color.White.copy(alpha = 0.12f) else Color.Transparent)
-                        .clickable { onSelect(item) }
-                        .padding(vertical = 10.dp)
-                        .fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        iconFor(item),
-                        contentDescription = screenLabel(item, t),
-                        tint = if (selected) CookitOrange else Color(0xFFD7DDD9)
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        screenLabel(item, t),
-                        color = if (selected) Color.White else Color(0xFFB9C0BC),
-                        fontSize = 10.sp,
-                        maxLines = 1
-                    )
-                }
+
+            Spacer(Modifier.height(12.dp))
+
+            mainScreens.forEach { item ->
+                SideNavigationItem(
+                    item = item,
+                    selected = item == screen,
+                    label = screenLabel(item, t),
+                    onClick = { onSelect(item) }
+                )
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            if (settings in screens) {
+                SideNavigationItem(
+                    item = settings,
+                    selected = settings == screen,
+                    label = screenLabel(settings, t),
+                    onClick = { onSelect(settings) }
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun SideNavigationItem(
+    item: Screen,
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .padding(horizontal = 7.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(15.dp))
+            .background(if (selected) Color.White.copy(alpha = 0.13f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp)
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            iconFor(item),
+            contentDescription = label,
+            tint = if (selected) CookitOrange else Color(0xFFD7DDD9),
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            label,
+            color = if (selected) Color.White else Color(0xFFB9C0BC),
+            fontSize = 9.sp,
+            maxLines = 1
+        )
     }
 }
 
@@ -265,6 +327,12 @@ private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
             modifier = Modifier.fillMaxWidth().height(if (compact) 68.dp else 78.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            RestaurantBrandMark(
+                logoUrl = state.user.restaurantLogoUrl,
+                restaurantName = state.user.restaurant,
+                compact = compact
+            )
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     state.user.restaurant,
@@ -323,6 +391,43 @@ private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
     }
 }
 
+
+@Composable
+private fun RestaurantBrandMark(
+    logoUrl: String?,
+    restaurantName: String,
+    compact: Boolean
+) {
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, logoUrl) {
+        value = loadRemoteBitmap(logoUrl)
+    }
+
+    Surface(
+        modifier = Modifier.size(if (compact) 38.dp else 44.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = if (bitmap == null) CookitSoftOrange else Color.White,
+        border = BorderStroke(1.dp, CookitLine)
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = restaurantName,
+                modifier = Modifier.fillMaxSize().padding(4.dp),
+                contentScale = ContentScale.Fit
+            )
+        } else {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    restaurantName.trim().firstOrNull()?.uppercase() ?: "R",
+                    color = CookitOrange,
+                    fontWeight = FontWeight.Black,
+                    fontSize = if (compact) 17.sp else 20.sp
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ScreenContent(screen: Screen, state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
     when (screen) {
@@ -338,9 +443,9 @@ private fun ScreenContent(screen: Screen, state: PosUiState, vm: CookitPosViewMo
         )
         Screen.ORDERS -> OrdersScreen(state.orders)
         Screen.CASH -> CashScreen(state, vm, t)
-        Screen.DASHBOARD -> DashboardScreen(state.orders)
-        Screen.KDS -> PlaceholderScreen("Cuisine", "KDS / tickets cuisine")
-        Screen.DELIVERY -> PlaceholderScreen("Livraison", "Commandes internes et plateformes")
+        Screen.DASHBOARD -> DashboardScreen(state)
+        Screen.KDS -> KdsScreen(state.orders, t)
+        Screen.DELIVERY -> DeliveryScreen(state.orders, t)
         Screen.SETTINGS -> SettingsScreen(state, vm, t, onRefresh = vm::refresh, onLogout = vm::logout)
     }
 }
@@ -620,21 +725,24 @@ private fun ProductCard(product: Product, onAdd: (Product) -> Unit) {
     }
 }
 
+private suspend fun loadRemoteBitmap(url: String?): androidx.compose.ui.graphics.ImageBitmap? {
+    if (url.isNullOrBlank()) return null
+    return withContext(Dispatchers.IO) {
+        runCatching {
+            val connection = URL(url).openConnection().apply {
+                connectTimeout = 5000
+                readTimeout = 8000
+                setRequestProperty("User-Agent", "CookitPOS-Android")
+            }
+            connection.getInputStream().use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+        }.getOrNull()
+    }
+}
+
 @Composable
 private fun ProductImage(product: Product) {
     val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, product.imageUrl) {
-        value = product.imageUrl?.let { url ->
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    val connection = URL(url).openConnection().apply {
-                        connectTimeout = 5000
-                        readTimeout = 8000
-                        setRequestProperty("User-Agent", "CookitPOS-Android")
-                    }
-                    connection.getInputStream().use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
-                }.getOrNull()
-            }
-        }
+        value = loadRemoteBitmap(product.imageUrl)
     }
 
     Surface(
@@ -811,6 +919,118 @@ private fun OrdersScreen(orders: List<PosOrder>) {
     }
 }
 
+
+@Composable
+private fun KdsScreen(orders: List<PosOrder>, t: UiStrings) {
+    val kitchenOrders = orders.filter {
+        it.status in setOf("Nouveau", "Confirmé", "En cuisine", "Prêt")
+    }
+
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Text(t.kitchen, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text("Flux cuisine synchronisé avec les commandes Cookit.", color = CookitMuted)
+        Spacer(Modifier.height(16.dp))
+
+        if (kitchenOrders.isEmpty()) {
+            EmptyOperationalState(Icons.Default.SoupKitchen, "Aucun ticket cuisine actif")
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(260.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(kitchenOrders, key = { it.id }) { order ->
+                    OperationalOrderCard(order = order, accent = CookitOrange)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeliveryScreen(orders: List<PosOrder>, t: UiStrings) {
+    val deliveryOrders = orders.filter { it.type == OrderType.DELIVERY }
+
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Text(t.delivery, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text("Commandes livraison internes et plateformes dans le même flux.", color = CookitMuted)
+        Spacer(Modifier.height(16.dp))
+
+        if (deliveryOrders.isEmpty()) {
+            EmptyOperationalState(Icons.Default.DeliveryDining, "Aucune livraison active")
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(280.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(deliveryOrders, key = { it.id }) { order ->
+                    OperationalOrderCard(order = order, accent = CookitGreen)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OperationalOrderCard(order: PosOrder, accent: Color) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, CookitLine)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(order.code, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.weight(1f))
+                Surface(shape = RoundedCornerShape(12.dp), color = accent.copy(alpha = 0.10f)) {
+                    Text(
+                        order.status,
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        color = accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Text(order.channel, color = CookitOrange, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text(
+                buildString {
+                    append(order.customer)
+                    order.table?.let { append(" • "); append(it) }
+                },
+                color = CookitMuted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            HorizontalDivider(color = CookitLine)
+            Text(
+                String.format(Locale.FRANCE, "%.2f €", order.total),
+                fontWeight = FontWeight.Black,
+                fontSize = 18.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyOperationalState(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    message: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(22.dp)
+    ) {
+        Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = CookitMuted)
+            Spacer(Modifier.width(12.dp))
+            Text(message, color = CookitMuted)
+        }
+    }
+}
+
 @Composable
 private fun CashScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
     var quantities by remember(state.cashDenominations) {
@@ -901,10 +1121,11 @@ private fun CashScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) 
 }
 
 @Composable
-private fun DashboardScreen(orders: List<PosOrder>) {
+private fun DashboardScreen(state: PosUiState) {
+    val orders = state.orders
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Bonjour Amina", fontSize = 30.sp, fontWeight = FontWeight.Black)
-        Text("Voici l'activité de la branche aujourd'hui.", color = CookitMuted)
+        Text("Bonjour ${state.user.name.substringBefore(' ')}", fontSize = 30.sp, fontWeight = FontWeight.Black)
+        Text("${state.user.restaurant} • ${state.user.branch}", color = CookitMuted)
         Spacer(Modifier.height(18.dp))
         LazyVerticalGrid(
             columns = GridCells.Adaptive(220.dp),
@@ -946,6 +1167,35 @@ private fun SettingsScreen(
 ) {
     var printerHost by remember(state.printerHost) { mutableStateOf(state.printerHost) }
     var printerPort by remember(state.printerPort) { mutableStateOf(state.printerPort.toString()) }
+    var starIdentifier by remember(state.starIdentifier) { mutableStateOf(state.starIdentifier) }
+    var starInterface by remember(state.starInterface) { mutableStateOf(state.starInterface) }
+    val context = LocalContext.current
+    var pendingPrinterAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val action = pendingPrinterAction
+        pendingPrinterAction = null
+        if (result.values.all { it }) action?.invoke()
+    }
+
+    fun permissionsFor(interfaceType: StarInterfaceType): Array<String> = when (interfaceType) {
+        StarInterfaceType.LAN -> if (Build.VERSION.SDK_INT >= 37) arrayOf("android.permission.ACCESS_LOCAL_NETWORK") else emptyArray()
+        StarInterfaceType.BLUETOOTH, StarInterfaceType.BLUETOOTH_LE -> if (Build.VERSION.SDK_INT >= 31) {
+            arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+        } else emptyArray()
+        StarInterfaceType.USB -> emptyArray()
+    }
+
+    fun runWithPrinterPermissions(interfaceType: StarInterfaceType, action: () -> Unit) {
+        val missing = permissionsFor(interfaceType).filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) action() else {
+            pendingPrinterAction = action
+            permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -993,37 +1243,166 @@ private fun SettingsScreen(
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(t.printers, fontWeight = FontWeight.Bold)
-                        Text("ESC/POS LAN • Star Android arrive dans la vague matérielle suivante", color = CookitMuted, fontSize = 12.sp)
+                        Text(
+                            "ESC/POS universel ou StarIO10 natif — même stratégie que CookitPad",
+                            color = CookitMuted,
+                            fontSize = 12.sp
+                        )
                     }
                     if (!state.policy.canManagePrinters) Icon(Icons.Default.Lock, null, tint = CookitMuted)
                 }
+
                 if (state.policy.canManagePrinters || state.demoMode) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = printerHost,
-                            onValueChange = { printerHost = it },
-                            label = { Text(t.printerHost) },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
+                        FilterChip(
+                            selected = state.printerProvider == PrinterProviderType.ESC_POS,
+                            onClick = { vm.setPrinterProvider(PrinterProviderType.ESC_POS) },
+                            label = { Text("ESC/POS") }
                         )
-                        OutlinedTextField(
-                            value = printerPort,
-                            onValueChange = { printerPort = it.filter(Char::isDigit).take(5) },
-                            label = { Text(t.printerPort) },
-                            modifier = Modifier.width(120.dp),
-                            singleLine = true
+                        FilterChip(
+                            selected = state.printerProvider == PrinterProviderType.STAR,
+                            onClick = { vm.setPrinterProvider(PrinterProviderType.STAR) },
+                            label = { Text("Star Micronics") }
                         )
                     }
+
+                    if (state.printerProvider == PrinterProviderType.ESC_POS) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = printerHost,
+                                onValueChange = { printerHost = it },
+                                label = { Text(t.printerHost) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = printerPort,
+                                onValueChange = { printerPort = it.filter(Char::isDigit).take(5) },
+                                label = { Text(t.printerPort) },
+                                modifier = Modifier.width(120.dp),
+                                singleLine = true
+                            )
+                        }
+                        OutlinedButton(onClick = { vm.savePrinter(printerHost, printerPort) }) {
+                            Text("Enregistrer")
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            StarInterfaceType.entries.forEach { interfaceType ->
+                                FilterChip(
+                                    selected = starInterface == interfaceType,
+                                    onClick = {
+                                        starInterface = interfaceType
+                                        vm.saveStarPrinter(starIdentifier, starInterface)
+                                    },
+                                    label = {
+                                        Text(
+                                            when (interfaceType) {
+                                                StarInterfaceType.LAN -> "LAN"
+                                                StarInterfaceType.BLUETOOTH -> "Bluetooth"
+                                                StarInterfaceType.BLUETOOTH_LE -> "Bluetooth LE"
+                                                StarInterfaceType.USB -> "USB"
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                        OutlinedTextField(
+                            value = starIdentifier,
+                            onValueChange = { starIdentifier = it },
+                            label = { Text("Identifiant Star (IP / MAC / nom / série USB)") },
+                            supportingText = { Text("Ex. 192.168.1.40 ou adresse MAC") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { vm.saveStarPrinter(starIdentifier, starInterface) }) {
+                                Text("Enregistrer Star")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    runWithPrinterPermissions(starInterface) {
+                                        vm.discoverStarPrinters(starInterface)
+                                    }
+                                },
+                                enabled = !state.printerDiscoveryBusy
+                            ) {
+                                if (state.printerDiscoveryBusy) {
+                                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Text(if (state.printerDiscoveryBusy) "Recherche…" else "Rechercher")
+                            }
+                        }
+
+                        if (state.discoveredPrinters.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Imprimantes Star détectées", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                state.discoveredPrinters.forEach { printer ->
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                starIdentifier = printer.identifier
+                                                starInterface = printer.interfaceType
+                                                vm.selectDiscoveredPrinter(printer)
+                                            },
+                                        color = CookitCanvas,
+                                        border = BorderStroke(1.dp, CookitLine)
+                                    ) {
+                                        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Print, null, tint = CookitOrange, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Column(Modifier.weight(1f)) {
+                                                Text(printer.identifier, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                Text(printer.interfaceType.name.replace('_', ' '), color = CookitMuted, fontSize = 10.sp)
+                                            }
+                                            Icon(Icons.Default.ChevronRight, null, tint = CookitMuted)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { vm.savePrinter(printerHost, printerPort) }) { Text("Enregistrer") }
                         Button(onClick = {
-                            vm.savePrinter(printerHost, printerPort)
-                            vm.testPrinter()
-                        }) { Text(t.testPrinter) }
+                            if (state.printerProvider == PrinterProviderType.ESC_POS) {
+                                vm.savePrinter(printerHost, printerPort)
+                                vm.testPrinter()
+                            } else {
+                                vm.saveStarPrinter(starIdentifier, starInterface)
+                                runWithPrinterPermissions(starInterface) { vm.testPrinter() }
+                            }
+                        }) {
+                            Text(
+                                if (state.printerProvider == PrinterProviderType.STAR)
+                                    "Tester Star"
+                                else t.testPrinter
+                            )
+                        }
+                        OutlinedButton(onClick = {
+                            if (state.printerProvider == PrinterProviderType.STAR) {
+                                runWithPrinterPermissions(starInterface) { vm.openDrawer() }
+                            } else {
+                                vm.openDrawer()
+                            }
+                        }) {
+                            Icon(Icons.Default.PointOfSale, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(t.drawer)
+                        }
                     }
+
                     state.printerMessage?.let { result ->
                         Text(
-                            if (result == "ok" || result == "drawer_ok") t.printerReady else t.printerFailed,
+                            when (result) {
+                                "ok", "drawer_ok", "selected" -> t.printerReady
+                                "discovery_ok" -> "Imprimante(s) détectée(s)"
+                                "discovery_empty" -> "Aucune imprimante Star détectée"
+                                else -> t.printerFailed
+                            },
                             color = if (result == "failed") MaterialTheme.colorScheme.error else CookitGreen,
                             fontSize = 12.sp
                         )

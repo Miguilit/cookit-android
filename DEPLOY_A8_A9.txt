@@ -1,0 +1,22 @@
+COOKIT ANDROID A8-A9 PARITY PATCH
+
+Target repository:
+  /home/u683350338/domains/allmart.be/public_html/_private_source/cookit-android
+
+Scope:
+  - compact landscape navigation rail + system insets
+  - restaurant logo from platform/config
+  - canonical Cookit item_photo_url media support
+  - KDS and Delivery operational screens
+  - RBAC-aware navigation
+  - native StarIO10 provider (LAN/Bluetooth/BLE/USB)
+  - Star printer discovery + test + drawer pulse
+  - runtime printer permissions
+
+After unzip at repository root:
+  git diff --check
+  git add app docs DEPLOY_A8_A9.txt SHA256SUMS.txt
+  git commit -m "Cookit Android A8-A9: branding navigation KDS delivery and Star parity"
+  git push origin main
+
+GitHub Actions will build the APK automatically.

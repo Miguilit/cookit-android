@@ -15,12 +15,17 @@ enum class AppLanguage(val code: String, val label: String) {
     }
 }
 
+enum class PrinterProviderType { ESC_POS, STAR }
+
+enum class StarInterfaceType { LAN, BLUETOOTH, BLUETOOTH_LE, USB }
+
 data class UserSession(
     val id: Long,
     val name: String,
     val role: PosRole,
     val restaurant: String,
-    val branch: String
+    val branch: String,
+    val restaurantLogoUrl: String? = null
 )
 
 data class Category(val id: Long, val name: String, val emoji: String)
@@ -60,6 +65,11 @@ data class DiningTable(
     val id: Long,
     val label: String,
     val available: Boolean = true
+)
+
+data class DiscoveredPrinter(
+    val identifier: String,
+    val interfaceType: StarInterfaceType
 )
 
 data class CashDenomination(
