@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.lifecycle.viewmodel.compose.viewModel
 import be.cookit.pos.android.data.DemoRepository
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.ui.theme.*
@@ -33,10 +34,16 @@ private enum class Screen(val label: String) {
 }
 
 @Composable
-fun CookitApp() {
-    var signedIn by remember { mutableStateOf(false) }
-    if (!signedIn) {
-        LoginScreen(onDemo = { signedIn = true })
+fun CookitApp(vm: CookitPosViewModel = viewModel()) {
+    val state by vm.ui.collectAsState()
+
+    if (!state.authenticated) {
+        LoginScreen(
+            loading = state.loading,
+            error = state.error,
+            onLogin = vm::login,
+            onDemo = vm::enterDemo
+        )
         return
     }
 
@@ -48,13 +55,13 @@ fun CookitApp() {
         Row(Modifier.fillMaxSize().background(CookitCanvas)) {
             SideNavigation(screen = screen, onSelect = { screen = it })
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                TopBar()
-                ScreenContent(screen)
+                TopBar(state = state)
+                ScreenContent(screen, state, vm)
             }
         }
     } else {
         Scaffold(
-            topBar = { TopBar(compact = true) },
+            topBar = { TopBar(state = state, compact = true) },
             bottomBar = {
                 NavigationBar {
                     listOf(Screen.POS, Screen.ORDERS, Screen.CASH, Screen.SETTINGS).forEach {
@@ -73,13 +80,21 @@ fun CookitApp() {
                     .fillMaxSize()
                     .padding(padding)
                     .background(CookitCanvas)
-            ) { ScreenContent(screen) }
+            ) { ScreenContent(screen, state, vm) }
         }
     }
 }
 
 @Composable
-private fun LoginScreen(onDemo: () -> Unit) {
+private fun LoginScreen(
+    loading: Boolean,
+    error: String?,
+    onLogin: (String, String) -> Unit,
+    onDemo: () -> Unit
+) {
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
     Box(
         modifier = Modifier.fillMaxSize().background(CookitCanvas),
         contentAlignment = Alignment.Center
@@ -103,31 +118,58 @@ private fun LoginScreen(onDemo: () -> Unit) {
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text("Cookit POS", fontSize = 26.sp, fontWeight = FontWeight.Black)
-                        Text("Android • Native preview", color = CookitMuted)
+                        Text("Android • A3–A5 Live", color = CookitMuted)
                     }
                 }
                 HorizontalDivider(color = CookitLine)
                 OutlinedTextField(
-                    value = "cashier@restaurant.test",
-                    onValueChange = {},
-                    label = { Text("E-mail") },
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("E-mail Cookit") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    enabled = !loading
                 )
                 OutlinedTextField(
-                    value = "••••••••",
-                    onValueChange = {},
+                    value = password,
+                    onValueChange = { password = it },
                     label = { Text("Mot de passe") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    enabled = !loading
                 )
+                if (!error.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Text(
+                            error,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
                 Button(
-                    onClick = onDemo,
+                    onClick = { onLogin(email, password) },
                     modifier = Modifier.fillMaxWidth().height(54.dp),
-                    shape = RoundedCornerShape(16.dp)
-                ) { Text("Voir la démo POS", fontWeight = FontWeight.Bold) }
+                    shape = RoundedCornerShape(16.dp),
+                    enabled = !loading
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Text(if (loading) "Connexion…" else "Se connecter à Cookit", fontWeight = FontWeight.Bold)
+                }
+                OutlinedButton(
+                    onClick = onDemo,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    enabled = !loading
+                ) { Text("Continuer en mode démo") }
                 Text(
-                    "La vague A3 branchera cet écran sur /auth/login et le bootstrap RBAC Cookit.",
+                    "Connexion réelle via l’API Cookit. Le mode démo reste disponible pour comparer l’UI.",
                     color = CookitMuted,
                     fontSize = 12.sp
                 )
@@ -200,43 +242,51 @@ private fun iconFor(screen: Screen) = when (screen) {
 }
 
 @Composable
-private fun TopBar(compact: Boolean = false) {
-    Surface(color = Color.White, shadowElevation = 1.dp) {
+private fun TopBar(state: PosUiState, compact: Boolean = false) {
+    Surface(modifier = Modifier.statusBarsPadding(), color = Color.White, shadowElevation = 1.dp) {
         Row(
             modifier = Modifier.fillMaxWidth().height(if (compact) 68.dp else 78.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    DemoRepository.user.restaurant,
+                    state.user.restaurant,
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = if (compact) 17.sp else 20.sp
                 )
                 Text(
-                    "${DemoRepository.user.branch} • ${DemoRepository.user.role.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                    "${state.user.branch} • ${state.user.role.name.lowercase().replaceFirstChar { it.uppercase() }}${if (state.demoMode) " • Démo" else ""}",
                     color = CookitMuted,
                     fontSize = 12.sp
                 )
             }
             Surface(
                 shape = RoundedCornerShape(14.dp),
-                color = CookitSoftGreen
+                color = if (state.online) CookitSoftGreen else MaterialTheme.colorScheme.errorContainer
             ) {
                 Row(
                     Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(Modifier.size(8.dp).clip(RoundedCornerShape(8.dp)).background(CookitGreen))
+                    Box(
+                        Modifier.size(8.dp).clip(RoundedCornerShape(8.dp))
+                            .background(if (state.online) CookitGreen else MaterialTheme.colorScheme.error)
+                    )
                     Spacer(Modifier.width(7.dp))
-                    Text("En ligne", color = CookitGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(
+                        if (state.online) "En ligne" else "Hors ligne",
+                        color = if (state.online) CookitGreen else MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
                 }
             }
             if (!compact) {
                 Spacer(Modifier.width(12.dp))
                 IconButton(onClick = {}) {
-                    BadgedBox(badge = { Badge { Text("2") } }) {
-                        Icon(Icons.Default.Notifications, null)
-                    }
+                    BadgedBox(
+                        badge = { if (state.unreadInbound > 0) Badge { Text(state.unreadInbound.toString()) } }
+                    ) { Icon(Icons.Default.Notifications, null) }
                 }
                 Surface(
                     modifier = Modifier.size(42.dp),
@@ -244,7 +294,11 @@ private fun TopBar(compact: Boolean = false) {
                     color = CookitSoftOrange
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("AM", color = CookitOrange, fontWeight = FontWeight.Black)
+                        Text(
+                            state.user.name.split(' ').mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").ifBlank { "C" },
+                            color = CookitOrange,
+                            fontWeight = FontWeight.Black
+                        )
                     }
                 }
             }
@@ -253,73 +307,69 @@ private fun TopBar(compact: Boolean = false) {
 }
 
 @Composable
-private fun ScreenContent(screen: Screen) {
+private fun ScreenContent(screen: Screen, state: PosUiState, vm: CookitPosViewModel) {
     when (screen) {
-        Screen.POS -> PosScreen()
-        Screen.ORDERS -> OrdersScreen()
+        Screen.POS -> PosScreen(
+            categories = state.categories,
+            products = state.products,
+            inboundCount = state.unreadInbound,
+            inboundOrders = state.orders.filter { it.unread },
+            onReadInbound = vm::markInboundRead
+        )
+        Screen.ORDERS -> OrdersScreen(state.orders)
         Screen.CASH -> CashScreen()
-        Screen.DASHBOARD -> DashboardScreen()
+        Screen.DASHBOARD -> DashboardScreen(state.orders)
         Screen.KDS -> PlaceholderScreen("Cuisine", "KDS / tickets cuisine")
         Screen.DELIVERY -> PlaceholderScreen("Livraison", "Commandes internes et plateformes")
-        Screen.SETTINGS -> SettingsScreen()
+        Screen.SETTINGS -> SettingsScreen(state, onRefresh = vm::refresh, onLogout = vm::logout)
     }
 }
 
 @Composable
-private fun InboundBanner() {
+private fun InboundBanner(count: Int, orders: List<PosOrder>, onRead: () -> Unit) {
+    if (count <= 0) return
+    val preview = orders.take(2).joinToString(" • ") { "${it.channel} ${it.code}" }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = Color(0xFFFFF7E8),
         border = BorderStroke(1.dp, Color(0xFFFFD99A))
     ) {
-        Row(
-            Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(12.dp), color = CookitOrange) {
-                Icon(
-                    Icons.Default.NotificationsActive,
-                    null,
-                    tint = Color.White,
-                    modifier = Modifier.padding(9.dp)
-                )
+                Icon(Icons.Default.NotificationsActive, null, tint = Color.White, modifier = Modifier.padding(9.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("2 nouvelles commandes", fontWeight = FontWeight.ExtraBold)
-                Text("QR Table #1248 • Site web #1247", color = CookitMuted, fontSize = 12.sp)
+                Text(
+                    if (count == 1) "1 nouvelle commande" else "$count nouvelles commandes",
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(preview.ifBlank { "Nouvelle commande externe" }, color = CookitMuted, fontSize = 12.sp)
             }
-            TextButton(onClick = {}) { Text("Voir") }
+            TextButton(onClick = onRead) { Text("Vu") }
         }
     }
 }
 
 @Composable
-private fun PosScreen() {
-    var selectedCategory by remember { mutableLongStateOf(1L) }
-    var cart by remember {
-        mutableStateOf(
-            listOf(
-                CartLine(DemoRepository.products[0], 2),
-                CartLine(DemoRepository.products[6], 1)
-            )
-        )
-    }
+private fun PosScreen(
+    categories: List<Category>,
+    products: List<Product>,
+    inboundCount: Int,
+    inboundOrders: List<PosOrder>,
+    onReadInbound: () -> Unit
+) {
+    val initialCategory = categories.firstOrNull()?.id ?: 0L
+    var selectedCategory by remember(categories) { mutableLongStateOf(initialCategory) }
+    var cart by remember { mutableStateOf(emptyList<CartLine>()) }
     val config = LocalConfiguration.current
     val wide = config.screenWidthDp >= 1050
 
-    Column(
-        Modifier.fillMaxSize().padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        InboundBanner()
+    Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        InboundBanner(inboundCount, inboundOrders, onReadInbound)
 
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Nouvelle commande", fontWeight = FontWeight.Black, fontSize = 26.sp)
             Spacer(Modifier.weight(1f))
             OrderTypeChip("Sur place", true)
@@ -328,32 +378,26 @@ private fun PosScreen() {
         }
 
         if (wide) {
-            Row(
-                Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 ProductPane(
                     modifier = Modifier.weight(1.65f),
+                    categories = categories,
+                    products = products,
                     selectedCategory = selectedCategory,
                     onCategory = { selectedCategory = it },
                     onAdd = { product ->
                         val existing = cart.firstOrNull { it.product.id == product.id }
                         cart = if (existing == null) cart + CartLine(product, 1)
-                        else cart.map {
-                            if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it
-                        }
+                        else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
                     }
                 )
                 CartPane(
                     modifier = Modifier.weight(0.9f),
                     cart = cart,
-                    onPlus = { id ->
-                        cart = cart.map { if (it.product.id == id) it.copy(quantity = it.quantity + 1) else it }
-                    },
+                    onPlus = { id -> cart = cart.map { if (it.product.id == id) it.copy(quantity = it.quantity + 1) else it } },
                     onMinus = { id ->
                         cart = cart.mapNotNull {
-                            if (it.product.id != id) it
-                            else if (it.quantity <= 1) null else it.copy(quantity = it.quantity - 1)
+                            if (it.product.id != id) it else if (it.quantity <= 1) null else it.copy(quantity = it.quantity - 1)
                         }
                     }
                 )
@@ -361,9 +405,15 @@ private fun PosScreen() {
         } else {
             ProductPane(
                 modifier = Modifier.fillMaxSize(),
+                categories = categories,
+                products = products,
                 selectedCategory = selectedCategory,
                 onCategory = { selectedCategory = it },
-                onAdd = { product -> cart = cart + CartLine(product, 1) }
+                onAdd = { product ->
+                    val existing = cart.firstOrNull { it.product.id == product.id }
+                    cart = if (existing == null) cart + CartLine(product, 1)
+                    else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
+                }
             )
         }
     }
@@ -389,13 +439,15 @@ private fun OrderTypeChip(label: String, selected: Boolean) {
 @Composable
 private fun ProductPane(
     modifier: Modifier,
+    categories: List<Category>,
+    products: List<Product>,
     selectedCategory: Long,
     onCategory: (Long) -> Unit,
     onAdd: (Product) -> Unit
 ) {
     Column(modifier) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(DemoRepository.categories) { category ->
+            items(categories) { category ->
                 FilterChip(
                     selected = category.id == selectedCategory,
                     onClick = { onCategory(category.id) },
@@ -405,8 +457,8 @@ private fun ProductPane(
         }
         Spacer(Modifier.height(12.dp))
 
-        val products = DemoRepository.products.filter {
-            selectedCategory == 1L || it.categoryId == selectedCategory
+        val visibleProducts = products.filter {
+            selectedCategory == 0L || it.categoryId == selectedCategory
         }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 180.dp),
@@ -414,7 +466,7 @@ private fun ProductPane(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
-            items(products, key = { it.id }) { product ->
+            items(visibleProducts, key = { it.id }) { product ->
                 ProductCard(product, onAdd)
             }
         }
@@ -558,13 +610,13 @@ private fun SummaryLine(label: String, amount: Double, muted: Boolean = false) {
 }
 
 @Composable
-private fun OrdersScreen() {
+private fun OrdersScreen(orders: List<PosOrder>) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("Commandes", fontSize = 28.sp, fontWeight = FontWeight.Black)
         Text("QR, web, POS et livraison dans une vue unique.", color = CookitMuted)
         Spacer(Modifier.height(16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(DemoRepository.orders) { order ->
+            items(orders) { order ->
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(18.dp),
@@ -681,7 +733,7 @@ private fun CashScreen() {
 }
 
 @Composable
-private fun DashboardScreen() {
+private fun DashboardScreen(orders: List<PosOrder>) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("Bonjour Amina", fontSize = 30.sp, fontWeight = FontWeight.Black)
         Text("Voici l'activité de la branche aujourd'hui.", color = CookitMuted)
@@ -691,10 +743,10 @@ private fun DashboardScreen() {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item { MetricCard("CA aujourd'hui", "1 284,50 €", "+12,4%", Icons.Default.TrendingUp) }
-            item { MetricCard("Commandes", "67", "5 entrantes", Icons.Default.ReceiptLong) }
-            item { MetricCard("En cuisine", "8", "3 à servir", Icons.Default.SoupKitchen) }
-            item { MetricCard("Livraisons", "6", "2 en route", Icons.Default.DeliveryDining) }
+            item { MetricCard("CA chargé", String.format(Locale.FRANCE, "%.2f €", orders.sumOf { it.total }), "session courante", Icons.Default.TrendingUp) }
+            item { MetricCard("Commandes", orders.size.toString(), "flux API", Icons.Default.ReceiptLong) }
+            item { MetricCard("En cuisine", orders.count { it.status == "En cuisine" }.toString(), "à préparer", Icons.Default.SoupKitchen) }
+            item { MetricCard("Livraisons", orders.count { it.type == OrderType.DELIVERY }.toString(), "commandes delivery", Icons.Default.DeliveryDining) }
         }
     }
 }
@@ -717,14 +769,32 @@ private fun MetricCard(title: String, value: String, note: String, icon: android
 }
 
 @Composable
-private fun SettingsScreen() {
+private fun SettingsScreen(state: PosUiState, onRefresh: () -> Unit, onLogout: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Réglages", fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text("Les options sensibles suivent native_policy.", color = CookitMuted)
-        SettingsRow(Icons.Default.Print, "Imprimantes", "Star / ESC-POS / mapping cuisine", locked = true)
-        SettingsRow(Icons.Default.Wifi, "Réseau", "Connexion et diagnostic LAN")
-        SettingsRow(Icons.Default.Person, "Compte", "Amina • Cashier")
-        SettingsRow(Icons.Default.Security, "Permissions", "Profil cashier • politique serveur")
+        Text(
+            if (state.demoMode) "Mode démo local" else "Session Cookit connectée • synchro toutes les 2 s",
+            color = CookitMuted
+        )
+        SettingsRow(Icons.Default.Sync, "Synchronisation", if (state.online) "API Cookit en ligne" else "Connexion interrompue")
+        SettingsRow(Icons.Default.Print, "Imprimantes", "Star / ESC-POS / mapping cuisine", locked = !state.policy.canManagePrinters)
+        SettingsRow(Icons.Default.Person, "Compte", "${state.user.name} • ${state.user.role.name.lowercase()}")
+        SettingsRow(Icons.Default.Security, "Permissions", "Profil ${state.policy.profile.name.lowercase()}")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onRefresh, enabled = !state.demoMode && !state.loading) {
+                Icon(Icons.Default.Refresh, null)
+                Spacer(Modifier.width(6.dp))
+                Text("Rafraîchir")
+            }
+            Button(onClick = onLogout) {
+                Icon(Icons.Default.Logout, null)
+                Spacer(Modifier.width(6.dp))
+                Text("Déconnexion")
+            }
+        }
+        if (!state.error.isNullOrBlank()) {
+            Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+        }
     }
 }
 

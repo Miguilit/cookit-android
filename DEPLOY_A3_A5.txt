@@ -1,0 +1,11 @@
+Baseline attendue: cookit-android main après commit d0cf272.
+
+Ce patch est volontairement sans dossier racine dans le ZIP.
+Depuis le repo:
+  unzip -o /chemin/CookitAndroid_A3_A5_PATCH_20260918.zip -d .
+  git status --short
+  git add app docs DEPLOY_A3_A5.txt
+  git commit -m "Cookit Android A3-A5: live auth catalog orders and inbound realtime"
+  git push origin main
+
+Le push déclenche Cookit Android Build automatiquement.
