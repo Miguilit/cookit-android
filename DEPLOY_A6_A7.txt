@@ -1,0 +1,16 @@
+COOKIT ANDROID A6-A7 PATCH
+==========================
+
+Apply at repository root:
+  /home/u683350338/domains/allmart.be/public_html/_private_source/cookit-android
+
+The ZIP has no wrapper directory. Extract directly into the repository root.
+
+Then:
+  git status --short
+  git diff --check
+  git add app docs DEPLOY_A6_A7.txt SHA256SUMS.txt
+  git commit -m "Cookit Android A6-A7: live checkout cash language media and ESC-POS"
+  git push origin main
+
+GitHub Actions will build the debug APK.

@@ -10,7 +10,6 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
@@ -31,6 +30,7 @@ data class PlatformSnapshot(
 )
 
 class CookitHttpClient {
+    var languageCode: String = "fr"
     private val baseUrl = BuildConfig.COOKIT_API_BASE_URL.trimEnd('/') + "/"
 
     suspend fun login(email: String, password: String): String = withContext(Dispatchers.IO) {
@@ -109,7 +109,8 @@ class CookitHttpClient {
                 val description = obj.optText("description", "short_description") ?: ""
                 val price = obj.doubleAny("price", "selling_price", "base_price", "amount") ?: 0.0
                 val available = obj.boolAny("available", "is_available", "status") ?: true
-                add(Product(id, categoryId, name, description, price, emojiForProduct(name), available))
+                val imageUrl = normalizeMediaUrl(extractMediaCandidate(obj))
+                add(Product(id, categoryId, name, description, price, emojiForProduct(name), available, imageUrl))
             }
         }.distinctBy { it.id }
 
@@ -165,6 +166,148 @@ class CookitHttpClient {
         }
     }
 
+
+    suspend fun tables(token: String): List<DiningTable> = withContext(Dispatchers.IO) {
+        val json = request("pos/tables", token = token)
+        val array = findArrayDeep(json, setOf("tables", "data")) ?: JSONArray()
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val id = obj.longAny("id", "table_id") ?: continue
+                val label = obj.optText("table_name", "name", "table_code", "code") ?: "Table $id"
+                val available = when {
+                    obj.boolAny("is_available", "available") != null -> obj.boolAny("is_available", "available") ?: true
+                    obj.has("is_running") -> !obj.optBoolean("is_running", false)
+                    else -> true
+                }
+                add(DiningTable(id, label, available))
+            }
+        }
+    }
+
+    suspend fun createOrder(
+        token: String,
+        type: OrderType,
+        lines: List<CartLine>,
+        tableId: Long? = null
+    ): Long = withContext(Dispatchers.IO) {
+        if (lines.isEmpty()) throw CookitApiException(422, "Panier vide")
+        val items = JSONArray()
+        lines.forEach { line ->
+            items.put(
+                JSONObject()
+                    .put("menu_item_id", line.product.id)
+                    .put("quantity", line.quantity)
+                    .put("price", line.product.price)
+                    .put("amount", line.total)
+            )
+        }
+        val body = JSONObject()
+            .put("order_type", when (type) {
+                OrderType.DINE_IN -> "dine_in"
+                OrderType.TAKEAWAY -> "pickup"
+                OrderType.DELIVERY -> "delivery"
+            })
+            .put("placed_via", "pos")
+            .put("items", items)
+        if (type == OrderType.DINE_IN && tableId != null) body.put("table_id", tableId)
+
+        val json = request("pos/orders", method = "POST", token = token, body = body)
+        val orderObj = findObjectDeep(json, setOf("order"))
+        orderObj?.longAny("id", "order_id")
+            ?: json.longAny("id", "order_id")
+            ?: throw CookitApiException(200, "Commande créée mais identifiant introuvable.")
+    }
+
+    suspend fun createKot(token: String, orderId: Long) = withContext(Dispatchers.IO) {
+        request("pos/orders/$orderId/kot", method = "POST", token = token, body = JSONObject())
+        Unit
+    }
+
+    suspend fun payOrderCash(token: String, orderId: Long, amount: Double) = withContext(Dispatchers.IO) {
+        val payments = JSONArray().put(JSONObject().put("amount", amount).put("method", "cash"))
+        request(
+            "pos/orders/$orderId/pay",
+            method = "POST",
+            token = token,
+            body = JSONObject().put("payments", payments)
+        )
+        Unit
+    }
+
+    suspend fun cashRegisters(token: String): List<CashRegister> = withContext(Dispatchers.IO) {
+        val json = request("pos/cash-register/registers", token = token)
+        val array = findArrayDeep(json, setOf("registers", "data")) ?: JSONArray()
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val id = obj.longAny("id", "cash_register_id", "register_id") ?: continue
+                add(CashRegister(id, obj.optText("name", "register_name", "title") ?: "Caisse $id"))
+            }
+        }
+    }
+
+    suspend fun cashDenominations(token: String): List<CashDenomination> = withContext(Dispatchers.IO) {
+        val json = request("pos/cash-register/denominations", token = token)
+        val array = findArrayDeep(json, setOf("denominations", "data")) ?: JSONArray()
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val value = obj.doubleAny("value", "amount", "denomination") ?: continue
+                val label = obj.optText("label", "name") ?: String.format(Locale.FRANCE, "%.2f €", value)
+                add(CashDenomination(label, value))
+            }
+        }.sortedBy { it.value }
+    }
+
+    suspend fun activeCashSession(token: String): CashSession? = withContext(Dispatchers.IO) {
+        val json = try {
+            request("pos/cash-register/sessions/active", token = token)
+        } catch (e: CookitApiException) {
+            if (e.statusCode == 404) return@withContext null else throw e
+        }
+        val obj = findObjectDeep(json, setOf("session", "data")) ?: json
+        val id = obj.longAny("id", "session_id") ?: return@withContext null
+        CashSession(
+            id = id,
+            registerId = obj.longAny("cash_register_id", "register_id"),
+            status = obj.optText("status") ?: "active",
+            openingAmount = obj.doubleAny("opening_amount", "opening_balance", "opening_cash"),
+            expectedAmount = obj.doubleAny("expected_amount", "expected_balance", "expected_cash")
+        )
+    }
+
+    suspend fun openCashSession(token: String, registerId: Long, openingAmount: Double): CashSession = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("cash_register_id", registerId)
+            .put("register_id", registerId)
+            .put("opening_amount", openingAmount)
+            .put("opening_balance", openingAmount)
+        val json = request("pos/cash-register/sessions/open", method = "POST", token = token, body = body)
+        val obj = findObjectDeep(json, setOf("session", "data")) ?: json
+        val id = obj.longAny("id", "session_id") ?: throw CookitApiException(200, "Session ouverte mais identifiant introuvable.")
+        CashSession(id, obj.longAny("cash_register_id", "register_id") ?: registerId, obj.optText("status") ?: "active", openingAmount)
+    }
+
+    private fun extractMediaCandidate(obj: JSONObject): String? {
+        obj.optText("image_url", "imageUrl", "item_image", "itemImage", "photo_url", "thumbnail_url")?.let { return it }
+        for (key in listOf("image", "photo", "thumbnail", "media")) {
+            val nested = obj.optJSONObject(key)
+            nested?.optText("url", "full_url", "path", "src", "original_url")?.let { return it }
+            val scalar = obj.opt(key)
+            if (scalar is String && scalar.isNotBlank()) return scalar
+        }
+        return null
+    }
+
+    private fun normalizeMediaUrl(raw: String?): String? {
+        val value = raw?.trim()?.takeIf { it.isNotBlank() && it != "null" } ?: return null
+        if (value.startsWith("http://") || value.startsWith("https://")) return value
+        val apiMarker = "/api/application-integration/"
+        val origin = baseUrl.substringBefore(apiMarker).trimEnd('/')
+        return origin + "/" + value.trimStart('/')
+    }
+
     private fun request(
         path: String,
         method: String = "GET",
@@ -176,6 +319,7 @@ class CookitHttpClient {
             connectTimeout = 15_000
             readTimeout = 20_000
             setRequestProperty("Accept", "application/json")
+            setRequestProperty("Accept-Language", languageCode)
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("X-Requested-With", "XMLHttpRequest")
             if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")

@@ -4,6 +4,17 @@ enum class PosRole { ADMINISTRATOR, MANAGER, CASHIER, WAITER, KITCHEN, DELIVERY 
 
 enum class OrderType { DINE_IN, TAKEAWAY, DELIVERY }
 
+enum class AppLanguage(val code: String, val label: String) {
+    FR("fr", "Français"),
+    NL("nl", "Nederlands"),
+    EN("en", "English"),
+    DE("de", "Deutsch");
+
+    companion object {
+        fun fromCode(code: String?): AppLanguage = entries.firstOrNull { it.code == code } ?: FR
+    }
+}
+
 data class UserSession(
     val id: Long,
     val name: String,
@@ -21,7 +32,8 @@ data class Product(
     val description: String,
     val price: Double,
     val emoji: String,
-    val available: Boolean = true
+    val available: Boolean = true,
+    val imageUrl: String? = null
 )
 
 data class CartLine(
@@ -44,10 +56,29 @@ data class PosOrder(
     val unread: Boolean = false
 )
 
+data class DiningTable(
+    val id: Long,
+    val label: String,
+    val available: Boolean = true
+)
+
 data class CashDenomination(
     val label: String,
     val value: Double,
     val quantity: Int = 0
+)
+
+data class CashRegister(
+    val id: Long,
+    val name: String
+)
+
+data class CashSession(
+    val id: Long,
+    val registerId: Long?,
+    val status: String,
+    val openingAmount: Double? = null,
+    val expectedAmount: Double? = null
 )
 
 data class NativePolicy(

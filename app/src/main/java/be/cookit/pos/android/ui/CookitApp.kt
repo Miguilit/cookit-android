@@ -1,5 +1,6 @@
 package be.cookit.pos.android.ui
 
+import android.graphics.BitmapFactory
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -12,6 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -21,7 +24,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import be.cookit.pos.android.data.DemoRepository
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.ui.theme.*
+import java.net.URL
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private enum class Screen(val label: String) {
     DASHBOARD("Accueil"),
@@ -33,9 +39,20 @@ private enum class Screen(val label: String) {
     SETTINGS("Réglages")
 }
 
+private fun screenLabel(screen: Screen, t: UiStrings): String = when (screen) {
+    Screen.DASHBOARD -> t.home
+    Screen.POS -> t.pos
+    Screen.ORDERS -> t.orders
+    Screen.KDS -> t.kitchen
+    Screen.DELIVERY -> t.delivery
+    Screen.CASH -> t.cash
+    Screen.SETTINGS -> t.settings
+}
+
 @Composable
 fun CookitApp(vm: CookitPosViewModel = viewModel()) {
     val state by vm.ui.collectAsState()
+    val t = strings(state.language)
 
     if (!state.authenticated) {
         LoginScreen(
@@ -53,15 +70,15 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
 
     if (tablet) {
         Row(Modifier.fillMaxSize().background(CookitCanvas)) {
-            SideNavigation(screen = screen, onSelect = { screen = it })
+            SideNavigation(screen = screen, t = t, onSelect = { screen = it })
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                TopBar(state = state)
-                ScreenContent(screen, state, vm)
+                TopBar(state = state, t = t)
+                ScreenContent(screen, state, vm, t)
             }
         }
     } else {
         Scaffold(
-            topBar = { TopBar(state = state, compact = true) },
+            topBar = { TopBar(state = state, t = t, compact = true) },
             bottomBar = {
                 NavigationBar {
                     listOf(Screen.POS, Screen.ORDERS, Screen.CASH, Screen.SETTINGS).forEach {
@@ -69,7 +86,7 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
                             selected = screen == it,
                             onClick = { screen = it },
                             icon = { Icon(iconFor(it), contentDescription = null) },
-                            label = { Text(it.label) }
+                            label = { Text(screenLabel(it, t)) }
                         )
                     }
                 }
@@ -80,7 +97,7 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
                     .fillMaxSize()
                     .padding(padding)
                     .background(CookitCanvas)
-            ) { ScreenContent(screen, state, vm) }
+            ) { ScreenContent(screen, state, vm, t) }
         }
     }
 }
@@ -179,7 +196,7 @@ private fun LoginScreen(
 }
 
 @Composable
-private fun SideNavigation(screen: Screen, onSelect: (Screen) -> Unit) {
+private fun SideNavigation(screen: Screen, t: UiStrings, onSelect: (Screen) -> Unit) {
     Surface(
         modifier = Modifier.width(104.dp).fillMaxHeight(),
         color = Color(0xFF152019)
@@ -215,12 +232,12 @@ private fun SideNavigation(screen: Screen, onSelect: (Screen) -> Unit) {
                 ) {
                     Icon(
                         iconFor(item),
-                        contentDescription = item.label,
+                        contentDescription = screenLabel(item, t),
                         tint = if (selected) CookitOrange else Color(0xFFD7DDD9)
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        item.label,
+                        screenLabel(item, t),
                         color = if (selected) Color.White else Color(0xFFB9C0BC),
                         fontSize = 10.sp,
                         maxLines = 1
@@ -242,7 +259,7 @@ private fun iconFor(screen: Screen) = when (screen) {
 }
 
 @Composable
-private fun TopBar(state: PosUiState, compact: Boolean = false) {
+private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
     Surface(modifier = Modifier.statusBarsPadding(), color = Color.White, shadowElevation = 1.dp) {
         Row(
             modifier = Modifier.fillMaxWidth().height(if (compact) 68.dp else 78.dp).padding(horizontal = 20.dp),
@@ -274,7 +291,7 @@ private fun TopBar(state: PosUiState, compact: Boolean = false) {
                     )
                     Spacer(Modifier.width(7.dp))
                     Text(
-                        if (state.online) "En ligne" else "Hors ligne",
+                        if (state.online) t.online else t.offline,
                         color = if (state.online) CookitGreen else MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
@@ -307,9 +324,12 @@ private fun TopBar(state: PosUiState, compact: Boolean = false) {
 }
 
 @Composable
-private fun ScreenContent(screen: Screen, state: PosUiState, vm: CookitPosViewModel) {
+private fun ScreenContent(screen: Screen, state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
     when (screen) {
         Screen.POS -> PosScreen(
+            state = state,
+            vm = vm,
+            t = t,
             categories = state.categories,
             products = state.products,
             inboundCount = state.unreadInbound,
@@ -317,11 +337,11 @@ private fun ScreenContent(screen: Screen, state: PosUiState, vm: CookitPosViewMo
             onReadInbound = vm::markInboundRead
         )
         Screen.ORDERS -> OrdersScreen(state.orders)
-        Screen.CASH -> CashScreen()
+        Screen.CASH -> CashScreen(state, vm, t)
         Screen.DASHBOARD -> DashboardScreen(state.orders)
         Screen.KDS -> PlaceholderScreen("Cuisine", "KDS / tickets cuisine")
         Screen.DELIVERY -> PlaceholderScreen("Livraison", "Commandes internes et plateformes")
-        Screen.SETTINGS -> SettingsScreen(state, onRefresh = vm::refresh, onLogout = vm::logout)
+        Screen.SETTINGS -> SettingsScreen(state, vm, t, onRefresh = vm::refresh, onLogout = vm::logout)
     }
 }
 
@@ -354,6 +374,9 @@ private fun InboundBanner(count: Int, orders: List<PosOrder>, onRead: () -> Unit
 
 @Composable
 private fun PosScreen(
+    state: PosUiState,
+    vm: CookitPosViewModel,
+    t: UiStrings,
     categories: List<Category>,
     products: List<Product>,
     inboundCount: Int,
@@ -363,18 +386,52 @@ private fun PosScreen(
     val initialCategory = categories.firstOrNull()?.id ?: 0L
     var selectedCategory by remember(categories) { mutableLongStateOf(initialCategory) }
     var cart by remember { mutableStateOf(emptyList<CartLine>()) }
+    var orderType by remember { mutableStateOf(OrderType.DINE_IN) }
+    var selectedTableId by remember(state.tables) {
+        mutableStateOf(state.tables.firstOrNull { it.available }?.id)
+    }
     val config = LocalConfiguration.current
-    val wide = config.screenWidthDp >= 1050
+    val wide = config.screenWidthDp >= 900
+
+    LaunchedEffect(state.checkoutNonce) {
+        if (state.checkoutNonce > 0 && state.checkoutMessage in setOf("paid", "demo")) {
+            cart = emptyList()
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         InboundBanner(inboundCount, inboundOrders, onReadInbound)
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Nouvelle commande", fontWeight = FontWeight.Black, fontSize = 26.sp)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(t.newOrder, fontWeight = FontWeight.Black, fontSize = 26.sp)
             Spacer(Modifier.weight(1f))
-            OrderTypeChip("Sur place", true)
-            OrderTypeChip("À emporter", false)
-            OrderTypeChip("Livraison", false)
+            OrderTypeChip(t.dineIn, orderType == OrderType.DINE_IN) { orderType = OrderType.DINE_IN }
+            OrderTypeChip(t.takeaway, orderType == OrderType.TAKEAWAY) { orderType = OrderType.TAKEAWAY }
+            OrderTypeChip(t.deliveryType, orderType == OrderType.DELIVERY) { orderType = OrderType.DELIVERY }
+        }
+
+        if (orderType == OrderType.DINE_IN && state.tables.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(state.tables.filter { it.available }) { table ->
+                    FilterChip(
+                        selected = selectedTableId == table.id,
+                        onClick = { selectedTableId = table.id },
+                        label = { Text("${t.chooseTable} ${table.label}") }
+                    )
+                }
+            }
+        }
+
+        if (state.checkoutMessage == "cash_required") {
+            Text(t.openCashFirst, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+        } else if (state.checkoutMessage == "table_required") {
+            Text("${t.chooseTable}: sélection requise", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+        } else if (state.checkoutMessage == "paid") {
+            Text(t.orderPaid, color = CookitGreen, fontWeight = FontWeight.Bold)
         }
 
         if (wide) {
@@ -385,43 +442,90 @@ private fun PosScreen(
                     products = products,
                     selectedCategory = selectedCategory,
                     onCategory = { selectedCategory = it },
-                    onAdd = { product ->
-                        val existing = cart.firstOrNull { it.product.id == product.id }
-                        cart = if (existing == null) cart + CartLine(product, 1)
-                        else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
-                    }
+                    onAdd = { product -> cart = addToCart(cart, product) }
                 )
                 CartPane(
                     modifier = Modifier.weight(0.9f),
                     cart = cart,
+                    t = t,
+                    busy = state.checkoutBusy,
+                    tableLabel = state.tables.firstOrNull { it.id == selectedTableId }?.label,
                     onPlus = { id -> cart = cart.map { if (it.product.id == id) it.copy(quantity = it.quantity + 1) else it } },
-                    onMinus = { id ->
-                        cart = cart.mapNotNull {
-                            if (it.product.id != id) it else if (it.quantity <= 1) null else it.copy(quantity = it.quantity - 1)
-                        }
-                    }
+                    onMinus = { id -> cart = decrementCart(cart, id) },
+                    onCheckout = { vm.checkout(cart, orderType, selectedTableId) }
                 )
             }
         } else {
-            ProductPane(
-                modifier = Modifier.fillMaxSize(),
-                categories = categories,
-                products = products,
-                selectedCategory = selectedCategory,
-                onCategory = { selectedCategory = it },
-                onAdd = { product ->
-                    val existing = cart.firstOrNull { it.product.id == product.id }
-                    cart = if (existing == null) cart + CartLine(product, 1)
-                    else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
+            Box(Modifier.fillMaxSize()) {
+                ProductPane(
+                    modifier = Modifier.fillMaxSize().padding(bottom = if (cart.isEmpty()) 0.dp else 84.dp),
+                    categories = categories,
+                    products = products,
+                    selectedCategory = selectedCategory,
+                    onCategory = { selectedCategory = it },
+                    onAdd = { product -> cart = addToCart(cart, product) }
+                )
+                if (cart.isNotEmpty()) {
+                    MobileCartBar(
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                        cart = cart,
+                        t = t,
+                        busy = state.checkoutBusy,
+                        onCheckout = { vm.checkout(cart, orderType, selectedTableId) }
+                    )
                 }
-            )
+            }
+        }
+    }
+}
+
+private fun addToCart(cart: List<CartLine>, product: Product): List<CartLine> {
+    val existing = cart.firstOrNull { it.product.id == product.id }
+    return if (existing == null) cart + CartLine(product, 1)
+    else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
+}
+
+private fun decrementCart(cart: List<CartLine>, id: Long): List<CartLine> = cart.mapNotNull {
+    if (it.product.id != id) it else if (it.quantity <= 1) null else it.copy(quantity = it.quantity - 1)
+}
+
+@Composable
+private fun MobileCartBar(
+    modifier: Modifier,
+    cart: List<CartLine>,
+    t: UiStrings,
+    busy: Boolean,
+    onCheckout: () -> Unit
+) {
+    val total = cart.sumOf { it.total }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = Color.White,
+        shadowElevation = 10.dp,
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("${cart.sumOf { it.quantity }} articles", color = CookitMuted, fontSize = 12.sp)
+                Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 20.sp, fontWeight = FontWeight.Black)
+            }
+            Button(onClick = onCheckout, enabled = !busy, shape = RoundedCornerShape(14.dp)) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                else Icon(Icons.Default.Payments, null)
+                Spacer(Modifier.width(8.dp))
+                Text(t.checkout, fontWeight = FontWeight.Black)
+            }
         }
     }
 }
 
 @Composable
-private fun OrderTypeChip(label: String, selected: Boolean) {
+private fun OrderTypeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
+        modifier = Modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         color = if (selected) CookitSoftOrange else Color.White,
         border = BorderStroke(1.dp, if (selected) CookitOrange else CookitLine)
@@ -478,27 +582,19 @@ private fun ProductCard(product: Product, onAdd: (Product) -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(178.dp)
+            .height(190.dp)
             .clickable { onAdd(product) },
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, CookitLine)
     ) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Row {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(15.dp),
-                    color = CookitCanvas
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(product.emoji, fontSize = 24.sp)
-                    }
-                }
+        Column(Modifier.fillMaxSize().padding(14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                ProductImage(product)
                 Spacer(Modifier.weight(1f))
                 Icon(Icons.Default.AddCircle, null, tint = CookitOrange)
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             Text(
                 product.name,
                 fontWeight = FontWeight.ExtraBold,
@@ -525,11 +621,50 @@ private fun ProductCard(product: Product, onAdd: (Product) -> Unit) {
 }
 
 @Composable
+private fun ProductImage(product: Product) {
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, product.imageUrl) {
+        value = product.imageUrl?.let { url ->
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val connection = URL(url).openConnection().apply {
+                        connectTimeout = 5000
+                        readTimeout = 8000
+                        setRequestProperty("User-Agent", "CookitPOS-Android")
+                    }
+                    connection.getInputStream().use { BitmapFactory.decodeStream(it)?.asImageBitmap() }
+                }.getOrNull()
+            }
+        }
+    }
+
+    Surface(
+        modifier = Modifier.size(62.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = CookitCanvas
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap!!,
+                contentDescription = product.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(contentAlignment = Alignment.Center) { Text(product.emoji, fontSize = 26.sp) }
+        }
+    }
+}
+
+@Composable
 private fun CartPane(
     modifier: Modifier,
     cart: List<CartLine>,
+    t: UiStrings,
+    busy: Boolean,
+    tableLabel: String?,
     onPlus: (Long) -> Unit,
-    onMinus: (Long) -> Unit
+    onMinus: (Long) -> Unit,
+    onCheckout: () -> Unit
 ) {
     Card(
         modifier = modifier.fillMaxHeight(),
@@ -538,42 +673,46 @@ private fun CartPane(
     ) {
         Column(Modifier.fillMaxSize().padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Panier", fontSize = 22.sp, fontWeight = FontWeight.Black)
+                Text(t.cart, fontSize = 22.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.weight(1f))
-                Surface(shape = RoundedCornerShape(12.dp), color = CookitCanvas) {
-                    Text("Table 7", Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontWeight = FontWeight.Bold)
+                if (!tableLabel.isNullOrBlank()) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = CookitCanvas) {
+                        Text(tableLabel, Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontWeight = FontWeight.Bold)
+                    }
                 }
             }
             Spacer(Modifier.height(14.dp))
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(cart, key = { it.product.id }) { line ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(line.product.name, fontWeight = FontWeight.Bold)
-                            Text(
-                                String.format(Locale.FRANCE, "%.2f €", line.total),
-                                color = CookitGreen,
-                                fontWeight = FontWeight.Bold
-                            )
+            if (cart.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(t.emptyCart, color = CookitMuted)
+                }
+            } else {
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(cart, key = { it.product.id }) { line ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(line.product.name, fontWeight = FontWeight.Bold)
+                                Text(
+                                    String.format(Locale.FRANCE, "%.2f €", line.total),
+                                    color = CookitGreen,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            FilledTonalIconButton(onClick = { onMinus(line.product.id) }) { Icon(Icons.Default.Remove, null) }
+                            Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
+                            FilledTonalIconButton(onClick = { onPlus(line.product.id) }) { Icon(Icons.Default.Add, null) }
                         }
-                        FilledTonalIconButton(onClick = { onMinus(line.product.id) }) {
-                            Icon(Icons.Default.Remove, null)
-                        }
-                        Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
-                        FilledTonalIconButton(onClick = { onPlus(line.product.id) }) {
-                            Icon(Icons.Default.Add, null)
-                        }
+                        HorizontalDivider(color = CookitLine)
                     }
-                    HorizontalDivider(color = CookitLine)
                 }
             }
 
             val subtotal = cart.sumOf { it.total }
-            SummaryLine("Sous-total", subtotal)
-            SummaryLine("TVA incluse", subtotal * 0.12, muted = true)
+            SummaryLine(t.subtotal, subtotal)
+            SummaryLine(t.vatIncluded, subtotal * 0.12, muted = true)
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = CookitLine)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Total", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text(t.total, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.weight(1f))
                 Text(
                     String.format(Locale.FRANCE, "%.2f €", subtotal),
@@ -584,13 +723,15 @@ private fun CartPane(
             }
             Spacer(Modifier.height(14.dp))
             Button(
-                onClick = {},
+                onClick = onCheckout,
+                enabled = cart.isNotEmpty() && !busy,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 shape = RoundedCornerShape(17.dp)
             ) {
-                Icon(Icons.Default.Payments, null)
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                else Icon(Icons.Default.Payments, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Encaisser", fontWeight = FontWeight.Black)
+                Text(t.checkout, fontWeight = FontWeight.Black)
             }
         }
     }
@@ -671,19 +812,29 @@ private fun OrdersScreen(orders: List<PosOrder>) {
 }
 
 @Composable
-private fun CashScreen() {
-    var quantities by remember { mutableStateOf(DemoRepository.denominations.associate { it.label to 0 }) }
-    val total = DemoRepository.denominations.sumOf { d -> d.value * (quantities[d.label] ?: 0) }
+private fun CashScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
+    var quantities by remember(state.cashDenominations) {
+        mutableStateOf(state.cashDenominations.associate { it.label to 0 })
+    }
+    val total = state.cashDenominations.sumOf { d -> d.value * (quantities[d.label] ?: 0) }
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Ouverture de caisse", fontSize = 28.sp, fontWeight = FontWeight.Black)
-                Text("Comptage du fond de caisse avant le service.", color = CookitMuted)
+                Text(
+                    if (state.activeCashSession == null) t.cashOpening else t.activeSession,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black
+                )
+                Text(
+                    if (state.activeCashSession == null) t.cashOpeningHelp
+                    else "#${state.activeCashSession.id} • ${state.activeCashSession.status}",
+                    color = CookitMuted
+                )
             }
             Surface(shape = RoundedCornerShape(16.dp), color = CookitSoftOrange) {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), horizontalAlignment = Alignment.End) {
-                    Text("FOND DE CAISSE", color = CookitOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(t.cashFund, color = CookitOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 24.sp, fontWeight = FontWeight.Black)
                 }
             }
@@ -695,7 +846,7 @@ private fun CashScreen() {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(DemoRepository.denominations) { denomination ->
+            items(state.cashDenominations) { denomination ->
                 val qty = quantities[denomination.label] ?: 0
                 Card(
                     shape = RoundedCornerShape(18.dp),
@@ -705,9 +856,7 @@ private fun CashScreen() {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(denomination.label, Modifier.weight(1f), fontWeight = FontWeight.Black)
                         IconButton(onClick = {
-                            quantities = quantities.toMutableMap().also {
-                                it[denomination.label] = (qty - 1).coerceAtLeast(0)
-                            }
+                            quantities = quantities.toMutableMap().also { it[denomination.label] = (qty - 1).coerceAtLeast(0) }
                         }) { Icon(Icons.Default.RemoveCircleOutline, null) }
                         Text("$qty", fontWeight = FontWeight.Black)
                         IconButton(onClick = {
@@ -720,14 +869,33 @@ private fun CashScreen() {
 
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = {}, modifier = Modifier.height(54.dp)) {
+            OutlinedButton(onClick = vm::openDrawer, modifier = Modifier.height(54.dp)) {
                 Icon(Icons.Default.PointOfSale, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Ouvrir le tiroir")
+                Text(t.drawer)
             }
-            Button(onClick = {}, modifier = Modifier.height(54.dp)) {
-                Text("Démarrer le service", fontWeight = FontWeight.Black)
+            if (state.activeCashSession == null) {
+                Button(
+                    onClick = { vm.openCashSession(total) },
+                    modifier = Modifier.height(54.dp),
+                    enabled = !state.cashBusy && (state.demoMode || state.cashRegisters.isNotEmpty())
+                ) {
+                    if (state.cashBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                    else Text(t.startService, fontWeight = FontWeight.Black)
+                }
             }
+        }
+        state.printerMessage?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (it == "drawer_ok") "✓ ${t.drawer}" else if (it == "failed") t.printerFailed else it,
+                color = if (it == "failed") MaterialTheme.colorScheme.error else CookitGreen,
+                fontSize = 12.sp
+            )
+        }
+        if (!state.error.isNullOrBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
         }
     }
 }
@@ -769,27 +937,111 @@ private fun MetricCard(title: String, value: String, note: String, icon: android
 }
 
 @Composable
-private fun SettingsScreen(state: PosUiState, onRefresh: () -> Unit, onLogout: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Réglages", fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text(
-            if (state.demoMode) "Mode démo local" else "Session Cookit connectée • synchro toutes les 2 s",
-            color = CookitMuted
-        )
-        SettingsRow(Icons.Default.Sync, "Synchronisation", if (state.online) "API Cookit en ligne" else "Connexion interrompue")
-        SettingsRow(Icons.Default.Print, "Imprimantes", "Star / ESC-POS / mapping cuisine", locked = !state.policy.canManagePrinters)
-        SettingsRow(Icons.Default.Person, "Compte", "${state.user.name} • ${state.user.role.name.lowercase()}")
-        SettingsRow(Icons.Default.Security, "Permissions", "Profil ${state.policy.profile.name.lowercase()}")
+private fun SettingsScreen(
+    state: PosUiState,
+    vm: CookitPosViewModel,
+    t: UiStrings,
+    onRefresh: () -> Unit,
+    onLogout: () -> Unit
+) {
+    var printerHost by remember(state.printerHost) { mutableStateOf(state.printerHost) }
+    var printerPort by remember(state.printerPort) { mutableStateOf(state.printerPort.toString()) }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(t.settings, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text(if (state.demoMode) "Mode démo local" else t.settingsHelp, color = CookitMuted)
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Language, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Text(t.language, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppLanguage.entries.forEach { language ->
+                        FilterChip(
+                            selected = state.language == language,
+                            onClick = { vm.setLanguage(language) },
+                            label = { Text(language.code.uppercase(Locale.ROOT)) }
+                        )
+                    }
+                }
+            }
+        }
+
+        SettingsRow(Icons.Default.Sync, t.synchronization, if (state.online) "API Cookit ${t.online.lowercase()}" else t.offline)
+        SettingsRow(Icons.Default.Person, t.account, "${state.user.name} • ${state.user.role.name.lowercase()}")
+        SettingsRow(Icons.Default.Security, t.permissions, "${state.policy.profile.name.lowercase()}")
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Print, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(t.printers, fontWeight = FontWeight.Bold)
+                        Text("ESC/POS LAN • Star Android arrive dans la vague matérielle suivante", color = CookitMuted, fontSize = 12.sp)
+                    }
+                    if (!state.policy.canManagePrinters) Icon(Icons.Default.Lock, null, tint = CookitMuted)
+                }
+                if (state.policy.canManagePrinters || state.demoMode) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = printerHost,
+                            onValueChange = { printerHost = it },
+                            label = { Text(t.printerHost) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = printerPort,
+                            onValueChange = { printerPort = it.filter(Char::isDigit).take(5) },
+                            label = { Text(t.printerPort) },
+                            modifier = Modifier.width(120.dp),
+                            singleLine = true
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { vm.savePrinter(printerHost, printerPort) }) { Text("Enregistrer") }
+                        Button(onClick = {
+                            vm.savePrinter(printerHost, printerPort)
+                            vm.testPrinter()
+                        }) { Text(t.testPrinter) }
+                    }
+                    state.printerMessage?.let { result ->
+                        Text(
+                            if (result == "ok" || result == "drawer_ok") t.printerReady else t.printerFailed,
+                            color = if (result == "failed") MaterialTheme.colorScheme.error else CookitGreen,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = onRefresh, enabled = !state.demoMode && !state.loading) {
                 Icon(Icons.Default.Refresh, null)
                 Spacer(Modifier.width(6.dp))
-                Text("Rafraîchir")
+                Text(t.refresh)
             }
             Button(onClick = onLogout) {
                 Icon(Icons.Default.Logout, null)
                 Spacer(Modifier.width(6.dp))
-                Text("Déconnexion")
+                Text(t.logout)
             }
         }
         if (!state.error.isNullOrBlank()) {
