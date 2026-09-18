@@ -43,6 +43,8 @@ data class PosUiState(
     val draftOrderType: OrderType = OrderType.DINE_IN,
     val draftTableId: Long? = null,
     val pendingRemoteOrderId: Long? = null,
+    val kdsBusyOrderIds: Set<Long> = emptySet(),
+    val kdsError: String? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
     val printerPort: Int = 9100,
@@ -353,23 +355,36 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 val orderId = if (existingOrderId != null) {
                     existingOrderId
                 } else {
-                    api.createOrder(
-                        currentToken,
-                        _ui.value.draftOrderType,
-                        _ui.value.draftCart,
-                        _ui.value.draftTableId
-                    ).also { createdOrderId ->
+                    try {
+                        api.createOrder(
+                            currentToken,
+                            _ui.value.draftOrderType,
+                            _ui.value.draftCart,
+                            _ui.value.draftTableId
+                        )
+                    } catch (e: Throwable) {
+                        throw IllegalStateException("Création de la commande — ${readableError(e)}", e)
+                    }.also { createdOrderId ->
                         updateDraft(pendingOrderId = createdOrderId)
-                        runCatching { api.createKot(currentToken, createdOrderId) }
                     }
                 }
 
-                api.payOrder(
-                    currentToken,
-                    orderId,
-                    _ui.value.draftCart.sumOf { it.total },
-                    method
-                )
+                try {
+                    api.ensureKot(currentToken, orderId)
+                } catch (e: Throwable) {
+                    throw IllegalStateException("Envoi en cuisine — ${readableError(e)}", e)
+                }
+
+                try {
+                    api.payOrder(
+                        currentToken,
+                        orderId,
+                        _ui.value.draftCart.sumOf { it.total },
+                        method
+                    )
+                } catch (e: Throwable) {
+                    throw IllegalStateException("Encaissement — ${readableError(e)}", e)
+                }
 
                 val fresh = api.orders(currentToken)
                 knownOrderIds.addAll(fresh.map { it.id })
@@ -446,6 +461,60 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val existing = cart.firstOrNull { it.product.id == product.id }
         return if (existing == null) cart + CartLine(product, 1)
         else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
+    }
+
+    fun advanceKitchenOrder(order: PosOrder) {
+        val currentToken = token ?: return
+        val nextStatus = nextKitchenStatus(order) ?: return
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    kdsBusyOrderIds = it.kdsBusyOrderIds + order.id,
+                    kdsError = null
+                )
+            }
+
+            runCatching {
+                api.updateOrderStatus(currentToken, order.id, nextStatus)
+                api.orders(currentToken)
+            }.onSuccess { fresh ->
+                knownOrderIds.addAll(fresh.map { it.id })
+                _ui.update {
+                    it.copy(
+                        orders = fresh,
+                        kdsBusyOrderIds = it.kdsBusyOrderIds - order.id,
+                        kdsError = null,
+                        online = true
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        kdsBusyOrderIds = it.kdsBusyOrderIds - order.id,
+                        kdsError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
+    private fun nextKitchenStatus(order: PosOrder): String? {
+        return when (order.remoteStatus.lowercase()) {
+            "placed", "new", "pending", "pending_verification", "pending_confirmation" -> "confirmed"
+            "confirmed" -> "preparing"
+            "preparing", "in_kitchen", "cooking" -> when (order.type) {
+                OrderType.TAKEAWAY -> "ready_for_pickup"
+                else -> "food_ready"
+            }
+            "food_ready", "ready" -> when (order.type) {
+                OrderType.DINE_IN -> "served"
+                OrderType.TAKEAWAY -> "delivered"
+                OrderType.DELIVERY -> null
+            }
+            "ready_for_pickup" -> "delivered"
+            else -> null
+        }
     }
 
     fun openCashSession(openingAmount: Double) {

@@ -46,10 +46,10 @@ object DemoRepository {
     )
 
     val orders = listOf(
-        PosOrder(101, "#1248", "QR Table", OrderType.DINE_IN, "Nouveau", 42.80, "Table 7", "T7", 1, true),
-        PosOrder(102, "#1247", "Site web", OrderType.TAKEAWAY, "Confirmé", 26.40, "Sofia M.", null, 4, true),
-        PosOrder(103, "#1246", "POS", OrderType.DINE_IN, "En cuisine", 58.20, "Table 3", "T3", 7, false),
-        PosOrder(104, "#1245", "Delivery", OrderType.DELIVERY, "Prêt", 31.90, "Karim B.", null, 12, false)
+        PosOrder(101, "#1248", "QR Table", OrderType.DINE_IN, "Nouveau", 42.80, "Table 7", "T7", 1, true, "placed"),
+        PosOrder(102, "#1247", "Site web", OrderType.TAKEAWAY, "Confirmé", 26.40, "Sofia M.", null, 4, true, "confirmed"),
+        PosOrder(103, "#1246", "POS", OrderType.DINE_IN, "En cuisine", 58.20, "Table 3", "T3", 7, false, "preparing"),
+        PosOrder(104, "#1245", "Delivery", OrderType.DELIVERY, "Prêt", 31.90, "Karim B.", null, 12, false, "food_ready")
     )
 
     val denominations = listOf(

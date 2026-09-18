@@ -63,7 +63,8 @@ data class PosOrder(
     val customer: String,
     val table: String? = null,
     val minutesAgo: Int = 0,
-    val unread: Boolean = false
+    val unread: Boolean = false,
+    val remoteStatus: String = "placed"
 )
 
 data class DiningTable(

@@ -1,0 +1,20 @@
+COOKIT ANDROID A11 — PAYMENT + KDS
+==================================
+
+Prerequisite: A10 already installed.
+Version: 0.11.0 / versionCode 4
+
+1) Apply the companion backend A11 patch to cookit.be FIRST.
+2) Overlay this ZIP on the Android repository.
+3) Commit/push; GitHub Actions builds the APK.
+
+Android repository:
+/home/u683350338/domains/allmart.be/public_html/_private_source/cookit-android
+
+Recommended validation:
+- cart survives navigation
+- Confirm payment creates one remote order only
+- retry does not duplicate the order
+- KDS shows the new order
+- KDS transitions Received -> Confirmed -> Preparing -> Ready -> Served
+- QR customer order tracking follows the same canonical order status

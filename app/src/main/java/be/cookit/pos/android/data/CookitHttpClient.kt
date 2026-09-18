@@ -144,7 +144,8 @@ class CookitHttpClient {
                 val codeRaw = obj.optText("order_number", "order_no", "code", "uuid") ?: id.toString()
                 val channel = channelLabel(obj.optText("placed_via", "channel", "source") ?: "POS")
                 val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
-                val status = humanStatus(obj.optText("order_status", "status") ?: "placed")
+                val remoteStatus = (obj.optText("order_status", "status") ?: "placed").lowercase(Locale.ROOT)
+                val status = humanStatus(remoteStatus)
                 val total = obj.doubleAny("grand_total", "total", "amount", "total_amount") ?: 0.0
                 val customerObj = obj.optJSONObject("customer")
                 val tableObj = obj.optJSONObject("table")
@@ -161,6 +162,7 @@ class CookitHttpClient {
                         channel = channel,
                         type = type,
                         status = status,
+                        remoteStatus = remoteStatus,
                         total = total,
                         customer = customer,
                         table = table,
@@ -230,22 +232,59 @@ class CookitHttpClient {
         Unit
     }
 
+    suspend fun ensureKot(token: String, orderId: Long) = withContext(Dispatchers.IO) {
+        val existing = request("pos/orders/$orderId/kots", token = token)
+        val kots = findArrayDeep(existing, setOf("kots", "data"))
+        if (kots == null || kots.length() == 0) {
+            request("pos/orders/$orderId/kot", method = "POST", token = token, body = JSONObject())
+        }
+        Unit
+    }
+
     suspend fun payOrder(
         token: String,
         orderId: Long,
         amount: Double,
         method: PosPaymentMethod
     ) = withContext(Dispatchers.IO) {
-        val payments = JSONArray().put(
-            JSONObject()
-                .put("amount", amount)
-                .put("method", method.apiValue)
-        )
+        // Deployed Cookit RestApi versions accept the legacy flat contract while
+        // newer documentation exposes a payments[] contract. Prefer the deployed
+        // flat contract and fall back only on validation errors.
+        val flatBody = JSONObject()
+            .put("amount", amount)
+            .put("method", method.apiValue)
+
+        try {
+            request(
+                "pos/orders/$orderId/pay",
+                method = "POST",
+                token = token,
+                body = flatBody
+            )
+        } catch (e: CookitApiException) {
+            if (e.statusCode !in setOf(400, 422)) throw e
+
+            val payments = JSONArray().put(
+                JSONObject()
+                    .put("amount", amount)
+                    .put("method", method.apiValue)
+            )
+            request(
+                "pos/orders/$orderId/pay",
+                method = "POST",
+                token = token,
+                body = JSONObject().put("payments", payments)
+            )
+        }
+        Unit
+    }
+
+    suspend fun updateOrderStatus(token: String, orderId: Long, status: String) = withContext(Dispatchers.IO) {
         request(
-            "pos/orders/$orderId/pay",
+            "pos/orders/$orderId/status",
             method = "POST",
             token = token,
-            body = JSONObject().put("payments", payments)
+            body = JSONObject().put("status", status)
         )
         Unit
     }
@@ -356,10 +395,7 @@ class CookitHttpClient {
             }.orEmpty()
 
             if (code !in 200..299) {
-                val message = runCatching {
-                    val errorJson = JSONObject(text)
-                    errorJson.optText("message", "error") ?: "Erreur HTTP $code"
-                }.getOrDefault("Erreur HTTP $code")
+                val message = extractApiErrorMessage(text, code)
                 throw CookitApiException(code, message, text)
             }
 
@@ -369,6 +405,37 @@ class CookitHttpClient {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun extractApiErrorMessage(text: String, code: Int): String {
+        if (text.isBlank()) return "Erreur HTTP $code"
+
+        return runCatching {
+            val errorJson = JSONObject(text)
+            val validation = errorJson.optJSONObject("errors")
+            if (validation != null) {
+                val messages = mutableListOf<String>()
+                val keys = validation.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val raw = validation.opt(key)
+                    when (raw) {
+                        is JSONArray -> if (raw.length() > 0) messages += raw.optString(0)
+                        is String -> messages += raw
+                    }
+                }
+                messages.firstOrNull { it.isNotBlank() }?.let { return@runCatching it }
+            }
+
+            val rawMessage = errorJson.optText("message", "error")
+            if (rawMessage.isNullOrBlank()) {
+                "Erreur HTTP $code"
+            } else if (rawMessage.startsWith("messages.") || rawMessage.contains("::")) {
+                "La commande n'a pas pu être enregistrée (HTTP $code)."
+            } else {
+                rawMessage
+            }
+        }.getOrDefault("Erreur HTTP $code")
     }
 
     private fun mapRole(raw: String): PosRole {
@@ -408,13 +475,15 @@ class CookitHttpClient {
     }
 
     private fun humanStatus(raw: String): String = when (raw.lowercase(Locale.ROOT)) {
-        "placed", "new", "pending" -> "Nouveau"
-        "confirmed" -> "Confirmé"
-        "preparing" -> "En cuisine"
+        "placed", "new", "pending", "pending_verification" -> "Nouveau"
+        "confirmed", "pending_confirmation" -> "Confirmé"
+        "preparing", "in_kitchen", "cooking" -> "En cuisine"
         "food_ready", "ready", "ready_for_pickup" -> "Prêt"
+        "picked_up" -> "Pris en charge"
         "served" -> "Servi"
         "out_for_delivery" -> "En livraison"
-        "delivered" -> "Livré"
+        "reached_destination" -> "Arrivé"
+        "delivered", "completed" -> "Livré"
         "cancelled", "canceled" -> "Annulé"
         else -> raw.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }

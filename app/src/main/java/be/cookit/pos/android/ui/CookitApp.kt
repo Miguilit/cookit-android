@@ -444,7 +444,7 @@ private fun ScreenContent(screen: Screen, state: PosUiState, vm: CookitPosViewMo
         Screen.ORDERS -> OrdersScreen(state.orders)
         Screen.CASH -> CashScreen(state, vm, t)
         Screen.DASHBOARD -> DashboardScreen(state)
-        Screen.KDS -> KdsScreen(state.orders, t)
+        Screen.KDS -> KdsScreen(state, t, vm::advanceKitchenOrder)
         Screen.DELIVERY -> DeliveryScreen(state.orders, t)
         Screen.SETTINGS -> SettingsScreen(state, vm, t, onRefresh = vm::refresh, onLogout = vm::logout)
     }
@@ -1042,26 +1042,156 @@ private fun OrdersScreen(orders: List<PosOrder>) {
 
 
 @Composable
-private fun KdsScreen(orders: List<PosOrder>, t: UiStrings) {
-    val kitchenOrders = orders.filter {
-        it.status in setOf("Nouveau", "Confirmé", "En cuisine", "Prêt")
+private fun KdsScreen(
+    state: PosUiState,
+    t: UiStrings,
+    onAdvance: (PosOrder) -> Unit
+) {
+    val kitchenOrders = state.orders.filter {
+        it.remoteStatus.lowercase(Locale.ROOT) in setOf(
+            "placed", "new", "pending", "pending_verification", "pending_confirmation",
+            "confirmed", "preparing", "in_kitchen", "cooking",
+            "food_ready", "ready", "ready_for_pickup"
+        )
     }
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text(t.kitchen, fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text("Flux cuisine synchronisé avec les commandes Cookit.", color = CookitMuted)
+        Text(t.kitchenFlowHelp, color = CookitMuted)
+        state.kdsError?.let { error ->
+            Spacer(Modifier.height(8.dp))
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                Text(
+                    error,
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontSize = 12.sp
+                )
+            }
+        }
         Spacer(Modifier.height(16.dp))
 
         if (kitchenOrders.isEmpty()) {
-            EmptyOperationalState(Icons.Default.SoupKitchen, "Aucun ticket cuisine actif")
+            EmptyOperationalState(Icons.Default.SoupKitchen, t.noKitchenTickets)
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(260.dp),
+                columns = GridCells.Adaptive(280.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(kitchenOrders, key = { it.id }) { order ->
-                    OperationalOrderCard(order = order, accent = CookitOrange)
+                    KitchenOrderCard(
+                        order = order,
+                        t = t,
+                        busy = order.id in state.kdsBusyOrderIds,
+                        onAdvance = { onAdvance(order) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KitchenOrderCard(
+    order: PosOrder,
+    t: UiStrings,
+    busy: Boolean,
+    onAdvance: () -> Unit
+) {
+    val raw = order.remoteStatus.lowercase(Locale.ROOT)
+    val step = when (raw) {
+        "placed", "new", "pending", "pending_verification", "pending_confirmation" -> 0
+        "confirmed" -> 1
+        "preparing", "in_kitchen", "cooking" -> 2
+        "food_ready", "ready", "ready_for_pickup" -> 3
+        "served", "delivered", "completed" -> 4
+        else -> 0
+    }
+    val steps = listOf(t.kitchenReceived, t.kitchenConfirmed, t.kitchenPreparing, t.kitchenReady, t.kitchenServed)
+    val nextLabel = when (step) {
+        0 -> t.kitchenConfirmed
+        1 -> t.kitchenPreparing
+        2 -> t.kitchenReady
+        3 -> when (order.type) {
+            OrderType.DELIVERY -> null
+            else -> t.kitchenServed
+        }
+        else -> null
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, CookitLine)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(order.code, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Spacer(Modifier.weight(1f))
+                Surface(shape = RoundedCornerShape(12.dp), color = CookitOrange.copy(alpha = 0.10f)) {
+                    Text(
+                        order.status,
+                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        color = CookitOrange,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Text(order.channel, color = CookitOrange, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text(
+                buildString {
+                    append(order.customer)
+                    order.table?.let { append(" • "); append(it) }
+                },
+                color = CookitMuted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                steps.forEachIndexed { index, label ->
+                    val active = index <= step
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(9.dp),
+                        color = if (active) CookitSoftGreen else CookitSurface
+                    ) {
+                        Text(
+                            label,
+                            Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                            color = if (active) CookitGreen else CookitMuted,
+                            fontSize = 9.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = CookitLine)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    String.format(Locale.FRANCE, "%.2f €", order.total),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 18.sp
+                )
+                Spacer(Modifier.weight(1f))
+                if (nextLabel != null) {
+                    Button(onClick = onAdvance, enabled = !busy) {
+                        if (busy) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                        } else {
+                            Text("${t.nextStatus} $nextLabel", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else if (order.type == OrderType.DELIVERY && step >= 3) {
+                    Text(t.delivery, color = CookitGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
         }

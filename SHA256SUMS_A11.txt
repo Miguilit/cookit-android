@@ -1,0 +1,10 @@
+cbfac6c06ef4ae187941ed205d2dbbdd0823d1be9e0907d25d392bc76b4c33d4  DEPLOY_A11.txt
+101a48570380089f7a1e721dcc6de3de022e4346a6b7a05b5657f35a015bcf12  README.md
+a6be99f6db63dffe011e93d60ff5a714f112601e800fbd486f71c62092e52430  app/build.gradle.kts
+47e100127ead8c95017be6a6262a4a3d2dbb4ce210661c8a59263fca9b8b9fe1  app/src/main/java/be/cookit/pos/android/data/CookitHttpClient.kt
+9ab2b039e4e48dc315a47dc7bdc28f4d3ff41de353e240742a88b2b1d7c223f7  app/src/main/java/be/cookit/pos/android/data/DemoRepository.kt
+492976221dcc2d44769be8863aeeba92b7da0e86346df437756558e711d60b79  app/src/main/java/be/cookit/pos/android/domain/Models.kt
+42e58a602006437613207f5e070797612c59daf289dc4aa6857affecb6cf020c  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+f25b34b603666f0f0db5fdfb2d3db9c612ddfb316614b0381f0927cceb2d63e1  app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+f0876138081a4f0986d7b4e8c1e6a1f8427cee99a0e95961e8dcd0d50cb88bd0  app/src/main/java/be/cookit/pos/android/ui/Localization.kt
+d837a9e9c0af456be67ddd2dbd3275cff59e309a1989701ae6bbbe911fda24de  docs/A11_PAYMENT_KDS.md

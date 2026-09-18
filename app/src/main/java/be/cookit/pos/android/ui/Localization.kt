@@ -54,7 +54,15 @@ data class UiStrings(
     val retryPayment: String,
     val cancel: String,
     val pendingOrder: String,
-    val selectionRequired: String
+    val selectionRequired: String,
+    val kitchenFlowHelp: String,
+    val noKitchenTickets: String,
+    val nextStatus: String,
+    val kitchenReceived: String,
+    val kitchenConfirmed: String,
+    val kitchenPreparing: String,
+    val kitchenReady: String,
+    val kitchenServed: String
 )
 
 fun strings(language: AppLanguage): UiStrings = when (language) {
@@ -75,7 +83,10 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         cardTerminalPayment="Carte / terminal", terminalHelp="Terminal bancaire externe",
         terminalConfirmHelp="Effectuez d’abord le paiement sur le terminal, puis confirmez ici uniquement après autorisation.",
         confirmPayment="Confirmer le paiement",
-        retryPayment="Réessayer le paiement", cancel="Annuler", pendingOrder="Commande en attente", selectionRequired="sélection requise"
+        retryPayment="Réessayer le paiement", cancel="Annuler", pendingOrder="Commande en attente", selectionRequired="sélection requise",
+        kitchenFlowHelp="Mettez à jour l’état ici : le client QR suit la même commande en temps réel.",
+        noKitchenTickets="Aucun ticket cuisine actif", nextStatus="Passer à", kitchenReceived="Reçue",
+        kitchenConfirmed="Confirmée", kitchenPreparing="En préparation", kitchenReady="Prête", kitchenServed="Servie"
     )
     AppLanguage.NL -> UiStrings(
         home="Start", pos="Kassa", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
@@ -94,7 +105,10 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         cardTerminalPayment="Kaart / terminal", terminalHelp="Externe betaalterminal",
         terminalConfirmHelp="Voer eerst de betaling uit op de terminal en bevestig hier pas na goedkeuring.",
         confirmPayment="Betaling bevestigen",
-        retryPayment="Betaling opnieuw proberen", cancel="Annuleren", pendingOrder="Wachtende bestelling", selectionRequired="selectie vereist"
+        retryPayment="Betaling opnieuw proberen", cancel="Annuleren", pendingOrder="Wachtende bestelling", selectionRequired="selectie vereist",
+        kitchenFlowHelp="Werk de status hier bij: de QR-klant volgt dezelfde bestelling in realtime.",
+        noKitchenTickets="Geen actieve keukentickets", nextStatus="Naar", kitchenReceived="Ontvangen",
+        kitchenConfirmed="Bevestigd", kitchenPreparing="In bereiding", kitchenReady="Klaar", kitchenServed="Geserveerd"
     )
     AppLanguage.EN -> UiStrings(
         home="Home", pos="POS", orders="Orders", kitchen="Kitchen", delivery="Delivery",
@@ -113,7 +127,10 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         cardTerminalPayment="Card / terminal", terminalHelp="External payment terminal",
         terminalConfirmHelp="Complete the payment on the terminal first, then confirm here only after approval.",
         confirmPayment="Confirm payment",
-        retryPayment="Retry payment", cancel="Cancel", pendingOrder="Pending order", selectionRequired="selection required"
+        retryPayment="Retry payment", cancel="Cancel", pendingOrder="Pending order", selectionRequired="selection required",
+        kitchenFlowHelp="Update the status here: QR customers follow the same order in real time.",
+        noKitchenTickets="No active kitchen tickets", nextStatus="Move to", kitchenReceived="Received",
+        kitchenConfirmed="Confirmed", kitchenPreparing="Preparing", kitchenReady="Ready", kitchenServed="Served"
     )
     AppLanguage.DE -> UiStrings(
         home="Start", pos="Kasse", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
@@ -132,6 +149,9 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         cardTerminalPayment="Karte / Terminal", terminalHelp="Externes Zahlungsterminal",
         terminalConfirmHelp="Führen Sie zuerst die Zahlung am Terminal durch und bestätigen Sie hier erst nach Freigabe.",
         confirmPayment="Zahlung bestätigen",
-        retryPayment="Zahlung wiederholen", cancel="Abbrechen", pendingOrder="Offene Bestellung", selectionRequired="Auswahl erforderlich"
+        retryPayment="Zahlung wiederholen", cancel="Abbrechen", pendingOrder="Offene Bestellung", selectionRequired="Auswahl erforderlich",
+        kitchenFlowHelp="Status hier aktualisieren: QR-Kunden verfolgen dieselbe Bestellung in Echtzeit.",
+        noKitchenTickets="Keine aktiven Küchentickets", nextStatus="Weiter zu", kitchenReceived="Eingegangen",
+        kitchenConfirmed="Bestätigt", kitchenPreparing="In Zubereitung", kitchenReady="Bereit", kitchenServed="Serviert"
     )
 }
