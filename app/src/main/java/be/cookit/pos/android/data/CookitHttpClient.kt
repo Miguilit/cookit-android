@@ -230,8 +230,17 @@ class CookitHttpClient {
         Unit
     }
 
-    suspend fun payOrderCash(token: String, orderId: Long, amount: Double) = withContext(Dispatchers.IO) {
-        val payments = JSONArray().put(JSONObject().put("amount", amount).put("method", "cash"))
+    suspend fun payOrder(
+        token: String,
+        orderId: Long,
+        amount: Double,
+        method: PosPaymentMethod
+    ) = withContext(Dispatchers.IO) {
+        val payments = JSONArray().put(
+            JSONObject()
+                .put("amount", amount)
+                .put("method", method.apiValue)
+        )
         request(
             "pos/orders/$orderId/pay",
             method = "POST",

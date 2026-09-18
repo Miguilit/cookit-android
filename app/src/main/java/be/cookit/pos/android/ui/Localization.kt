@@ -43,7 +43,18 @@ data class UiStrings(
     val printerFailed: String,
     val orderPaid: String,
     val openCashFirst: String,
-    val settingsHelp: String
+    val settingsHelp: String,
+    val paymentTitle: String,
+    val cashPayment: String,
+    val cashPaymentHelp: String,
+    val cardTerminalPayment: String,
+    val terminalHelp: String,
+    val terminalConfirmHelp: String,
+    val confirmPayment: String,
+    val retryPayment: String,
+    val cancel: String,
+    val pendingOrder: String,
+    val selectionRequired: String
 )
 
 fun strings(language: AppLanguage): UiStrings = when (language) {
@@ -59,7 +70,12 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         account="Compte", permissions="Permissions", language="Langue", printerHost="IP imprimante",
         printerPort="Port", testPrinter="Tester ESC/POS", printerReady="Imprimante joignable",
         printerFailed="Imprimante non joignable", orderPaid="Commande créée et encaissée",
-        openCashFirst="Ouvrez d’abord une session de caisse.", settingsHelp="Session Cookit connectée • synchro toutes les 2 s"
+        openCashFirst="Ouvrez d’abord une session de caisse.", settingsHelp="Session Cookit connectée • synchro toutes les 2 s",
+        paymentTitle="Encaissement", cashPayment="Espèces", cashPaymentHelp="Paiement comptant et tiroir-caisse",
+        cardTerminalPayment="Carte / terminal", terminalHelp="Terminal bancaire externe",
+        terminalConfirmHelp="Effectuez d’abord le paiement sur le terminal, puis confirmez ici uniquement après autorisation.",
+        confirmPayment="Confirmer le paiement",
+        retryPayment="Réessayer le paiement", cancel="Annuler", pendingOrder="Commande en attente", selectionRequired="sélection requise"
     )
     AppLanguage.NL -> UiStrings(
         home="Start", pos="Kassa", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
@@ -73,7 +89,12 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         account="Account", permissions="Rechten", language="Taal", printerHost="Printer-IP",
         printerPort="Poort", testPrinter="ESC/POS testen", printerReady="Printer bereikbaar",
         printerFailed="Printer niet bereikbaar", orderPaid="Bestelling aangemaakt en betaald",
-        openCashFirst="Open eerst een kassasessie.", settingsHelp="Cookit-sessie verbonden • sync elke 2 s"
+        openCashFirst="Open eerst een kassasessie.", settingsHelp="Cookit-sessie verbonden • sync elke 2 s",
+        paymentTitle="Betaling", cashPayment="Contant", cashPaymentHelp="Contante betaling en kassalade",
+        cardTerminalPayment="Kaart / terminal", terminalHelp="Externe betaalterminal",
+        terminalConfirmHelp="Voer eerst de betaling uit op de terminal en bevestig hier pas na goedkeuring.",
+        confirmPayment="Betaling bevestigen",
+        retryPayment="Betaling opnieuw proberen", cancel="Annuleren", pendingOrder="Wachtende bestelling", selectionRequired="selectie vereist"
     )
     AppLanguage.EN -> UiStrings(
         home="Home", pos="POS", orders="Orders", kitchen="Kitchen", delivery="Delivery",
@@ -87,7 +108,12 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         account="Account", permissions="Permissions", language="Language", printerHost="Printer IP",
         printerPort="Port", testPrinter="Test ESC/POS", printerReady="Printer reachable",
         printerFailed="Printer unreachable", orderPaid="Order created and paid",
-        openCashFirst="Open a cash session first.", settingsHelp="Cookit session connected • sync every 2 s"
+        openCashFirst="Open a cash session first.", settingsHelp="Cookit session connected • sync every 2 s",
+        paymentTitle="Payment", cashPayment="Cash", cashPaymentHelp="Cash payment and drawer",
+        cardTerminalPayment="Card / terminal", terminalHelp="External payment terminal",
+        terminalConfirmHelp="Complete the payment on the terminal first, then confirm here only after approval.",
+        confirmPayment="Confirm payment",
+        retryPayment="Retry payment", cancel="Cancel", pendingOrder="Pending order", selectionRequired="selection required"
     )
     AppLanguage.DE -> UiStrings(
         home="Start", pos="Kasse", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
@@ -101,6 +127,11 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         account="Konto", permissions="Berechtigungen", language="Sprache", printerHost="Drucker-IP",
         printerPort="Port", testPrinter="ESC/POS testen", printerReady="Drucker erreichbar",
         printerFailed="Drucker nicht erreichbar", orderPaid="Bestellung erstellt und bezahlt",
-        openCashFirst="Öffnen Sie zuerst eine Kassensitzung.", settingsHelp="Cookit verbunden • Sync alle 2 s"
+        openCashFirst="Öffnen Sie zuerst eine Kassensitzung.", settingsHelp="Cookit verbunden • Sync alle 2 s",
+        paymentTitle="Zahlung", cashPayment="Bar", cashPaymentHelp="Barzahlung und Kassenschublade",
+        cardTerminalPayment="Karte / Terminal", terminalHelp="Externes Zahlungsterminal",
+        terminalConfirmHelp="Führen Sie zuerst die Zahlung am Terminal durch und bestätigen Sie hier erst nach Freigabe.",
+        confirmPayment="Zahlung bestätigen",
+        retryPayment="Zahlung wiederholen", cancel="Abbrechen", pendingOrder="Offene Bestellung", selectionRequired="Auswahl erforderlich"
     )
 }

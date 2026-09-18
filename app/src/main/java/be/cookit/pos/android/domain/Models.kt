@@ -4,6 +4,11 @@ enum class PosRole { ADMINISTRATOR, MANAGER, CASHIER, WAITER, KITCHEN, DELIVERY 
 
 enum class OrderType { DINE_IN, TAKEAWAY, DELIVERY }
 
+enum class PosPaymentMethod(val apiValue: String) {
+    CASH("cash"),
+    CARD_TERMINAL("card")
+}
+
 enum class AppLanguage(val code: String, val label: String) {
     FR("fr", "Français"),
     NL("nl", "Nederlands"),

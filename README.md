@@ -98,3 +98,7 @@ Le workflow `.github/workflows/android-build.yml` produit l'APK debug comme arte
 - RBAC-aware navigation
 
 See `docs/A8_A9_PARITY.md`.
+
+## A10 — workflow stability
+
+A10 moves the active POS draft into the ViewModel and persists it locally, introduces a two-stage create/pay checkout with duplicate protection, makes checkout errors visible, and adds a payment selector for cash and external card terminal payments. See `docs/A10_WORKFLOW_STABILITY.md`.

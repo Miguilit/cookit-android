@@ -1,0 +1,18 @@
+Cookit Android A10 — persistent cart + stable multi-payment checkout
+
+Apply at repository root:
+  unzip -o CookitAndroid_A10_WORKFLOW_STABILITY_PATCH_20260918.zip -d .
+
+Then:
+  git status --short
+  git diff --check
+  git add app docs DEPLOY_A10.txt README.md SHA256SUMS.txt
+  git commit -m "Cookit Android A10: persistent cart and stable multi-payment checkout"
+  git push origin main
+
+Expected behavior:
+- cart survives navigation and process recreation
+- Encaisser opens a payment selector
+- cash and card/external-terminal modes
+- visible API errors
+- payment retry reuses already-created remote order

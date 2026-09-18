@@ -490,19 +490,11 @@ private fun PosScreen(
 ) {
     val initialCategory = categories.firstOrNull()?.id ?: 0L
     var selectedCategory by remember(categories) { mutableLongStateOf(initialCategory) }
-    var cart by remember { mutableStateOf(emptyList<CartLine>()) }
-    var orderType by remember { mutableStateOf(OrderType.DINE_IN) }
-    var selectedTableId by remember(state.tables) {
-        mutableStateOf(state.tables.firstOrNull { it.available }?.id)
-    }
+    val cart = state.draftCart
+    val orderType = state.draftOrderType
+    val selectedTableId = state.draftTableId
     val config = LocalConfiguration.current
     val wide = config.screenWidthDp >= 900
-
-    LaunchedEffect(state.checkoutNonce) {
-        if (state.checkoutNonce > 0 && state.checkoutMessage in setOf("paid", "demo")) {
-            cart = emptyList()
-        }
-    }
 
     Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         InboundBanner(inboundCount, inboundOrders, onReadInbound)
@@ -514,17 +506,17 @@ private fun PosScreen(
         ) {
             Text(t.newOrder, fontWeight = FontWeight.Black, fontSize = 26.sp)
             Spacer(Modifier.weight(1f))
-            OrderTypeChip(t.dineIn, orderType == OrderType.DINE_IN) { orderType = OrderType.DINE_IN }
-            OrderTypeChip(t.takeaway, orderType == OrderType.TAKEAWAY) { orderType = OrderType.TAKEAWAY }
-            OrderTypeChip(t.deliveryType, orderType == OrderType.DELIVERY) { orderType = OrderType.DELIVERY }
+            OrderTypeChip(t.dineIn, orderType == OrderType.DINE_IN) { vm.setDraftOrderType(OrderType.DINE_IN) }
+            OrderTypeChip(t.takeaway, orderType == OrderType.TAKEAWAY) { vm.setDraftOrderType(OrderType.TAKEAWAY) }
+            OrderTypeChip(t.deliveryType, orderType == OrderType.DELIVERY) { vm.setDraftOrderType(OrderType.DELIVERY) }
         }
 
         if (orderType == OrderType.DINE_IN && state.tables.isNotEmpty()) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(state.tables.filter { it.available }) { table ->
+                items(state.tables.filter { it.available || it.id == selectedTableId }) { table ->
                     FilterChip(
                         selected = selectedTableId == table.id,
-                        onClick = { selectedTableId = table.id },
+                        onClick = { vm.selectDraftTable(table.id) },
                         label = { Text("${t.chooseTable} ${table.label}") }
                     )
                 }
@@ -534,9 +526,24 @@ private fun PosScreen(
         if (state.checkoutMessage == "cash_required") {
             Text(t.openCashFirst, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
         } else if (state.checkoutMessage == "table_required") {
-            Text("${t.chooseTable}: sélection requise", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+            Text("${t.chooseTable}: ${t.selectionRequired}", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
         } else if (state.checkoutMessage == "paid") {
             Text(t.orderPaid, color = CookitGreen, fontWeight = FontWeight.Bold)
+        }
+
+        if (!state.checkoutError.isNullOrBlank() && !state.paymentSheetOpen) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Text(
+                    state.checkoutError,
+                    modifier = Modifier.padding(12.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
 
         if (wide) {
@@ -547,7 +554,7 @@ private fun PosScreen(
                     products = products,
                     selectedCategory = selectedCategory,
                     onCategory = { selectedCategory = it },
-                    onAdd = { product -> cart = addToCart(cart, product) }
+                    onAdd = vm::addProduct
                 )
                 CartPane(
                     modifier = Modifier.weight(0.9f),
@@ -555,9 +562,9 @@ private fun PosScreen(
                     t = t,
                     busy = state.checkoutBusy,
                     tableLabel = state.tables.firstOrNull { it.id == selectedTableId }?.label,
-                    onPlus = { id -> cart = cart.map { if (it.product.id == id) it.copy(quantity = it.quantity + 1) else it } },
-                    onMinus = { id -> cart = decrementCart(cart, id) },
-                    onCheckout = { vm.checkout(cart, orderType, selectedTableId) }
+                    onPlus = vm::incrementProduct,
+                    onMinus = vm::decrementProduct,
+                    onCheckout = vm::requestCheckout
                 )
             }
         } else {
@@ -568,7 +575,7 @@ private fun PosScreen(
                     products = products,
                     selectedCategory = selectedCategory,
                     onCategory = { selectedCategory = it },
-                    onAdd = { product -> cart = addToCart(cart, product) }
+                    onAdd = vm::addProduct
                 )
                 if (cart.isNotEmpty()) {
                     MobileCartBar(
@@ -576,22 +583,136 @@ private fun PosScreen(
                         cart = cart,
                         t = t,
                         busy = state.checkoutBusy,
-                        onCheckout = { vm.checkout(cart, orderType, selectedTableId) }
+                        onCheckout = vm::requestCheckout
                     )
                 }
             }
         }
     }
+
+    if (state.paymentSheetOpen) {
+        PaymentMethodDialog(
+            state = state,
+            t = t,
+            onDismiss = vm::dismissPaymentSheet,
+            onConfirm = vm::confirmPayment
+        )
+    }
 }
 
-private fun addToCart(cart: List<CartLine>, product: Product): List<CartLine> {
-    val existing = cart.firstOrNull { it.product.id == product.id }
-    return if (existing == null) cart + CartLine(product, 1)
-    else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
+@Composable
+private fun PaymentMethodDialog(
+    state: PosUiState,
+    t: UiStrings,
+    onDismiss: () -> Unit,
+    onConfirm: (PosPaymentMethod) -> Unit
+) {
+    var selected by remember(state.paymentSheetOpen) { mutableStateOf(PosPaymentMethod.CASH) }
+    val total = state.draftCart.sumOf { it.total }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(t.paymentTitle, fontWeight = FontWeight.Black) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(t.total, color = CookitMuted)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        String.format(Locale.FRANCE, "%.2f €", total),
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Black,
+                        color = CookitGreen
+                    )
+                }
+
+                if (state.pendingRemoteOrderId != null) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = CookitSoftOrange) {
+                        Text(
+                            "${t.pendingOrder} #${state.pendingRemoteOrderId}",
+                            Modifier.padding(10.dp),
+                            color = CookitOrange,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                PaymentChoice(
+                    icon = Icons.Default.Payments,
+                    title = t.cashPayment,
+                    subtitle = t.cashPaymentHelp,
+                    selected = selected == PosPaymentMethod.CASH,
+                    onClick = { selected = PosPaymentMethod.CASH }
+                )
+                PaymentChoice(
+                    icon = Icons.Default.CreditCard,
+                    title = t.cardTerminalPayment,
+                    subtitle = t.terminalHelp,
+                    selected = selected == PosPaymentMethod.CARD_TERMINAL,
+                    onClick = { selected = PosPaymentMethod.CARD_TERMINAL }
+                )
+                if (selected == PosPaymentMethod.CARD_TERMINAL) {
+                    Text(t.terminalConfirmHelp, color = CookitMuted, fontSize = 12.sp)
+                }
+
+                if (!state.checkoutError.isNullOrBlank()) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                        Text(
+                            state.checkoutError,
+                            Modifier.padding(10.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(selected) },
+                enabled = !state.checkoutBusy
+            ) {
+                if (state.checkoutBusy) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    if (state.pendingRemoteOrderId != null) t.retryPayment else t.confirmPayment,
+                    fontWeight = FontWeight.Black
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !state.checkoutBusy) { Text(t.cancel) }
+        }
+    )
 }
 
-private fun decrementCart(cart: List<CartLine>, id: Long): List<CartLine> = cart.mapNotNull {
-    if (it.product.id != id) it else if (it.quantity <= 1) null else it.copy(quantity = it.quantity - 1)
+@Composable
+private fun PaymentChoice(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) CookitSoftOrange else Color.White,
+        border = BorderStroke(1.dp, if (selected) CookitOrange else CookitLine)
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = if (selected) CookitOrange else CookitMuted)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.ExtraBold)
+                Text(subtitle, color = CookitMuted, fontSize = 12.sp)
+            }
+            if (selected) Icon(Icons.Default.CheckCircle, null, tint = CookitOrange)
+        }
+    }
 }
 
 @Composable
