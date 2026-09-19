@@ -79,7 +79,8 @@ jobs:
           fi
           "$APKSIGNER" verify --verbose --print-certs "$APK"
           APK_FP=$("$APKSIGNER" verify --print-certs "$APK" \
-            | awk -F': ' '/Signer #1 certificate SHA-256 digest/{print $2; exit}' \
+            | sed -n 's/.*certificate SHA-256 digest: //p' \
+            | head -n 1 \
             | tr '[:lower:]' '[:upper:]')
           EXPECTED=$(printf '%s' "$COOKIT_EXPECTED_SIGNING_SHA256" \
             | tr '[:lower:]' '[:upper:]')
