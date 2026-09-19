@@ -1,0 +1,16 @@
+Cookit Android A14.4.3 — P5 upgrade persistence probe
+
+Purpose:
+- Force a real Android in-place APK upgrade over 0.14.4.2.
+- No functional/runtime/database change.
+- Room schema/database version is intentionally unchanged.
+- Must be installed WITHOUT uninstalling Cookit POS and WITHOUT clearing app data.
+
+Expected after upgrade:
+- versionName 0.14.4.3 / versionCode 14
+- same runtime_id
+- same terminal_id
+- existing fiscal outbox retained
+- embedded Mock idempotence registry retained
+- previously submitted Mock event still returns duplicate=true
+- offline cold-start remains functional

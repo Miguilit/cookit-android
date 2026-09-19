@@ -1,0 +1,4 @@
+Apply this overlay on top of Cookit Android 0.14.4.2.
+Build the debug APK via the existing GitHub Actions workflow.
+Install the resulting APK over the existing 0.14.4.2 installation.
+DO NOT uninstall the app. DO NOT clear storage/data.
