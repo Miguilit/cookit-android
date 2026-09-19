@@ -212,3 +212,11 @@ See `docs/A14_4_2_OFFLINE_COLD_START.md`.
 - establishes the clean baseline required for the P5 upgrade-persistence test
 
 See `docs/A14_4_4_PERSISTENT_APK_SIGNING.md`.
+
+
+## A14.4.5 — fiscal local health / signed upgrade target
+- Keeps the persistent Cookit APK signing chain introduced in A14.4.4.
+- Coroutine cancellation is never reported as a SQLite/Room failure.
+- Cloud/fiscal sync errors remain sync errors and no longer poison local DB health.
+- A successful local outbox health read clears stale SQLite error state.
+- Serves as the signed P5 upgrade target from A14.4.4.

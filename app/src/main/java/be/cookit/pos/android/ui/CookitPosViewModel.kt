@@ -9,6 +9,7 @@ import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.*
 import be.cookit.pos.android.data.fiscal.*
 import be.cookit.pos.android.domain.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Throwable) {
+    Result.failure(error)
+}
 
 data class PosUiState(
     val authenticated: Boolean = false,
@@ -1291,7 +1300,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         currentToken: String,
         orderId: Long,
         paymentMethod: String
-    ): FiscalOutboxEntity? = runCatching {
+    ): FiscalOutboxEntity? = runCatchingPreservingCancellation {
         val remote = api.orderDraft(currentToken, orderId)
         val identity = fiscalRuntimeRepository.ensureIdentity()
         fiscalOutboxRepository.prepareRemoteSale(
@@ -1311,7 +1320,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }.getOrNull()
 
     private suspend fun activateFiscalSale(orderId: Long) {
-        runCatching {
+        runCatchingPreservingCancellation {
             val identity = fiscalRuntimeRepository.ensureIdentity()
             fiscalOutboxRepository.activate(identity, orderId)
         }
@@ -1327,11 +1336,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private suspend fun refreshFiscalHealth() {
-        runCatching {
+        runCatchingPreservingCancellation {
             val identity = fiscalRuntimeRepository.ensureIdentity()
             fiscalOutboxRepository.health(identity)
         }
-            .onSuccess { health -> _ui.update { it.copy(fiscalOutboxHealth = health) } }
+            .onSuccess { health ->
+                _ui.update { it.copy(fiscalOutboxHealth = health, fiscalLocalDbError = null) }
+            }
             .onFailure { error ->
                 _ui.update {
                     it.copy(fiscalLocalDbError = error.message ?: "Lecture de la fiscal outbox impossible")
@@ -1352,7 +1363,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 val currentToken = token ?: break
                 if (_ui.value.demoMode) break
 
-                runCatching {
+                runCatchingPreservingCancellation {
                     val identity = fiscalRuntimeRepository.ensureIdentity()
                     fiscalSyncEngine.reconcilePrepared(identity) { orderId ->
                         api.orderDraft(currentToken, orderId)
@@ -1370,10 +1381,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                         state.copy(fiscalSyncMessage = message)
                     }
-                }.onFailure { error ->
-                    _ui.update {
-                        it.copy(fiscalSyncMessage = "retry", fiscalLocalDbError = it.fiscalLocalDbError ?: error.message)
-                    }
+                }.onFailure {
+                    // Cloud/network/provider failures are sync state, not SQLite failures.
+                    _ui.update { it.copy(fiscalSyncMessage = "retry") }
                 }
 
                 delay(15_000L)
@@ -1382,7 +1392,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private suspend fun initializeFiscalRuntime() {
-        runCatching { fiscalRuntimeRepository.ensureIdentity() }
+        runCatchingPreservingCancellation { fiscalRuntimeRepository.ensureIdentity() }
             .onSuccess { identity ->
                 _ui.update { it.copy(fiscalIdentity = identity, fiscalLocalDbError = null) }
                 refreshFiscalHealth()
@@ -1433,7 +1443,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     private suspend fun restoreOfflineBootstrap(cause: Throwable): Boolean {
         val cached = offlineBootstrapStore.load() ?: return false
-        val fiscalIdentityResult = runCatching {
+        val fiscalIdentityResult = runCatchingPreservingCancellation {
             fiscalRuntimeRepository.bindScope(
                 restaurantId = cached.platform.user.restaurantId,
                 branchId = cached.platform.user.branchId,
@@ -1488,7 +1498,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     private suspend fun refreshLiveData(currentToken: String, email: String, primeOrders: Boolean) {
         val platform = api.platform(currentToken, email)
-        val fiscalIdentityResult = runCatching {
+        val fiscalIdentityResult = runCatchingPreservingCancellation {
             fiscalRuntimeRepository.bindScope(
                 restaurantId = platform.user.restaurantId,
                 branchId = platform.user.branchId,

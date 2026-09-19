@@ -1,0 +1,22 @@
+P5 signed-upgrade PASS checklist
+
+Before upgrade on A14.4.4:
+- record runtime_id
+- record terminal_id
+- record latest sale event id / Mock receipt
+- ensure latest event has already been tested once so a later replay should be duplicate=true
+
+Install A14.4.5 over A14.4.4 WITHOUT uninstalling.
+
+PASS after upgrade:
+- Android accepts update (no package/signature conflict)
+- app starts normally
+- version 0.14.4.5 / versionCode 16
+- runtime_id unchanged
+- terminal_id unchanged
+- outbox counters/data still present
+- latest fiscal event still present
+- Mock GraphQL test passes
+- replay of previously seen event returns same Mock receipt and duplicate=true
+- Runtime fiscal local shows Room / SQLite durable (no StandaloneCoroutine cancellation false alarm)
+- cold-start offline still works

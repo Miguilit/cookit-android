@@ -1,0 +1,11 @@
+Cookit Android A14.4.5 — signed P5 upgrade target
+
+Prerequisite: A14.4.4 persistent-signing baseline already installed and built using the same GitHub signing secrets.
+
+DO NOT uninstall Cookit.
+DO NOT clear app data.
+Apply this overlay to the current Android repository, commit, push, build, then install app-debug.apk directly over the installed A14.4.4.
+
+Expected version:
+versionCode = 16
+versionName = 0.14.4.5

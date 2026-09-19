@@ -1,0 +1,6 @@
+10dae0316031fed408808367cff49a1d7c923197b1074d6f196ae1d4deb398bf  ./DEPLOY_A14_4_5_P5.txt
+464700bbd466caa98965f4fd8d802c5892ab7b33501344d1df1c013e90498118  ./README.md
+6676bfac862de90a0bc6acd120e979b51d1a29d8b4e12e7d0ff5973a461f386c  ./TEST_A14_4_5_P5.txt
+bd0dd5bb968dc830ef44afcd45c705dde1e0ffc0379c994aa0e63f87f63189e5  ./app/build.gradle.kts
+3542f30ec19b1df8be00e7e6b9da0510c25dee0b359a66f59e4429c9ef90b467  ./app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+85d0b96c92de3cad383883fa9ea72399d55a7a2ab0dc0220bbd33f4c34103277  ./docs/A14_4_5_LOCAL_DB_HEALTH_AND_P5.md
