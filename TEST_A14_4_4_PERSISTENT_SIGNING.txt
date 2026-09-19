@@ -1,0 +1,12 @@
+A14.4.4 signing checks
+
+1. GitHub Actions build is green.
+2. Artifact is named cookit-android-debug-signed-apk.
+3. Artifact contains app-debug.apk and COOKIT_SIGNING_INFO.txt.
+4. Save the certificate_sha256 value from COOKIT_SIGNING_INFO.txt.
+5. Uninstall the OLD ephemeral-signed Cookit test APK once.
+6. Install A14.4.4 signed baseline.
+7. Login/bootstrap online and record runtime_id + terminal_id.
+8. Create/pay one test order and test the fiscal event against embedded Mock.
+9. Keep the app data intact.
+10. Build/install A14.4.5 with the SAME secrets to perform P5 real upgrade validation.

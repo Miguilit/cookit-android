@@ -28,13 +28,75 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Build debug APK
+      - name: Restore persistent Cookit signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.COOKIT_ANDROID_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.COOKIT_ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.COOKIT_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.COOKIT_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required Cookit signing secret: $name" >&2
+              exit 1
+            fi
+          done
+
+          SIGNING_STORE_FILE="$RUNNER_TEMP/cookit-pos-signing.jks"
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$SIGNING_STORE_FILE"
+          chmod 600 "$SIGNING_STORE_FILE"
+
+          keytool -list \
+            -keystore "$SIGNING_STORE_FILE" \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$KEY_ALIAS" >/dev/null
+
+          echo "COOKIT_SIGNING_STORE_FILE=$SIGNING_STORE_FILE" >> "$GITHUB_ENV"
+          echo "COOKIT_SIGNING_STORE_PASSWORD=$STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "COOKIT_SIGNING_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "COOKIT_SIGNING_KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+
+          KEY_FP=$(keytool -list -v \
+            -keystore "$SIGNING_STORE_FILE" \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$KEY_ALIAS" \
+            | awk '/SHA256:/{print $2; exit}')
+          echo "Cookit signing certificate SHA-256: $KEY_FP"
+          echo "COOKIT_EXPECTED_SIGNING_SHA256=${KEY_FP//:/}" >> "$GITHUB_ENV"
+
+      - name: Build persistently signed debug APK
         run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK signing certificate
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "apksigner not found" >&2
+            exit 1
+          fi
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          APK_FP=$("$APKSIGNER" verify --print-certs "$APK" \
+            | awk -F': ' '/Signer #1 certificate SHA-256 digest/{print $2; exit}' \
+            | tr '[:lower:]' '[:upper:]')
+          EXPECTED=$(printf '%s' "$COOKIT_EXPECTED_SIGNING_SHA256" \
+            | tr '[:lower:]' '[:upper:]')
+          if [ "$APK_FP" != "$EXPECTED" ]; then
+            echo "APK signing certificate mismatch" >&2
+            echo "Expected: $EXPECTED" >&2
+            echo "APK:      $APK_FP" >&2
+            exit 1
+          fi
+          printf 'version=0.14.4.4\nversionCode=15\ncertificate_sha256=%s\n' "$APK_FP" > app/build/outputs/apk/debug/COOKIT_SIGNING_INFO.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: cookit-android-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: cookit-android-debug-signed-apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/COOKIT_SIGNING_INFO.txt
           if-no-files-found: error
           retention-days: 7

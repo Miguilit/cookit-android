@@ -5,16 +5,39 @@ plugins {
     id("androidx.room")
 }
 
+val cookitSigningStoreFile = System.getenv("COOKIT_SIGNING_STORE_FILE")?.takeIf { it.isNotBlank() }
+val cookitSigningStorePassword = System.getenv("COOKIT_SIGNING_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+val cookitSigningKeyAlias = System.getenv("COOKIT_SIGNING_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+val cookitSigningKeyPassword = System.getenv("COOKIT_SIGNING_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+
+val cookitPersistentSigningAvailable = listOf(
+    cookitSigningStoreFile,
+    cookitSigningStorePassword,
+    cookitSigningKeyAlias,
+    cookitSigningKeyPassword,
+).all { it != null }
+
 android {
     namespace = "be.cookit.pos.android"
     compileSdk = 37
+
+    signingConfigs {
+        create("cookitPersistent") {
+            if (cookitPersistentSigningAvailable) {
+                storeFile = file(requireNotNull(cookitSigningStoreFile))
+                storePassword = requireNotNull(cookitSigningStorePassword)
+                keyAlias = requireNotNull(cookitSigningKeyAlias)
+                keyPassword = requireNotNull(cookitSigningKeyPassword)
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "be.cookit.pos.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 14
-        versionName = "0.14.4.3"
+        versionCode = 15
+        versionName = "0.14.4.4"
 
         buildConfigField(
             "String",
@@ -27,9 +50,15 @@ android {
         getByName("debug") {
             // A14.4.1 embedded Mock FDM is a debug-only test harness. Release builds stay fail-closed.
             buildConfigField("boolean", "ENABLE_MOCK_FDM", "true")
+            if (cookitPersistentSigningAvailable) {
+                signingConfig = signingConfigs.getByName("cookitPersistent")
+            }
         }
         getByName("release") {
             buildConfigField("boolean", "ENABLE_MOCK_FDM", "false")
+            if (cookitPersistentSigningAvailable) {
+                signingConfig = signingConfigs.getByName("cookitPersistent")
+            }
         }
     }
 

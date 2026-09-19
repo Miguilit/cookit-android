@@ -201,3 +201,14 @@ See `docs/A14_4_1_EMBEDDED_MOCK_FDM.md` and `TEST_A14_4_1_EMBEDDED_MOCK.txt`.
 - resumes polling/fiscal sync with retry-safe recovery when connectivity returns.
 
 See `docs/A14_4_2_OFFLINE_COLD_START.md`.
+
+## A14.4.4 — persistent APK signing baseline
+- version `0.14.4.4`, versionCode `15`
+- GitHub Actions consumes one persistent Cookit keystore from repository secrets
+- CI fails closed when signing secrets are absent
+- debug and release use the same persistent certificate when the signing environment is supplied
+- CI verifies the certificate actually embedded in the APK and publishes its SHA-256 fingerprint
+- embedded Mock FDM remains debug-only
+- establishes the clean baseline required for the P5 upgrade-persistence test
+
+See `docs/A14_4_4_PERSISTENT_APK_SIGNING.md`.

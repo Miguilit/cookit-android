@@ -1,0 +1,12 @@
+Cookit Android A14.4.4 / versionCode 15
+Persistent APK signing baseline.
+
+BEFORE PUSHING THIS PATCH:
+1. Create one Cookit signing keystore you own.
+2. Configure the 4 GitHub repository secrets documented in docs/A14_4_4_PERSISTENT_APK_SIGNING.md.
+3. Keep an encrypted offline backup of the keystore and passwords.
+
+Then apply this overlay to A14.4.3, commit, and push.
+GitHub Actions intentionally FAILS if the signing secrets are absent.
+
+The old A14.4.3 APK cannot normally be updated in place because it was signed with an ephemeral GitHub runner debug key. Install A14.4.4 once as a clean baseline, then use A14.4.5 to validate the real upgrade persistence path.
