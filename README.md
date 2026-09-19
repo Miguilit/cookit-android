@@ -174,3 +174,18 @@ A14.4 adds a **debug-only** Cookit Mock FDM harness so the Android fiscal runtim
 - the production Checkbox/Eutronix `signSale` mapping remains fail-closed until the certified schema/dev box is validated
 
 See `docs/A14_4_MOCK_FDM_RUNTIME_PASS.md` and `TEST_A14_4_MOCK_FDM.txt`.
+
+## A14.4.1 — Embedded Mock FDM on Android debug
+
+A14.4.1 removes the PC/firewall dependency from the Runtime PASS campaign.
+
+- version: `0.14.4.1` / versionCode `12`
+- debug APK starts a Cookit-owned Mock FDM on `127.0.0.1:8787`
+- no LAN listener: the embedded server binds only Android loopback
+- existing A14.4 scenarios remain available: success, lost response, GraphQL error, HTTP 500, malformed JSON, auth required, slow response, timeout
+- the mock ledger is persisted locally so idempotency survives an app/process restart
+- reusing an idempotency key with a different snapshot hash is rejected
+- release variant contains only a no-op placeholder and never starts a Mock server
+- production Checkbox/Eutronix stays HTTPS-only and real `signSale` remains fail-closed
+
+See `docs/A14_4_1_EMBEDDED_MOCK_FDM.md` and `TEST_A14_4_1_EMBEDDED_MOCK.txt`.

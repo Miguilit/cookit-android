@@ -1,0 +1,57 @@
+Cookit Android A14.4.1 — Embedded Mock FDM Runtime PASS
+=======================================================
+
+PRECONDITION
+- Install debug APK 0.14.4.1 / versionCode 12 over the current app.
+- Log in with a branch account allowed to manage settings.
+- No PC Mock server is needed.
+
+1. EMBEDDED SERVER
+- Open Settings > FDM.
+- Enable Mock mode and press "Activer Mock embarqué".
+- Expected host: 127.0.0.1
+- Expected port: 8787
+- Expected UI: "Mock embarqué actif".
+- Press "Tester GraphQL".
+- PASS: HTTP 200 + GraphQL detected + local Mock transport OK.
+
+2. REAL LOCAL OUTBOX EVENT
+- Complete one paid test order.
+- Return to Settings > FDM.
+- PASS: "Tester le dernier événement fiscal" is able to use the latest real local outbox event.
+
+3. SUCCESS
+- Select "Succès".
+- Run test.
+- PASS: mock receipt is returned.
+- Run the same event again.
+- PASS: same receipt + duplicate=true.
+
+4. LOST RESPONSE / AMBIGUOUS OUTCOME
+- Use a fresh paid test order if a first-hit result is desired.
+- Select "Réponse perdue".
+- Run test.
+- Expected: controlled transport failure.
+- Kill/relaunch Cookit if desired.
+- Select "Succès" and retry the same latest event.
+- PASS: same persisted mock sale is recognized and duplicate=true.
+
+5. CONTROLLED FAILURES
+Run each scenario:
+- Erreur GraphQL -> controlled GraphQL error
+- HTTP 500 -> controlled HTTP error
+- JSON invalide -> malformed JSON error
+- 401 -> authentication-required error
+- Lent 3 s -> success after ~3 s
+- Timeout -> controlled timeout around the HTTP client read timeout
+
+6. FISCAL SAFETY
+- After Mock tests, verify the local outbox event was not marked fiscalized by the Mock itself.
+- Switch back to Checkbox/Eutronix.
+- PASS: HTTPS-only transport returns and real signSale mapping remains locked.
+
+7. RELEASE BOUNDARY
+- Debug build: Mock feature visible.
+- Release build when produced: Mock provider disabled and no embedded server starts.
+
+A14.4.1 Runtime PASS does not equal Belgian fiscal certification.

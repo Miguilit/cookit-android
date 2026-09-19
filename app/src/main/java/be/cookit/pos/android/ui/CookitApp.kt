@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.DemoRepository
+import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmContract
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.ui.theme.*
 import java.net.URL
@@ -2157,11 +2158,11 @@ private fun SettingsScreen(
                     Icon(Icons.Default.Security, null, tint = CookitInk)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (state.fdmSettings.isMock) "Mock FDM A14.4" else "Checkbox / Eutronix FDM", fontWeight = FontWeight.Bold)
+                        Text(if (state.fdmSettings.isMock) "Mock FDM A14.4.1" else "Checkbox / Eutronix FDM", fontWeight = FontWeight.Bold)
                         Text(
                             when {
                                 !state.fdmSettings.configured -> "Transport local non configuré"
-                                state.fdmSettings.isMock -> "Harness GraphQL debug sur réseau local"
+                                state.fdmSettings.isMock -> "Harness GraphQL embarqué sur la tablette"
                                 else -> "Transport HTTPS /graphql configuré"
                             },
                             color = if (state.fdmSettings.configured) CookitGreen else CookitMuted,
@@ -2176,10 +2177,15 @@ private fun SettingsScreen(
                         selected = mockFdmMode,
                         onClick = {
                             mockFdmMode = !mockFdmMode
-                            if (mockFdmMode && fdmPort == "443") fdmPort = "8787"
-                            if (!mockFdmMode && fdmPort == "8787") fdmPort = "443"
+                            if (mockFdmMode) {
+                                fdmHost = EmbeddedMockFdmContract.HOST
+                                fdmPort = EmbeddedMockFdmContract.PORT.toString()
+                            } else {
+                                if (fdmHost == EmbeddedMockFdmContract.HOST) fdmHost = ""
+                                if (fdmPort == EmbeddedMockFdmContract.PORT.toString()) fdmPort = "443"
+                            }
                         },
-                        label = { Text("Mode Mock A14.4 (debug uniquement)") },
+                        label = { Text("Mode Mock A14.4.1 embarqué (debug uniquement)") },
                         leadingIcon = { Icon(Icons.Default.BugReport, null, Modifier.size(16.dp)) }
                     )
                 }
@@ -2189,21 +2195,23 @@ private fun SettingsScreen(
                         OutlinedTextField(
                             value = fdmHost,
                             onValueChange = { fdmHost = it.trim() },
-                            label = { Text(if (mockFdmMode) "IP du PC Mock FDM" else "FDM host / IP") },
+                            label = { Text(if (mockFdmMode) "Loopback Android" else "FDM host / IP") },
                             modifier = Modifier.weight(1f),
-                            singleLine = true
+                            singleLine = true,
+                            enabled = !mockFdmMode
                         )
                         OutlinedTextField(
                             value = fdmPort,
                             onValueChange = { fdmPort = it.filter(Char::isDigit).take(5) },
-                            label = { Text(if (mockFdmMode) "Port Mock" else "Port TLS") },
+                            label = { Text(if (mockFdmMode) "Port local" else "Port TLS") },
                             modifier = Modifier.width(120.dp),
-                            singleLine = true
+                            singleLine = true,
+                            enabled = !mockFdmMode
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort, mockFdmMode) }) {
-                            Text(if (mockFdmMode) "Enregistrer Mock" else "Enregistrer FDM")
+                            Text(if (mockFdmMode) "Activer Mock embarqué" else "Enregistrer FDM")
                         }
                         OutlinedButton(onClick = { vm.probeFdmConnectivity() }, enabled = !state.fdmProbeBusy) {
                             if (state.fdmProbeBusy) {
@@ -2211,6 +2219,24 @@ private fun SettingsScreen(
                                 Spacer(Modifier.width(6.dp))
                             }
                             Text("Tester GraphQL")
+                        }
+                    }
+                    if (BuildConfig.ENABLE_MOCK_FDM && mockFdmMode) {
+                        val embedded = state.embeddedMockFdmStatus
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                if (embedded.running) {
+                                    "Mock embarqué actif • ${embedded.host}:${embedded.port}"
+                                } else {
+                                    "Mock embarqué arrêté${embedded.lastError?.let { " • ${it.take(100)}" } ?: ""}"
+                                },
+                                fontSize = 11.sp,
+                                color = if (embedded.running) CookitGreen else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (!embedded.running) {
+                                OutlinedButton(onClick = { vm.restartEmbeddedMockFdm() }) { Text("Redémarrer") }
+                            }
                         }
                     }
                     if (!state.fdmSettings.isMock) {
@@ -2235,7 +2261,7 @@ private fun SettingsScreen(
                         buildString {
                             when {
                                 probe.tlsConnected -> append("TLS OK")
-                                probe.mockCleartextConnected -> append("Mock LAN HTTP OK")
+                                probe.mockCleartextConnected -> append("Mock local HTTP OK")
                                 else -> append("Transport échec")
                             }
                             probe.httpStatus?.let { append(" • HTTP $it") }
@@ -2295,10 +2321,11 @@ private fun SettingsScreen(
                     val mockStatus = when {
                         state.mockFdmMessage == null -> "Effectue d’abord une commande payée de test pour alimenter l’outbox."
                         state.mockFdmMessage == "mock_no_event" -> "Aucun événement fiscal local disponible : effectue une commande payée de test."
-                        state.mockFdmMessage == "mock_not_configured" -> "Configure et enregistre l’IP/port du Mock FDM."
+                        state.mockFdmMessage == "mock_not_configured" -> "Active le Mock embarqué 127.0.0.1:8787."
                         state.mockFdmMessage == "mock_identity_missing" -> "Runtime fiscal non lié à un restaurant/une branche."
                         state.mockFdmMessage == "mock_forbidden" -> "Test Mock réservé à un compte autorisé hors mode démo."
                         state.mockFdmMessage == "mock_disabled" -> "Mock FDM désactivé dans ce build."
+                        state.mockFdmMessage.startsWith("mock_embedded_unavailable:") -> "Mock embarqué indisponible : ${state.mockFdmMessage.substringAfter(':').take(160)}"
                         state.mockFdmMessage.startsWith("mock_running:") -> "Scénario ${state.mockFdmMessage.substringAfter(':')} en cours…"
                         state.mockFdmMessage.startsWith("mock_local_hash_mismatch:") -> "STOP : SHA-256 local invalide pour ${state.mockFdmMessage.substringAfter(':')}."
                         state.mockFdmMessage.startsWith("mock_ok:") -> {
@@ -2313,7 +2340,7 @@ private fun SettingsScreen(
 
                 Text(
                     if (state.fdmSettings.isMock) {
-                        "Le Mock A14.4 est un outil de test Cookit uniquement. Les builds release refusent ce provider et le clear-text. Le vrai adapter Checkbox/Eutronix reste verrouillé."
+                        "Le Mock A14.4.1 est embarqué uniquement dans le build debug et écoute sur 127.0.0.1. Les builds release n’exécutent aucun serveur Mock. Le vrai adapter Checkbox/Eutronix reste verrouillé."
                     } else {
                         "Le test réseau est non fiscalisant : il ne lance aucune mutation signSale/signOrder. Cookit ne fiscalise rien tant que le mapping certifié n’est pas installé."
                     },

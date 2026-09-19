@@ -87,7 +87,7 @@ class FdmConnectivityProbe {
                 certificateSha256 = certFingerprint,
                 latencyMs = latency,
                 message = when {
-                    !https && settings.isMock && status in 200..299 && graphql -> "Debug Mock FDM reachable over private-LAN HTTP"
+                    !https && settings.isMock && status in 200..299 && graphql -> "Debug Mock FDM reachable over local/private HTTP"
                     status in 200..299 && graphql -> "TLS + GraphQL endpoint reachable"
                     status in 200..299 -> "Transport reachable; response is not a GraphQL envelope"
                     status == 401 || status == 403 -> "Transport reachable; FDM authentication is required"

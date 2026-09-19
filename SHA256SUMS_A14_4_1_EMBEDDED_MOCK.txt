@@ -1,0 +1,12 @@
+8cf557ab2e1653a8223db63b3916a6cee890fa8e56de34a10dfa2aba84ff7f2f  ./A14_4_1_VALIDATION.txt
+f5440afec301a10242342282873feab0d995b6c471ae6cc7f27dd721a883294e  ./DEPLOY_A14_4_1_EMBEDDED_MOCK.txt
+1199615d48ccbde94e6a402ec38e01a122f90585c131e5aad3e2706c4adfd3b0  ./README.md
+f8a2a2c6898047916ae76aac02a17e832a538ed10a4b80a10c3f91334116b243  ./TEST_A14_4_1_EMBEDDED_MOCK.txt
+5b9dc41724e194ec562a39f868cbfa64d5bdfaf3d49aae8023ea95aa8e1bc156  ./app/build.gradle.kts
+76d89a47d838a1b344e82b11a4f0bf53737bd72720bb63aa385bdeb6ad2524e7  ./app/src/debug/java/be/cookit/pos/android/data/fiscal/EmbeddedMockFdmServer.kt
+05e63867891481e37ad9f26cc5d04259cbcff694982796e2452715840761113b  ./app/src/main/java/be/cookit/pos/android/data/fiscal/EmbeddedMockFdmContract.kt
+ca27efa2de701f2ce01357855e19565a8dc0e51343066c124b3d5b0915328282  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FdmConnectivityProbe.kt
+7089e07b855a378d5e798027838d8c53047504fcf29cd593bd6c77e4df87ae01  ./app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+5feff1338468fbd689746114b04cdec9269efd0a8e1f8334fe2b03bc05ad70ec  ./app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+545a49ac1dde8b35baa87f5e6ffc7610ff566f7851fd1df8d599a1a939fa2aea  ./app/src/release/java/be/cookit/pos/android/data/fiscal/EmbeddedMockFdmServer.kt
+f67b7c3c5573bd06695ed64da12d78f6f28bbcafe67a04140e71b4557e0cc623  ./docs/A14_4_1_EMBEDDED_MOCK_FDM.md

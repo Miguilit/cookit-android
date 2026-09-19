@@ -13,8 +13,8 @@ android {
         applicationId = "be.cookit.pos.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 11
-        versionName = "0.14.4"
+        versionCode = 12
+        versionName = "0.14.4.1"
 
         buildConfigField(
             "String",
@@ -25,7 +25,7 @@ android {
 
     buildTypes {
         getByName("debug") {
-            // A14.4 Mock FDM is a debug-only test harness. Release builds stay fail-closed.
+            // A14.4.1 embedded Mock FDM is a debug-only test harness. Release builds stay fail-closed.
             buildConfigField("boolean", "ENABLE_MOCK_FDM", "true")
         }
         getByName("release") {

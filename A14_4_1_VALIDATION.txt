@@ -1,0 +1,34 @@
+Cookit Android A14.4.1 validation
+=================================
+
+Target:
+- versionName 0.14.4.1
+- versionCode 12
+- base: Cookit Android A14.4 support-only build
+
+Implemented:
+- debug-only embedded loopback Mock FDM
+- fixed 127.0.0.1:8787 endpoint for Mock mode
+- GraphQL connectivity probe support
+- A14.4 success/failure scenarios
+- snapshot SHA-256 verification
+- persistent mock idempotency ledger across process restart
+- idempotency conflict rejection for same key/different snapshot
+- release no-op implementation
+
+Static validation performed in packaging environment:
+- debug EmbeddedMockFdmServer Kotlin compilation with Android/JSON API stubs: PASS
+- release no-op EmbeddedMockFdmServer Kotlin compilation with Android API stubs: PASS
+- CookitApp/CookitPosViewModel parser check: PASS (no syntax/"expecting" errors)
+- git diff --check: PASS
+- no 0.0.0.0 listener in Android sources: PASS
+- no fiscal profile enable code introduced: PASS
+- no standalone tools/mock-fdm directory bundled: PASS
+
+Still requires GitHub/real-device validation:
+- Gradle Android debug build
+- install/upgrade on tablet
+- loopback GraphQL probe
+- full Runtime PASS scenario campaign
+
+No claim of Eutronix/Checkbox protocol certification is made.

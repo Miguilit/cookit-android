@@ -1,0 +1,28 @@
+Cookit Android A14.4.1 — apply over A14.4
+=========================================
+
+This ZIP is an overlay patch for the current Cookit Android 0.14.4 branch.
+It does not contain or modify the Laravel backend.
+It does not contain the old standalone PC Mock server.
+
+Expected Android version after override:
+  versionCode = 12
+  versionName = "0.14.4.1"
+
+Recommended flow:
+  1. verify ZIP SHA256
+  2. unzip -t
+  3. unzip -o over the Android repo root
+  4. git diff --check
+  5. git status --short
+  6. commit/push an update/** branch
+  7. let GitHub Actions build the debug APK
+
+Debug behavior:
+  - embedded Mock FDM listens only on 127.0.0.1:8787
+  - no Windows/Linux Mock process is required
+  - no LAN/firewall ingress is required
+
+Release behavior:
+  - no embedded Mock listener is started
+  - Checkbox/Eutronix stays HTTPS-only and fail-closed until certified mapping validation

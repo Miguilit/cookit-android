@@ -69,6 +69,7 @@ data class PosUiState(
     val fdmProbe: FdmConnectivityProbeResult = FdmConnectivityProbeResult(),
     val mockFdmBusy: Boolean = false,
     val mockFdmMessage: String? = null,
+    val embeddedMockFdmStatus: EmbeddedMockFdmStatus = EmbeddedMockFdmStatus(),
     val fiscalAgentConfigured: Boolean = false,
     val fiscalAgentDeviceHint: String = "",
     val fiscalAgentMessage: String? = null,
@@ -93,6 +94,16 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fiscalCloudClient = FiscalCloudClient()
     private val fiscalSyncEngine = FiscalSyncEngine(fiscalOutboxRepository, fiscalCloudClient)
     private val fdmSettingsStore = FiscalFdmSettingsStore(application)
+    private val embeddedMockFdmServer = EmbeddedMockFdmServer(application)
+    private val storedFdmSettings = fdmSettingsStore.load()
+    private val initialFdmSettings = if (BuildConfig.ENABLE_MOCK_FDM && storedFdmSettings.isMock) {
+        storedFdmSettings.copy(
+            host = EmbeddedMockFdmContract.HOST,
+            port = EmbeddedMockFdmContract.PORT,
+            path = EmbeddedMockFdmContract.PATH,
+            useTls = false
+        )
+    } else storedFdmSettings
     private val fdmGraphqlClient = FdmGraphqlClient()
     private val fdmRuntime = FiscalFdmRuntime(fdmGraphqlClient)
     private val fdmConnectivityProbe = FdmConnectivityProbe()
@@ -109,8 +120,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             draftOrderType = persistedDraft.orderType,
             draftTableId = persistedDraft.tableId,
             pendingRemoteOrderId = persistedDraft.pendingOrderId,
-            fdmSettings = fdmSettingsStore.load(),
-            fdmReadiness = fdmRuntime.readiness(fdmSettingsStore.load()),
+            fdmSettings = initialFdmSettings,
+            fdmReadiness = fdmRuntime.readiness(initialFdmSettings),
+            embeddedMockFdmStatus = embeddedMockFdmServer.status(),
             fiscalAgentConfigured = fiscalAgentCredentialStore.configured(),
             fiscalAgentDeviceHint = fiscalAgentCredentialStore.deviceHint(),
             printerProvider = printerStore.provider(),
@@ -130,6 +142,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         api.languageCode = sessionStore.language().code
+        if (BuildConfig.ENABLE_MOCK_FDM) {
+            if (initialFdmSettings != storedFdmSettings) fdmSettingsStore.save(initialFdmSettings)
+            val embeddedStatus = embeddedMockFdmServer.start()
+            _ui.update { it.copy(embeddedMockFdmStatus = embeddedStatus) }
+        }
         viewModelScope.launch { initializeFiscalRuntime() }
         val savedToken = sessionStore.token()
         val savedEmail = sessionStore.email()
@@ -178,6 +195,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fdmProbe = it.fdmProbe,
                 mockFdmBusy = it.mockFdmBusy,
                 mockFdmMessage = it.mockFdmMessage,
+                embeddedMockFdmStatus = it.embeddedMockFdmStatus,
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
@@ -211,6 +229,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fdmProbe = it.fdmProbe,
                 mockFdmBusy = it.mockFdmBusy,
                 mockFdmMessage = it.mockFdmMessage,
+                embeddedMockFdmStatus = it.embeddedMockFdmStatus,
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
@@ -232,15 +251,19 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun saveFdmSettings(host: String, portText: String, mockMode: Boolean = false) {
         val mockSelected = BuildConfig.ENABLE_MOCK_FDM && mockMode
-        val defaultPort = if (mockSelected) 8787 else 443
-        val port = portText.toIntOrNull()?.coerceIn(1, 65535) ?: defaultPort
+        val port = if (mockSelected) {
+            EmbeddedMockFdmContract.PORT
+        } else {
+            portText.toIntOrNull()?.coerceIn(1, 65535) ?: 443
+        }
         val settings = FiscalFdmSettings(
             provider = if (mockSelected) FiscalFdmSettings.PROVIDER_MOCK else FiscalFdmSettings.PROVIDER_CHECKBOX,
-            host = host.trim(),
+            host = if (mockSelected) EmbeddedMockFdmContract.HOST else host.trim(),
             port = port,
-            path = "/graphql",
+            path = EmbeddedMockFdmContract.PATH,
             useTls = !mockSelected
         )
+        val embeddedStatus = if (mockSelected) embeddedMockFdmServer.start() else embeddedMockFdmServer.status()
         fdmSettingsStore.save(settings)
         _ui.update {
             it.copy(
@@ -248,12 +271,21 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fdmReadiness = fdmRuntime.readiness(settings),
                 fdmMessage = when {
                     !settings.configured -> null
-                    settings.isMock -> "mock_transport_configured"
+                    settings.isMock && embeddedStatus.running -> "mock_embedded_ready"
+                    settings.isMock -> "mock_embedded_failed"
                     else -> "transport_configured_mapping_gated"
                 },
-                mockFdmMessage = null
+                mockFdmMessage = null,
+                embeddedMockFdmStatus = embeddedStatus
             )
         }
+    }
+
+    fun restartEmbeddedMockFdm() {
+        if (!BuildConfig.ENABLE_MOCK_FDM) return
+        embeddedMockFdmServer.stop()
+        val status = embeddedMockFdmServer.start()
+        _ui.update { it.copy(embeddedMockFdmStatus = status, mockFdmMessage = null) }
     }
 
     /**
@@ -297,6 +329,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val settings = _ui.value.fdmSettings
         if (!settings.isMock || !settings.configured) {
             _ui.update { it.copy(mockFdmMessage = "mock_not_configured") }
+            return
+        }
+        val embeddedStatus = embeddedMockFdmServer.start()
+        _ui.update { it.copy(embeddedMockFdmStatus = embeddedStatus) }
+        if (!embeddedStatus.running) {
+            _ui.update { it.copy(mockFdmMessage = "mock_embedded_unavailable:${embeddedStatus.lastError.orEmpty()}") }
             return
         }
         val identity = _ui.value.fiscalIdentity
@@ -1501,6 +1539,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     override fun onCleared() {
         pollingJob?.cancel()
         fiscalSyncJob?.cancel()
+        embeddedMockFdmServer.stop()
         tone.release()
         super.onCleared()
     }
