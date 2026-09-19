@@ -20,9 +20,9 @@ class FdmGraphqlException(message: String, val responseBody: String = "") : Exce
 /**
  * Network-only POS -> FDM GraphQL transport.
  *
- * It intentionally knows nothing about signSale/signReport payload fields. That mapping belongs to a
- * certified provider adapter. Keeping transport and fiscal semantics separate prevents guessed schema
- * fields from ever reaching a real FDM.
+ * Production providers remain HTTPS-only. A14.4 permits clear-text only for the debug Mock FDM and
+ * only when its host resolves to loopback/RFC1918/link-local space; release builds keep the exception
+ * disabled through BuildConfig.ENABLE_MOCK_FDM=false.
  */
 class FdmGraphqlClient {
     suspend fun execute(
@@ -31,9 +31,7 @@ class FdmGraphqlClient {
         extraHeaders: Map<String, String> = emptyMap()
     ): JSONObject = withContext(Dispatchers.IO) {
         require(settings.configured) { "FDM host/port not configured" }
-        require(settings.useTls) {
-            "Cookit Android blocks clear-text FDM transport. Provision HTTPS/TLS before enabling the adapter."
-        }
+        if (!settings.useTls) MockFdmDebugGuard.requireAllowed(settings)
 
         val endpoint = settings.endpoint ?: error("FDM endpoint unavailable")
         val body = JSONObject()
@@ -48,6 +46,7 @@ class FdmGraphqlClient {
             doOutput = true
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("User-Agent", "CookitPOS-Android-FDM")
             extraHeaders.forEach { (key, value) ->
                 if (key.isNotBlank() && value.isNotBlank()) setRequestProperty(key, value)
             }
@@ -67,7 +66,11 @@ class FdmGraphqlClient {
                 throw FdmGraphqlException("FDM GraphQL HTTP $code", text)
             }
 
-            val json = if (text.isBlank()) JSONObject() else JSONObject(text)
+            val json = try {
+                if (text.isBlank()) JSONObject() else JSONObject(text)
+            } catch (error: Throwable) {
+                throw FdmGraphqlException("FDM returned malformed JSON", text)
+            }
             val errors = json.optJSONArray("errors")
             if (errors != null && errors.length() > 0) {
                 val first = errors.optJSONObject(0)?.optString("message")?.takeIf { it.isNotBlank() }

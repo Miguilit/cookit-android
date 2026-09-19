@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      A14.4: debug APKs may reach the Cookit Mock FDM over clear-text HTTP on a private LAN.
+      Runtime guards in FdmGraphqlClient/FdmConnectivityProbe restrict this exception to the
+      debug-only mock provider and RFC1918/loopback hosts. The release manifest remains HTTPS-only.
+    -->
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+</manifest>

@@ -1,0 +1,43 @@
+Cookit Android A14.4 — Mock FDM Runtime PASS
+============================================
+
+PRECONDITIONS
+[ ] GitHub debug build is green
+[ ] Android and PC are on the same LAN/Wi-Fi
+[ ] Standalone Mock FDM is running on the PC (distributed separately)
+[ ] User is logged in to a real Cookit branch (not demo)
+[ ] One paid test order has populated the fiscal outbox
+
+MOCK SERVER (STANDALONE, NOT INCLUDED IN THIS ANDROID PATCH)
+[ ] START_MOCK_FDM.cmd is running on the PC
+[ ] server listens on the PC LAN IP:8787
+[ ] GET /health => HTTP 200
+[ ] Android "Tester GraphQL" => Mock LAN HTTP OK + GraphQL detected
+
+IDENTITY / OUTBOX
+[ ] runtime_id unchanged after force-stop/restart
+[ ] terminal_id unchanged after force-stop/restart
+[ ] latest event SHA-256 accepted by Mock
+[ ] Mock submission does NOT change fiscal outbox status/counters
+
+SCENARIOS
+[ ] success => PASS Mock + receipt MOCK-...
+[ ] success again => same receipt + duplicate=true
+[ ] lost_response => controlled network error
+[ ] success after lost_response => same receipt + duplicate=true
+[ ] graphql_error => controlled GraphQL error
+[ ] http_500 => controlled HTTP 500 error
+[ ] malformed => controlled malformed JSON error
+[ ] auth_required => controlled HTTP 401 error
+[ ] slow => success after ~3s
+[ ] timeout => controlled timeout after ~20s
+
+SECURITY BOUNDARY
+[ ] Mock works only in debug build
+[ ] public/non-private clear-text host is refused
+[ ] Checkbox provider still requires HTTPS
+[ ] Checkbox signSale mapping still reports locked
+[ ] profile_enabled remains unchanged/OFF
+
+PASS RESULT
+[ ] A14.4 MOCK RUNTIME PASS

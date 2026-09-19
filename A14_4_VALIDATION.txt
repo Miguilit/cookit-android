@@ -1,0 +1,27 @@
+Cookit Android A14.4 validation checkpoint
+===========================================
+
+CODE / HARNESS
+PASS - standalone Mock harness validated separately for hash/idempotency/fault scenarios
+PASS - Android support preserves the Cookit Mock GraphQL contract
+PASS - git diff --check
+NOTE - standalone Mock server files are intentionally NOT included in this Android patch
+
+ANDROID STATIC DESIGN
+PASS - Mock provider gated by BuildConfig.ENABLE_MOCK_FDM
+PASS - release BuildConfig sets ENABLE_MOCK_FDM=false
+PASS - clear-text allowed only for debug Mock provider + private/loopback literal hosts
+PASS - production Checkbox adapter remains fail-closed and HTTPS-only
+PASS - mock submission validates local snapshot hash before network request
+PASS - mock submission does not mutate local fiscal outbox status
+
+RUNTIME DEVICE PASS STILL REQUIRED
+PENDING - GitHub/AGP build of 0.14.4
+PENDING - real Android device LAN test
+PENDING - force-stop/restart persistence test
+PENDING - all A14.4 fault scenarios from Settings UI
+
+CERTIFIED HARDWARE
+NOT CLAIMED - Eutronix/Checkbox certified mapping
+NOT CLAIMED - real FDM authentication/certificates
+NOT CLAIMED - certification/legal conformance

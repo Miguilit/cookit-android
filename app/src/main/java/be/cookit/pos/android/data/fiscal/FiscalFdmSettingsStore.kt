@@ -10,6 +10,7 @@ data class FiscalFdmSettings(
     val useTls: Boolean = true
 ) {
     val configured: Boolean get() = host.isNotBlank() && port in 1..65535
+    val isMock: Boolean get() = provider == PROVIDER_MOCK
 
     val endpoint: String?
         get() = if (!configured) null else buildString {
@@ -22,6 +23,7 @@ data class FiscalFdmSettings(
 
     companion object {
         const val PROVIDER_CHECKBOX = "checkbox_eutronix"
+        const val PROVIDER_MOCK = "cookit_mock_fdm_a14_4"
     }
 }
 
@@ -31,6 +33,9 @@ data class FiscalFdmSettings(
  * Provider authentication secrets/certificates are deliberately NOT persisted here. The certified
  * installer/provider layer must provision them through a dedicated secure mechanism once the exact
  * Checkbox/Eutronix security profile is known.
+ *
+ * A14.4 adds a debug-only Mock FDM provider. Its clear-text LAN transport is never accepted by the
+ * production Checkbox adapter and is additionally gated by BuildConfig.ENABLE_MOCK_FDM at runtime.
  */
 class FiscalFdmSettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("cookit_fdm_runtime", Context.MODE_PRIVATE)

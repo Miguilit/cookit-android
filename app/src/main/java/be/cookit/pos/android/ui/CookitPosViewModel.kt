@@ -5,6 +5,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.*
 import be.cookit.pos.android.data.fiscal.*
 import be.cookit.pos.android.domain.*
@@ -66,6 +67,8 @@ data class PosUiState(
     val fdmMessage: String? = null,
     val fdmProbeBusy: Boolean = false,
     val fdmProbe: FdmConnectivityProbeResult = FdmConnectivityProbeResult(),
+    val mockFdmBusy: Boolean = false,
+    val mockFdmMessage: String? = null,
     val fiscalAgentConfigured: Boolean = false,
     val fiscalAgentDeviceHint: String = "",
     val fiscalAgentMessage: String? = null,
@@ -90,9 +93,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fiscalCloudClient = FiscalCloudClient()
     private val fiscalSyncEngine = FiscalSyncEngine(fiscalOutboxRepository, fiscalCloudClient)
     private val fdmSettingsStore = FiscalFdmSettingsStore(application)
-    private val fdmProviderAdapter = CheckboxFiscalProviderAdapter()
     private val fdmGraphqlClient = FdmGraphqlClient()
-    private val fdmRuntime = FiscalFdmRuntime(fdmProviderAdapter, fdmGraphqlClient)
+    private val fdmRuntime = FiscalFdmRuntime(fdmGraphqlClient)
     private val fdmConnectivityProbe = FdmConnectivityProbe()
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
     private val fiscalAgentClient = FiscalAgentClient()
@@ -174,6 +176,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fdmReadiness = it.fdmReadiness,
                 fdmMessage = it.fdmMessage,
                 fdmProbe = it.fdmProbe,
+                mockFdmBusy = it.mockFdmBusy,
+                mockFdmMessage = it.mockFdmMessage,
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
@@ -205,6 +209,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fdmReadiness = it.fdmReadiness,
                 fdmMessage = it.fdmMessage,
                 fdmProbe = it.fdmProbe,
+                mockFdmBusy = it.mockFdmBusy,
+                mockFdmMessage = it.mockFdmMessage,
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
@@ -224,21 +230,28 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (token != null) refresh()
     }
 
-    fun saveFdmSettings(host: String, portText: String) {
-        val port = portText.toIntOrNull()?.coerceIn(1, 65535) ?: 443
+    fun saveFdmSettings(host: String, portText: String, mockMode: Boolean = false) {
+        val mockSelected = BuildConfig.ENABLE_MOCK_FDM && mockMode
+        val defaultPort = if (mockSelected) 8787 else 443
+        val port = portText.toIntOrNull()?.coerceIn(1, 65535) ?: defaultPort
         val settings = FiscalFdmSettings(
-            provider = FiscalFdmSettings.PROVIDER_CHECKBOX,
+            provider = if (mockSelected) FiscalFdmSettings.PROVIDER_MOCK else FiscalFdmSettings.PROVIDER_CHECKBOX,
             host = host.trim(),
             port = port,
             path = "/graphql",
-            useTls = true
+            useTls = !mockSelected
         )
         fdmSettingsStore.save(settings)
         _ui.update {
             it.copy(
                 fdmSettings = settings,
                 fdmReadiness = fdmRuntime.readiness(settings),
-                fdmMessage = if (settings.configured) "transport_configured_mapping_gated" else null
+                fdmMessage = when {
+                    !settings.configured -> null
+                    settings.isMock -> "mock_transport_configured"
+                    else -> "transport_configured_mapping_gated"
+                },
+                mockFdmMessage = null
             )
         }
     }
@@ -268,6 +281,72 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     fdmProbe = result,
                     fdmMessage = if (result.transportReady) "probe_reachable" else "probe_failed"
                 )
+            }
+        }
+    }
+
+    fun runMockFdmTest(scenario: String) {
+        if (!BuildConfig.ENABLE_MOCK_FDM) {
+            _ui.update { it.copy(mockFdmMessage = "mock_disabled") }
+            return
+        }
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) {
+            _ui.update { it.copy(mockFdmMessage = "mock_forbidden") }
+            return
+        }
+        val settings = _ui.value.fdmSettings
+        if (!settings.isMock || !settings.configured) {
+            _ui.update { it.copy(mockFdmMessage = "mock_not_configured") }
+            return
+        }
+        val identity = _ui.value.fiscalIdentity
+        if (identity == null || identity.restaurantId == null || identity.branchId == null) {
+            _ui.update { it.copy(mockFdmMessage = "mock_identity_missing") }
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update { it.copy(mockFdmBusy = true, mockFdmMessage = "mock_running:$scenario") }
+            val event = runCatching { fiscalOutboxRepository.latest(identity) }.getOrNull()
+            if (event == null) {
+                _ui.update { it.copy(mockFdmBusy = false, mockFdmMessage = "mock_no_event") }
+                return@launch
+            }
+
+            val calculatedHash = FiscalCanonicalJson.sha256Hex(event.snapshotJson)
+            if (!calculatedHash.equals(event.snapshotHash, ignoreCase = true)) {
+                _ui.update {
+                    it.copy(
+                        mockFdmBusy = false,
+                        mockFdmMessage = "mock_local_hash_mismatch:${event.localEventId}"
+                    )
+                }
+                return@launch
+            }
+
+            runCatching {
+                fdmRuntime.submitSale(
+                    settings = settings,
+                    event = event,
+                    headers = mapOf("X-Cookit-Mock-Scenario" to scenario.trim().ifBlank { "success" })
+                )
+            }.onSuccess { envelope ->
+                val sale = envelope.optJSONObject("data")?.optJSONObject("signSale")
+                val receipt = sale?.optString("receiptNumber").orEmpty()
+                val duplicate = sale?.optBoolean("duplicate", false) ?: false
+                _ui.update {
+                    it.copy(
+                        mockFdmBusy = false,
+                        mockFdmMessage = "mock_ok:${event.localEventId}:${receipt.ifBlank { "n/a" }}:$duplicate"
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        mockFdmBusy = false,
+                        mockFdmMessage = "mock_failed:${scenario.trim().ifBlank { "success" }}:${error.message.orEmpty().take(180)}"
+                    )
+                }
             }
         }
     }

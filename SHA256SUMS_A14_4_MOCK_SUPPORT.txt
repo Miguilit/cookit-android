@@ -1,0 +1,17 @@
+3d72069d4ae7f1310b49139dd1c826c56f1373d558a61cf59d8aa1bfcba8cb03  ./A14_4_VALIDATION.txt
+283cfa54e6eefe805e6444754b4a5927a3cde7d5e83a7587c68befba6ade00bc  ./DEPLOY_A14_4_MOCK_FDM.txt
+c7bccb1dad2024f07f9c7f6dfc3e1fb973a90e5114eb681c2b5060f335f199c9  ./README.md
+c9a60fa38c1decb8522232d5666cf7a51ccb7a9fb2284263d736f6c7fa425c63  ./TEST_A14_4_MOCK_FDM.txt
+716e85993ac72d4b346752c53dafba23e990d2a59405cdf1e064921a1ff5f715  ./app/build.gradle.kts
+a800c668025bf961cb56d3e237fb05840890141f8b37f2a2ce8a0fc90443a417  ./app/src/debug/AndroidManifest.xml
+67e0d1d78d2512aeacfad7696dda595ab903984c2d1018c7b446730864022db1  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FdmConnectivityProbe.kt
+8c78280de926e8ccb865a77bf0dbdff4bf26198f4c47e39fd4a57b73c7eb221d  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FdmGraphqlClient.kt
+2321545d98bdeee960bb905b59f21d8c918972f95fd69499bb325db85ae4a5f0  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalFdmRuntime.kt
+beba0245872dbda9c43fbb95922adf7424db8aecbb50802c5471540a0c238927  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalFdmSettingsStore.kt
+689d612f090d9b1cb5ccf8085b264248d105b5372abc208ceeef0c37be945f5f  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalOutboxDao.kt
+e076cfa28111c9e11f0dc34c59642b58ca994daa1f66b5b30b621b2730718b99  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalOutboxRepository.kt
+472b7b14ca96a18833856b040d3ef0309d490d8e2aeec66306934f4e70ed4936  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalProviderAdapter.kt
+65689d2ce35b8a56b9aefb75f1cda272c1c4a7b855f06cba477fd5b6b85988f8  ./app/src/main/java/be/cookit/pos/android/data/fiscal/MockFdmDebugGuard.kt
+a5430cd8956e318339ac6bfde481eb9a96ee90256f1d15fdcde9c97cd777a3f8  ./app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+e3fd7544937153aa5beaa68c595a20cb2b9070e02371d64f483291b7bd8566ec  ./app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+9a6dbb1c4e2fb388bfc6a23a0dda383ff297ed99c6c272a66409707a938627ac  ./docs/A14_4_MOCK_FDM_RUNTIME_PASS.md

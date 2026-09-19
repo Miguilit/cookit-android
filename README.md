@@ -158,3 +158,19 @@ See `docs/A14_2_LOCAL_FISCAL_RUNTIME_FINAL.md`.
 - `signSale` remains fail-closed and Android never enables the fiscal profile
 
 See `docs/A14_3_FISCAL_READINESS_HARDENING.md`.
+
+## A14.4 — Mock FDM / Runtime PASS campaign
+
+A14.4 adds a **debug-only** Cookit Mock FDM harness so the Android fiscal runtime can be exercised before the Eutronix/Checkbox dev box arrives.
+
+- version: `0.14.4` / versionCode `11`
+- Android debug support for an external Cookit Mock FDM harness (standalone mock distributed separately)
+- debug provider: `cookit_mock_fdm_a14_4`
+- scenarios: success, lost response, GraphQL error, HTTP 500, malformed JSON, auth required, slow response, timeout
+- validates snapshot SHA-256 and idempotency
+- repeated identical requests return the same mock receipt with `duplicate=true`
+- mock submissions never mutate the local fiscal outbox status
+- release builds disable the mock provider and keep clear-text FDM traffic blocked
+- the production Checkbox/Eutronix `signSale` mapping remains fail-closed until the certified schema/dev box is validated
+
+See `docs/A14_4_MOCK_FDM_RUNTIME_PASS.md` and `TEST_A14_4_MOCK_FDM.txt`.

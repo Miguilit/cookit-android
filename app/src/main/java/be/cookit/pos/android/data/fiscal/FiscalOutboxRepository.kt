@@ -106,6 +106,12 @@ class FiscalOutboxRepository(
         return dao.latestForOrder(orderId, restaurantId, branchId)
     }
 
+    suspend fun latest(identity: FiscalRuntimeIdentity): FiscalOutboxEntity? {
+        val restaurantId = identity.restaurantId ?: return null
+        val branchId = identity.branchId ?: return null
+        return dao.latestForBranch(restaurantId, branchId)
+    }
+
     suspend fun prepared(identity: FiscalRuntimeIdentity, limit: Int = 20): List<FiscalOutboxEntity> {
         val restaurantId = identity.restaurantId ?: return emptyList()
         val branchId = identity.branchId ?: return emptyList()

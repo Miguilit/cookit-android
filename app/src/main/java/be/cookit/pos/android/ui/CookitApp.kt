@@ -31,6 +31,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.DemoRepository
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.ui.theme.*
@@ -2016,6 +2017,10 @@ private fun SettingsScreen(
     var starInterface by remember(state.starInterface) { mutableStateOf(state.starInterface) }
     var fdmHost by remember(state.fdmSettings.host) { mutableStateOf(state.fdmSettings.host) }
     var fdmPort by remember(state.fdmSettings.port) { mutableStateOf(state.fdmSettings.port.toString()) }
+    var mockFdmMode by remember(state.fdmSettings.provider) {
+        mutableStateOf(BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock)
+    }
+    var mockScenario by remember { mutableStateOf("success") }
     var fiscalAgentDeviceId by remember(state.fiscalAgentDeviceHint) { mutableStateOf(state.fiscalAgentDeviceHint) }
     var fiscalAgentToken by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -2152,9 +2157,13 @@ private fun SettingsScreen(
                     Icon(Icons.Default.Security, null, tint = CookitInk)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Checkbox / Eutronix FDM", fontWeight = FontWeight.Bold)
+                        Text(if (state.fdmSettings.isMock) "Mock FDM A14.4" else "Checkbox / Eutronix FDM", fontWeight = FontWeight.Bold)
                         Text(
-                            if (state.fdmSettings.configured) "Transport HTTPS /graphql configuré" else "Transport local non configuré",
+                            when {
+                                !state.fdmSettings.configured -> "Transport local non configuré"
+                                state.fdmSettings.isMock -> "Harness GraphQL debug sur réseau local"
+                                else -> "Transport HTTPS /graphql configuré"
+                            },
                             color = if (state.fdmSettings.configured) CookitGreen else CookitMuted,
                             fontSize = 12.sp
                         )
@@ -2162,42 +2171,61 @@ private fun SettingsScreen(
                     if (!state.policy.canManageSettings) Icon(Icons.Default.Lock, null, tint = CookitMuted)
                 }
 
+                if (BuildConfig.ENABLE_MOCK_FDM && (state.policy.canManageSettings || state.demoMode)) {
+                    FilterChip(
+                        selected = mockFdmMode,
+                        onClick = {
+                            mockFdmMode = !mockFdmMode
+                            if (mockFdmMode && fdmPort == "443") fdmPort = "8787"
+                            if (!mockFdmMode && fdmPort == "8787") fdmPort = "443"
+                        },
+                        label = { Text("Mode Mock A14.4 (debug uniquement)") },
+                        leadingIcon = { Icon(Icons.Default.BugReport, null, Modifier.size(16.dp)) }
+                    )
+                }
+
                 if (state.policy.canManageSettings || state.demoMode) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = fdmHost,
                             onValueChange = { fdmHost = it.trim() },
-                            label = { Text("FDM host / IP") },
+                            label = { Text(if (mockFdmMode) "IP du PC Mock FDM" else "FDM host / IP") },
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
                         OutlinedTextField(
                             value = fdmPort,
                             onValueChange = { fdmPort = it.filter(Char::isDigit).take(5) },
-                            label = { Text("Port TLS") },
+                            label = { Text(if (mockFdmMode) "Port Mock" else "Port TLS") },
                             modifier = Modifier.width(120.dp),
                             singleLine = true
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort) }) {
-                            Text("Enregistrer FDM")
+                        OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort, mockFdmMode) }) {
+                            Text(if (mockFdmMode) "Enregistrer Mock" else "Enregistrer FDM")
                         }
                         OutlinedButton(onClick = { vm.probeFdmConnectivity() }, enabled = !state.fdmProbeBusy) {
                             if (state.fdmProbeBusy) {
                                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(6.dp))
                             }
-                            Text("Tester TLS/GraphQL")
+                            Text("Tester GraphQL")
                         }
                     }
-                    OutlinedButton(onClick = { vm.verifyFdmAdapterGate() }) {
-                        Text("Vérifier le verrou signSale")
+                    if (!state.fdmSettings.isMock) {
+                        OutlinedButton(onClick = { vm.verifyFdmAdapterGate() }) {
+                            Text("Vérifier le verrou signSale")
+                        }
                     }
                 }
 
                 Text(
-                    "Mutation attendue pour une vente normale : ${state.fdmReadiness.mutationName}. Mapping certifié : ${if (state.fdmReadiness.mappingInstalled) "installé" else "verrouillé"}.",
+                    if (state.fdmSettings.isMock) {
+                        "Mutation de test : ${state.fdmReadiness.mutationName}. Mapping Mock : ${if (state.fdmReadiness.mappingInstalled) "actif" else "indisponible"}. Aucune valeur de ce harness n’est une preuve fiscale."
+                    } else {
+                        "Mutation attendue pour une vente normale : ${state.fdmReadiness.mutationName}. Mapping certifié : ${if (state.fdmReadiness.mappingInstalled) "installé" else "verrouillé"}."
+                    },
                     fontSize = 11.sp,
                     color = if (state.fdmReadiness.mappingInstalled) CookitGreen else CookitMuted
                 )
@@ -2205,7 +2233,11 @@ private fun SettingsScreen(
                     val probe = state.fdmProbe
                     Text(
                         buildString {
-                            append(if (probe.tlsConnected) "TLS OK" else "TLS échec")
+                            when {
+                                probe.tlsConnected -> append("TLS OK")
+                                probe.mockCleartextConnected -> append("Mock LAN HTTP OK")
+                                else -> append("Transport échec")
+                            }
                             probe.httpStatus?.let { append(" • HTTP $it") }
                             if (probe.graphqlResponded) append(" • GraphQL détecté")
                             probe.latencyMs?.let { append(" • ${it} ms") }
@@ -2218,8 +2250,73 @@ private fun SettingsScreen(
                     }
                     probe.message?.let { Text(it, fontSize = 10.sp, color = CookitMuted) }
                 }
+
+                if (BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock) {
+                    HorizontalDivider(color = CookitLine)
+                    Text("Campagne Runtime PASS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(
+                        "Le bouton utilise le dernier événement réel de l’outbox locale, vérifie son SHA-256 puis l’envoie au Mock sans changer son statut fiscal.",
+                        fontSize = 10.sp,
+                        color = CookitMuted
+                    )
+                    val scenarios = listOf(
+                        "success" to "Succès",
+                        "lost_response" to "Réponse perdue",
+                        "graphql_error" to "Erreur GraphQL",
+                        "http_500" to "HTTP 500",
+                        "malformed" to "JSON invalide",
+                        "auth_required" to "401",
+                        "slow" to "Lent 3 s",
+                        "timeout" to "Timeout"
+                    )
+                    scenarios.chunked(2).forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { (key, label) ->
+                                FilterChip(
+                                    selected = mockScenario == key,
+                                    onClick = { mockScenario = key },
+                                    label = { Text(label, fontSize = 10.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                    Button(
+                        onClick = { vm.runMockFdmTest(mockScenario) },
+                        enabled = !state.mockFdmBusy && state.fdmSettings.configured && !state.demoMode
+                    ) {
+                        if (state.mockFdmBusy) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text("Tester le dernier événement fiscal")
+                    }
+                    val mockStatus = when {
+                        state.mockFdmMessage == null -> "Effectue d’abord une commande payée de test pour alimenter l’outbox."
+                        state.mockFdmMessage == "mock_no_event" -> "Aucun événement fiscal local disponible : effectue une commande payée de test."
+                        state.mockFdmMessage == "mock_not_configured" -> "Configure et enregistre l’IP/port du Mock FDM."
+                        state.mockFdmMessage == "mock_identity_missing" -> "Runtime fiscal non lié à un restaurant/une branche."
+                        state.mockFdmMessage == "mock_forbidden" -> "Test Mock réservé à un compte autorisé hors mode démo."
+                        state.mockFdmMessage == "mock_disabled" -> "Mock FDM désactivé dans ce build."
+                        state.mockFdmMessage.startsWith("mock_running:") -> "Scénario ${state.mockFdmMessage.substringAfter(':')} en cours…"
+                        state.mockFdmMessage.startsWith("mock_local_hash_mismatch:") -> "STOP : SHA-256 local invalide pour ${state.mockFdmMessage.substringAfter(':')}."
+                        state.mockFdmMessage.startsWith("mock_ok:") -> {
+                            val parts = state.mockFdmMessage.split(':')
+                            "PASS Mock • event ${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()}"
+                        }
+                        state.mockFdmMessage.startsWith("mock_failed:") -> "Résultat attendu/erreur Mock : ${state.mockFdmMessage.substringAfter(':').take(220)}"
+                        else -> state.mockFdmMessage
+                    }
+                    Text(mockStatus, fontSize = 10.sp, color = if (state.mockFdmMessage?.startsWith("mock_ok:") == true) CookitGreen else CookitMuted)
+                }
+
                 Text(
-                    "Le test réseau est non fiscalisant : il ne lance aucune mutation signSale/signOrder. Cookit ne fiscalise rien tant que le mapping certifié n’est pas installé.",
+                    if (state.fdmSettings.isMock) {
+                        "Le Mock A14.4 est un outil de test Cookit uniquement. Les builds release refusent ce provider et le clear-text. Le vrai adapter Checkbox/Eutronix reste verrouillé."
+                    } else {
+                        "Le test réseau est non fiscalisant : il ne lance aucune mutation signSale/signOrder. Cookit ne fiscalise rien tant que le mapping certifié n’est pas installé."
+                    },
                     fontSize = 11.sp,
                     color = CookitMuted
                 )

@@ -27,6 +27,17 @@ interface FiscalOutboxDao {
     @Query(
         """
         SELECT * FROM fiscal_outbox
+        WHERE restaurant_id = :restaurantId
+          AND branch_id = :branchId
+        ORDER BY local_db_id DESC
+        LIMIT 1
+        """
+    )
+    suspend fun latestForBranch(restaurantId: Long, branchId: Long): FiscalOutboxEntity?
+
+    @Query(
+        """
+        SELECT * FROM fiscal_outbox
         WHERE status = 'prepared'
           AND restaurant_id = :restaurantId
           AND branch_id = :branchId

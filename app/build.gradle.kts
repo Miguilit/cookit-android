@@ -13,14 +13,24 @@ android {
         applicationId = "be.cookit.pos.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 10
-        versionName = "0.14.3"
+        versionCode = 11
+        versionName = "0.14.4"
 
         buildConfigField(
             "String",
             "COOKIT_API_BASE_URL",
             "\"https://cookit.be/api/application-integration/\""
         )
+    }
+
+    buildTypes {
+        getByName("debug") {
+            // A14.4 Mock FDM is a debug-only test harness. Release builds stay fail-closed.
+            buildConfigField("boolean", "ENABLE_MOCK_FDM", "true")
+        }
+        getByName("release") {
+            buildConfigField("boolean", "ENABLE_MOCK_FDM", "false")
+        }
     }
 
     buildFeatures {
