@@ -1,0 +1,30 @@
+Cookit Android A14.4.2 — validation report
+Date: 2026-09-19
+
+Observed device regression
+- A14.4.1: online launch PASS.
+- A14.4.1: already-running offline local Mock/outbox PASS.
+- A14.4.1: cold start after removing app from Recents while offline FAIL (Android repeated crash).
+
+Patch invariants
+- Cloud bootstrap failure is caught; no uncaught cold-start bootstrap exception.
+- Last-known-good bootstrap cache is restored only when present and schema-valid.
+- Restored state is explicitly online=false.
+- Cached data contains user/policy/catalog/orders/tables only; no Fiscal Agent credentials/FDM secrets/passwords.
+- Fiscal runtime identity is rebound to the cached restaurant/branch.
+- Runtime/outbox/Mock remain independent from cloud availability.
+- Logout clears the operational bootstrap cache.
+- No fiscal profile activation added.
+- No production Checkbox/Eutronix mapping added.
+
+Static checks
+- OfflineBootstrapStore Kotlin syntax/type check with Android/JSON stubs: PASS.
+- CookitPosViewModel Kotlin parser pass: no syntax-like errors detected (full Android type build deferred to GitHub Actions).
+- git diff --no-index --check: PASS (no whitespace errors).
+
+Runtime tests required after GitHub build
+- offline cold start on the same tablet;
+- embedded Mock + last fiscal event while offline after cold start;
+- unchanged runtime_id/terminal_id;
+- network restoration / live polling recovery;
+- APK in-place upgrade persistence (P5).

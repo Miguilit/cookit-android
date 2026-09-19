@@ -189,3 +189,15 @@ A14.4.1 removes the PC/firewall dependency from the Runtime PASS campaign.
 - production Checkbox/Eutronix stays HTTPS-only and real `signSale` remains fail-closed
 
 See `docs/A14_4_1_EMBEDDED_MOCK_FDM.md` and `TEST_A14_4_1_EMBEDDED_MOCK.txt`.
+
+## A14.4.2 — Offline cold-start recovery
+
+- fixes the confirmed Android cold-start crash when Cookit Cloud is unreachable;
+- persists a last-known-good local bootstrap snapshot after successful online refresh;
+- restores authenticated branch/user policy, menu, last orders and tables without marking the app online;
+- starts the local fiscal runtime and embedded Mock FDM independently from Cookit Cloud;
+- keeps runtime/terminal identity and fiscal Room/outbox available during offline cold starts;
+- never fabricates an offline session when no valid cached bootstrap exists;
+- resumes polling/fiscal sync with retry-safe recovery when connectivity returns.
+
+See `docs/A14_4_2_OFFLINE_COLD_START.md`.

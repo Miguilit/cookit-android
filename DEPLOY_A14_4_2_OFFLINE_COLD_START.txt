@@ -1,0 +1,12 @@
+Cookit Android A14.4.2 — Offline cold-start recovery
+
+BASE REQUIRED
+- Cookit Android 0.14.4.1 / versionCode 12
+
+TARGET
+- versionName 0.14.4.2
+- versionCode 13
+
+This ZIP is an overlay patch. Extract it over the Android repository root.
+No Laravel/server deployment is required.
+Do not clear Android app data before the runtime persistence test.

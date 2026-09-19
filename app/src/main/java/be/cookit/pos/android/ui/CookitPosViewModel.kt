@@ -86,6 +86,7 @@ data class PosUiState(
 class CookitPosViewModel(application: Application) : AndroidViewModel(application) {
     private val api = CookitHttpClient()
     private val sessionStore = SessionStore(application)
+    private val offlineBootstrapStore = OfflineBootstrapStore(application)
     private val draftStore = DraftOrderStore(application)
     private val printerStore = PrinterSettingsStore(application)
     private val localDatabase = CookitLocalDatabase.get(application)
@@ -214,6 +215,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         token = null
         knownOrderIds.clear()
         sessionStore.clearSession()
+        offlineBootstrapStore.clear()
         draftStore.clear()
         persistedDraft = PersistedDraft()
         _ui.update {
@@ -1397,11 +1399,91 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun bootstrap(email: String) {
         val currentToken = token ?: return
         _ui.update { it.copy(loading = true, error = null) }
-        refreshLiveData(currentToken, email, primeOrders = true)
-        _ui.update { it.copy(authenticated = true, demoMode = false, loading = false, online = true) }
+
+        val liveResult = runCatching { refreshLiveData(currentToken, email, primeOrders = true) }
+        if (liveResult.isSuccess) {
+            _ui.update { it.copy(authenticated = true, demoMode = false, loading = false, online = true) }
+            refreshFiscalHealth()
+            startPolling()
+            startFiscalSync()
+            return
+        }
+
+        val error = liveResult.exceptionOrNull() ?: IllegalStateException("Cookit bootstrap failed")
+        val restored = restoreOfflineBootstrap(error)
+        if (!restored) {
+            _ui.update {
+                it.copy(
+                    authenticated = false,
+                    demoMode = false,
+                    loading = false,
+                    online = false,
+                    error = readableError(error)
+                )
+            }
+            return
+        }
+
+        // Local runtime remains usable offline. Polling/sync are retry-safe and will recover
+        // automatically when Cookit Cloud becomes reachable again.
         refreshFiscalHealth()
         startPolling()
         startFiscalSync()
+    }
+
+    private suspend fun restoreOfflineBootstrap(cause: Throwable): Boolean {
+        val cached = offlineBootstrapStore.load() ?: return false
+        val fiscalIdentityResult = runCatching {
+            fiscalRuntimeRepository.bindScope(
+                restaurantId = cached.platform.user.restaurantId,
+                branchId = cached.platform.user.branchId,
+                restaurantName = cached.platform.user.restaurant,
+                branchName = cached.platform.user.branch
+            )
+        }
+
+        val liveProducts = cached.catalog.products
+        val savedEntries = if (_ui.value.draftCart.isNotEmpty()) {
+            _ui.value.draftCart.map { DraftEntry(it.product.id, it.quantity) }
+        } else {
+            persistedDraft.entries
+        }
+        val restoredCart = savedEntries.mapNotNull { entry ->
+            liveProducts.firstOrNull { it.id == entry.productId }
+                ?.let { CartLine(it, entry.quantity.coerceAtLeast(1)) }
+        }
+        val requestedTableId = _ui.value.draftTableId ?: persistedDraft.tableId
+        val restoredTableId = requestedTableId
+            ?.takeIf { id -> cached.tables.any { it.id == id } }
+            ?: cached.tables.firstOrNull { it.available }?.id
+
+        knownOrderIds.clear()
+        knownOrderIds.addAll(cached.orders.map { it.id })
+
+        _ui.update { state ->
+            state.copy(
+                authenticated = true,
+                demoMode = false,
+                loading = false,
+                online = false,
+                user = cached.platform.user,
+                policy = cached.platform.policy,
+                categories = cached.catalog.categories,
+                products = cached.catalog.products,
+                orders = cached.orders,
+                tables = cached.tables,
+                draftCart = restoredCart,
+                draftOrderType = persistedDraft.orderType,
+                draftTableId = restoredTableId,
+                pendingRemoteOrderId = persistedDraft.pendingOrderId,
+                fiscalIdentity = fiscalIdentityResult.getOrNull() ?: state.fiscalIdentity,
+                fiscalLocalDbError = fiscalIdentityResult.exceptionOrNull()?.message ?: state.fiscalLocalDbError,
+                lastSyncEpochMs = cached.savedAtEpochMs.takeIf { it > 0L },
+                error = "Mode hors ligne — dernier état local chargé. ${readableError(cause)}"
+            )
+        }
+        persistCurrentDraft()
+        return true
     }
 
     private suspend fun refreshLiveData(currentToken: String, email: String, primeOrders: Boolean) {
@@ -1448,6 +1530,15 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (clearStalePending) {
             draftStore.clear()
             persistedDraft = PersistedDraft()
+        }
+
+        runCatching {
+            offlineBootstrapStore.save(
+                platform = platform,
+                catalog = catalog.copy(products = liveProducts),
+                orders = liveOrders,
+                tables = tables
+            )
         }
 
         _ui.update {

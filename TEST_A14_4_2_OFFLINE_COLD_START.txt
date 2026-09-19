@@ -1,0 +1,29 @@
+A14.4.2 Runtime PASS
+
+C1 ONLINE PRIME
+1. Start with Internet enabled and authenticate normally.
+2. Open Settings once; verify runtime_id/terminal_id and Mock GraphQL.
+3. Create/pay a test order if needed so the fiscal outbox contains a known event.
+
+C2 OFFLINE COLD START
+1. Disable Wi-Fi and mobile data.
+2. Remove Cookit POS from Android Recents (do NOT clear app data/storage).
+3. Relaunch Cookit POS.
+PASS: app opens without crash, authenticated cached branch is shown, status is offline.
+
+C3 LOCAL FISCAL WHILE OFFLINE
+1. Open Settings.
+2. Test embedded Mock GraphQL.
+3. Test last fiscal event with Success.
+PASS: 127.0.0.1 responds and existing outbox event remains testable.
+
+C4 IDENTITY/DATA DURABILITY
+PASS: runtime_id and terminal_id are unchanged; existing fiscal event remains present.
+
+C5 RECOVERY
+1. Re-enable Internet.
+2. Wait for polling or press refresh.
+PASS: online status returns and normal live data resumes without logout/reinstall.
+
+C6 NEGATIVE FIRST-RUN CASE
+On an install with no previously successful bootstrap, network failure must show login/network error; it must not fabricate a restaurant/role and must not crash.
