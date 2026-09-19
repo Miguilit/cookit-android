@@ -1,0 +1,35 @@
+COOKIT ANDROID A14.2 FINAL — VALIDATION REPORT
+==============================================
+
+Baseline
+--------
+A13.4 commit: d65794e08e67d5fe1cfc72024c86d2e13fdaf431
+Target: 0.14.2 / versionCode 9
+
+Static/code checks performed in the build workspace
+---------------------------------------------------
+PASS - git diff --check
+PASS - fiscal Kotlin source set type/syntax check with kotlinc + local Android/Room/JSON stubs
+PASS - Room database/entity/DAO/migration source type/syntax check with local stubs
+PASS - ViewModel and CookitApp brace balance / targeted source inspection
+PASS - no Android code enables fiscal_profiles/profile_enabled
+PASS - Checkbox/Eutronix provider mapping remains fail-closed
+PASS - FDM transport requires TLS and Android manifest keeps usesCleartextTraffic=false
+PASS - Fiscal Agent credentials are caller supplied and are not persisted by FiscalAgentClient
+PASS - outbox queries/sync/health/activation are scoped to the currently bound restaurant + branch
+PASS - local PREPARED evidence is required before a live non-demo payment request
+
+Not executable in this container
+--------------------------------
+PENDING - real Android Gradle/AGP/KSP build (no Android SDK/Gradle runtime in this environment)
+PENDING - GitHub Actions :app:assembleDebug
+PENDING - target-device Room migration/install smoke test
+PENDING - CookitFiscal HTTP runtime test against production/staging
+PENDING - Checkbox/Eutronix hardware GraphQL test
+PENDING - certified signSale field mapping and Belgian certification workflow
+
+Safety gate
+-----------
+The app does not send a signSale mutation because CheckboxFiscalProviderAdapter.buildSaleOperation()
+throws FiscalProviderMappingUnavailable until the exact certified provider schema/device mapping is
+validated. profile_enabled remains a server-side deliberate action and is not changed by Android.

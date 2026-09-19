@@ -1,0 +1,50 @@
+COOKIT ANDROID A14.2 FINAL — TEST MATRIX
+========================================
+
+A. Identity / migration
+[ ] Upgrade from A13.4/A14.2A without clearing app data.
+[ ] App starts and Room migration 1 -> 2 succeeds.
+[ ] runtime_id and terminal_id stay identical after force-stop/restart.
+[ ] logout/login keeps both ids.
+[ ] restaurant/branch scope appears after login.
+
+B. Normal POS payment
+[ ] Create and pay one cash order.
+[ ] POS payment succeeds normally with fiscal profile OFF when local Room persistence is healthy.
+[ ] Force a local persistence failure in a debug test: live payment is blocked before the payment request.
+[ ] Settings outbox shows a durable pending/blocked event.
+[ ] profile_enabled remains OFF on the server.
+[ ] Restart app: outbox counters remain.
+
+C. Ambiguous response recovery
+[ ] Prepare a payment, simulate network loss around payment response.
+[ ] Local row remains PREPARED if Android cannot confirm payment.
+[ ] After reconnect, settled remote order promotes the row to syncable state.
+[ ] Unpaid remote order is never promoted.
+
+D. Split / merge
+[ ] Split one order into 2+ payments; only one order sale event exists.
+[ ] Event activates only when full order amountDue reaches zero/terminal settlement.
+[ ] Pay merged-table group; one fiscal sale intent exists per canonical order.
+
+E. Idempotence
+[ ] Repeat sync/restart several times.
+[ ] Same order/runtime produces the same idempotency key.
+[ ] No duplicate local outbox row is created.
+[ ] Backend queue replay with same Idempotency-Key does not create a duplicate fiscal transaction once test profile is enabled later.
+
+F. Tenant isolation
+[ ] Create pending event in restaurant A.
+[ ] Login to restaurant B on the same Android installation.
+[ ] B does not submit A's outbox event.
+
+G. FDM boundary
+[ ] Save Checkbox FDM HTTPS host/port in Settings.
+[ ] Adapter status remains "mapping verrouillé".
+[ ] No signSale GraphQL mutation is transmitted.
+[ ] HTTP/clear-text configuration is not used.
+
+H. Build
+[ ] git diff --check clean.
+[ ] GitHub Actions / Gradle 9.6 :app:assembleDebug green.
+[ ] APK installs on target Android POS device.

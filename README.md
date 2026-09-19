@@ -133,3 +133,28 @@ A11 stabilise le contrat de paiement RestApi (compatibilité `amount/method` et 
 - dining-session table merge/unmerge;
 - grouped payment for merged tables;
 - normal checkout is protected while split/merge billing is active.
+
+## A14.2 — Android Local Fiscal Runtime FINAL
+
+- Room / SQLite durable runtime identity (`runtime_id` + `terminal_id`)
+- Room schema v2 fiscal outbox with deterministic canonical snapshot + SHA-256
+- two-phase PREPARED/PENDING guard around live payment
+- crash/ambiguous-response reconciliation from the canonical Cookit order
+- tenant/branch-scoped background sync to CookitFiscal with `Idempotency-Key`
+- retry/backoff and explicit profile-OFF dormant state
+- Checkbox/Eutronix HTTPS `/graphql` transport seam
+- Cookit Fiscal Agent handshake/heartbeat/job transport contract
+- certified `signSale` mapping deliberately fail-closed until exact provider schema + hardware validation
+- Android never enables the server fiscal profile
+
+See `docs/A14_2_LOCAL_FISCAL_RUNTIME_FINAL.md`.
+
+## A14.3 — Fiscal readiness hardening
+
+- Fiscal Agent device credentials encrypted with Android Keystore AES/GCM
+- explicit authorized handshake / heartbeat controls
+- non-mutating TLS/GraphQL FDM connectivity probe + certificate SHA-256 diagnostic
+- canonical remote-order snapshot used before live payment to avoid partial-settlement fiscal evidence
+- `signSale` remains fail-closed and Android never enables the fiscal profile
+
+See `docs/A14_3_FISCAL_READINESS_HARDENING.md`.

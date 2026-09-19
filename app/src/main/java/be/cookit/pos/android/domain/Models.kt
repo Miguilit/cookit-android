@@ -30,7 +30,19 @@ data class UserSession(
     val role: PosRole,
     val restaurant: String,
     val branch: String,
-    val restaurantLogoUrl: String? = null
+    val restaurantLogoUrl: String? = null,
+    val restaurantId: Long? = null,
+    val branchId: Long? = null
+)
+
+data class FiscalRuntimeIdentity(
+    val runtimeId: String,
+    val terminalId: String,
+    val createdAtEpochMs: Long,
+    val restaurantId: Long? = null,
+    val branchId: Long? = null,
+    val restaurantName: String? = null,
+    val branchName: String? = null
 )
 
 data class Category(val id: Long, val name: String, val emoji: String)

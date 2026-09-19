@@ -1,6 +1,8 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.devtools.ksp")
+    id("androidx.room")
 }
 
 android {
@@ -11,8 +13,8 @@ android {
         applicationId = "be.cookit.pos.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 7
-        versionName = "0.13.4"
+        versionCode = 10
+        versionName = "0.14.3"
 
         buildConfigField(
             "String",
@@ -33,6 +35,10 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+
+    room {
+        schemaDirectory("$projectDir/schemas")
     }
 }
 
@@ -56,6 +62,12 @@ dependencies {
     // CookitPad parity: native Star Micronics provider.
     implementation("com.starmicronics:stario10:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.10.2")
+
+    // A14.2A: durable Android fiscal runtime identity on Room / SQLite.
+    val roomVersion = "2.8.5"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

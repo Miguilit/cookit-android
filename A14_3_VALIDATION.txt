@@ -1,0 +1,32 @@
+COOKIT ANDROID A14.3 — VALIDATION CHECKPOINT
+============================================
+
+Baseline
+--------
+A13.4 repository baseline + consolidated A14.2 local fiscal runtime.
+Target: 0.14.3 / versionCode 10
+
+Code/static checks
+------------------
+PASS - git diff --check
+PASS - kotlinc syntax/type pass for new A14.3 credential/probe files using local Android/JSON/coroutine stubs
+PASS - Kotlin parser token pass on modified ViewModel/Compose sources (Android/Compose references unresolved outside SDK as expected)
+PASS - Fiscal Agent token is not persisted in plain SharedPreferences
+PASS - credential encryption uses Android Keystore AES/GCM
+PASS - restored/unreadable encrypted credentials fail closed
+PASS - FDM connectivity probe is TLS-only and non-mutating (`__typename` query only)
+PASS - no trust-all TLS manager / hostname verifier introduced
+PASS - Checkbox signSale provider mapping remains fail-closed
+PASS - no Android code writes profile_enabled / fiscal_profiles.enabled
+PASS - normal checkout persists fiscal evidence from canonical remote order before payment
+PASS - split and merged-table paths keep one order-level fiscal idempotency key
+
+Runtime checks pending target environment
+-----------------------------------------
+PENDING - GitHub Actions Android Gradle/AGP/KSP build
+PENDING - Android Keystore round-trip on target device
+PENDING - Room install/migration smoke test on target device
+PENDING - Fiscal Agent handshake/heartbeat using provisioned device credentials
+PENDING - TLS probe against the real Checkbox/Eutronix endpoint and certificate profile
+PENDING - certified signSale mapping and hardware test
+PENDING - formal Belgian certification workflow

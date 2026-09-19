@@ -1,0 +1,23 @@
+COOKIT ANDROID A14.2 FINAL — DEPLOY
+===================================
+
+This package is consolidated from the A13.4 baseline. Do NOT apply the old A14.2A package first.
+
+Recommended Git workflow (from the Android repo root):
+
+1. Create a safety branch / backup.
+2. Extract CookitAndroid_A14_2_FINAL_PATCH_20260919.zip over the repo root.
+3. Run:
+
+   git diff --check
+   gradle :app:assembleDebug --stacktrace
+
+4. Inspect Settings -> Runtime fiscal local / Checkbox FDM.
+5. Keep fiscal profile OFF during this validation wave.
+6. Commit/push only after the Android build and smoke tests are green.
+
+Expected app version:
+- versionName 0.14.2
+- versionCode 9
+
+No Laravel backend file is modified by this Android package.

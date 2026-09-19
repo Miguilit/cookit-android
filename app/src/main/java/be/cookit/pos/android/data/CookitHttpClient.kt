@@ -57,6 +57,9 @@ class CookitHttpClient {
         val firstBranch = findArrayDeep(json, setOf("branches"))?.firstObject()
         val userObj = findObjectDeep(json, setOf("user"))
 
+        val restaurantId = restaurantObj?.longAny("id", "restaurant_id")
+            ?: json.longAny("restaurant_id")
+
         val restaurantName = restaurantObj?.optText("name", "restaurant_name")
             ?: json.optText("restaurant_name")
             ?: "Cookit Restaurant"
@@ -65,6 +68,10 @@ class CookitHttpClient {
             restaurantObj?.optText("logo_url", "logoUrl", "logo")
                 ?: json.optText("restaurant_logo_url")
         )
+
+        val branchId = branchObj?.longAny("id", "branch_id")
+            ?: firstBranch?.longAny("id", "branch_id")
+            ?: json.longAny("branch_id")
 
         val branchName = branchObj?.optText("name", "branch_name")
             ?: firstBranch?.optText("name", "branch_name")
@@ -88,7 +95,9 @@ class CookitHttpClient {
                 role = role,
                 restaurant = restaurantName,
                 branch = branchName,
-                restaurantLogoUrl = restaurantLogoUrl
+                restaurantLogoUrl = restaurantLogoUrl,
+                restaurantId = restaurantId,
+                branchId = branchId
             ),
             policy = defaultPolicy(role)
         )

@@ -6,6 +6,7 @@ import android.media.ToneGenerator
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import be.cookit.pos.android.data.*
+import be.cookit.pos.android.data.fiscal.*
 import be.cookit.pos.android.domain.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -56,6 +57,18 @@ data class PosUiState(
     val billingError: String? = null,
     val billingContext: BillingContext? = null,
     val lastCashChange: Double? = null,
+    val fiscalIdentity: FiscalRuntimeIdentity? = null,
+    val fiscalLocalDbError: String? = null,
+    val fiscalOutboxHealth: FiscalOutboxHealth = FiscalOutboxHealth(),
+    val fiscalSyncMessage: String? = null,
+    val fdmSettings: FiscalFdmSettings = FiscalFdmSettings(),
+    val fdmReadiness: FiscalProviderReadiness = CheckboxFiscalProviderAdapter().readiness(FiscalFdmSettings()),
+    val fdmMessage: String? = null,
+    val fdmProbeBusy: Boolean = false,
+    val fdmProbe: FdmConnectivityProbeResult = FdmConnectivityProbeResult(),
+    val fiscalAgentConfigured: Boolean = false,
+    val fiscalAgentDeviceHint: String = "",
+    val fiscalAgentMessage: String? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
     val printerPort: Int = 9100,
@@ -71,6 +84,18 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val sessionStore = SessionStore(application)
     private val draftStore = DraftOrderStore(application)
     private val printerStore = PrinterSettingsStore(application)
+    private val localDatabase = CookitLocalDatabase.get(application)
+    private val fiscalRuntimeRepository = FiscalRuntimeRepository(localDatabase.fiscalRuntimeDao())
+    private val fiscalOutboxRepository = FiscalOutboxRepository(localDatabase.fiscalOutboxDao())
+    private val fiscalCloudClient = FiscalCloudClient()
+    private val fiscalSyncEngine = FiscalSyncEngine(fiscalOutboxRepository, fiscalCloudClient)
+    private val fdmSettingsStore = FiscalFdmSettingsStore(application)
+    private val fdmProviderAdapter = CheckboxFiscalProviderAdapter()
+    private val fdmGraphqlClient = FdmGraphqlClient()
+    private val fdmRuntime = FiscalFdmRuntime(fdmProviderAdapter, fdmGraphqlClient)
+    private val fdmConnectivityProbe = FdmConnectivityProbe()
+    private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
+    private val fiscalAgentClient = FiscalAgentClient()
     private val printerService = EscPosPrinterService()
     private val starPrinterService = StarPrinterService(application)
     private val starDiscoveryService = StarDiscoveryService(application)
@@ -82,6 +107,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             draftOrderType = persistedDraft.orderType,
             draftTableId = persistedDraft.tableId,
             pendingRemoteOrderId = persistedDraft.pendingOrderId,
+            fdmSettings = fdmSettingsStore.load(),
+            fdmReadiness = fdmRuntime.readiness(fdmSettingsStore.load()),
+            fiscalAgentConfigured = fiscalAgentCredentialStore.configured(),
+            fiscalAgentDeviceHint = fiscalAgentCredentialStore.deviceHint(),
             printerProvider = printerStore.provider(),
             printerHost = printerStore.host(),
             printerPort = printerStore.port(),
@@ -93,11 +122,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var token: String? = null
     private var pollingJob: Job? = null
+    private var fiscalSyncJob: Job? = null
     private val knownOrderIds = linkedSetOf<Long>()
     private val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
 
     init {
         api.languageCode = sessionStore.language().code
+        viewModelScope.launch { initializeFiscalRuntime() }
         val savedToken = sessionStore.token()
         val savedEmail = sessionStore.email()
         if (!savedToken.isNullOrBlank() && !savedEmail.isNullOrBlank()) {
@@ -128,12 +159,24 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun enterDemo() {
         pollingJob?.cancel()
+        fiscalSyncJob?.cancel()
         _ui.update {
             PosUiState(
                 authenticated = true,
                 demoMode = true,
                 online = true,
                 language = it.language,
+                fiscalIdentity = it.fiscalIdentity,
+                fiscalLocalDbError = it.fiscalLocalDbError,
+                fiscalOutboxHealth = it.fiscalOutboxHealth,
+                fiscalSyncMessage = it.fiscalSyncMessage,
+                fdmSettings = it.fdmSettings,
+                fdmReadiness = it.fdmReadiness,
+                fdmMessage = it.fdmMessage,
+                fdmProbe = it.fdmProbe,
+                fiscalAgentConfigured = it.fiscalAgentConfigured,
+                fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
+                fiscalAgentMessage = it.fiscalAgentMessage,
                 printerProvider = it.printerProvider,
                 printerHost = it.printerHost,
                 printerPort = it.printerPort,
@@ -145,6 +188,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun logout() {
         pollingJob?.cancel()
+        fiscalSyncJob?.cancel()
         token = null
         knownOrderIds.clear()
         sessionStore.clearSession()
@@ -153,6 +197,17 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         _ui.update {
             PosUiState(
                 language = it.language,
+                fiscalIdentity = it.fiscalIdentity,
+                fiscalLocalDbError = it.fiscalLocalDbError,
+                fiscalOutboxHealth = it.fiscalOutboxHealth,
+                fiscalSyncMessage = it.fiscalSyncMessage,
+                fdmSettings = it.fdmSettings,
+                fdmReadiness = it.fdmReadiness,
+                fdmMessage = it.fdmMessage,
+                fdmProbe = it.fdmProbe,
+                fiscalAgentConfigured = it.fiscalAgentConfigured,
+                fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
+                fiscalAgentMessage = it.fiscalAgentMessage,
                 printerProvider = it.printerProvider,
                 printerHost = it.printerHost,
                 printerPort = it.printerPort,
@@ -167,6 +222,143 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         api.languageCode = language.code
         _ui.update { it.copy(language = language) }
         if (token != null) refresh()
+    }
+
+    fun saveFdmSettings(host: String, portText: String) {
+        val port = portText.toIntOrNull()?.coerceIn(1, 65535) ?: 443
+        val settings = FiscalFdmSettings(
+            provider = FiscalFdmSettings.PROVIDER_CHECKBOX,
+            host = host.trim(),
+            port = port,
+            path = "/graphql",
+            useTls = true
+        )
+        fdmSettingsStore.save(settings)
+        _ui.update {
+            it.copy(
+                fdmSettings = settings,
+                fdmReadiness = fdmRuntime.readiness(settings),
+                fdmMessage = if (settings.configured) "transport_configured_mapping_gated" else null
+            )
+        }
+    }
+
+    /**
+     * Intentionally does not send a GraphQL fiscal mutation. This exposes the permanent provider
+     * boundary to the UI while the certified Checkbox signSale input mapping remains unavailable.
+     */
+    fun verifyFdmAdapterGate() {
+        val readiness = fdmRuntime.readiness(_ui.value.fdmSettings)
+        _ui.update {
+            it.copy(
+                fdmReadiness = readiness,
+                fdmMessage = if (readiness.readyForFiscalization) "ready" else "mapping_gated"
+            )
+        }
+    }
+
+    fun probeFdmConnectivity() {
+        val settings = _ui.value.fdmSettings
+        viewModelScope.launch {
+            _ui.update { it.copy(fdmProbeBusy = true, fdmMessage = "probe_running") }
+            val result = fdmConnectivityProbe.probe(settings)
+            _ui.update {
+                it.copy(
+                    fdmProbeBusy = false,
+                    fdmProbe = result,
+                    fdmMessage = if (result.transportReady) "probe_reachable" else "probe_failed"
+                )
+            }
+        }
+    }
+
+    fun saveFiscalAgentCredentials(deviceId: String, deviceToken: String) {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) {
+            _ui.update { it.copy(fiscalAgentMessage = "forbidden") }
+            return
+        }
+        val credentials = FiscalAgentCredentials(deviceId.trim(), deviceToken)
+        if (!credentials.configured) {
+            _ui.update { it.copy(fiscalAgentMessage = "credentials_incomplete") }
+            return
+        }
+        runCatching { fiscalAgentCredentialStore.save(credentials) }
+            .onSuccess {
+                _ui.update {
+                    it.copy(
+                        fiscalAgentConfigured = true,
+                        fiscalAgentDeviceHint = credentials.deviceId,
+                        fiscalAgentMessage = "credentials_saved"
+                    )
+                }
+            }
+            .onFailure { error ->
+                _ui.update { it.copy(fiscalAgentMessage = error.message ?: "credentials_failed") }
+            }
+    }
+
+    fun clearFiscalAgentCredentials() {
+        if (!_ui.value.policy.canManageSettings) return
+        fiscalAgentCredentialStore.clear()
+        _ui.update {
+            it.copy(
+                fiscalAgentConfigured = false,
+                fiscalAgentDeviceHint = "",
+                fiscalAgentMessage = "credentials_cleared"
+            )
+        }
+    }
+
+    fun handshakeFiscalAgent() {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) {
+            _ui.update { it.copy(fiscalAgentMessage = "forbidden") }
+            return
+        }
+        val credentials = fiscalAgentCredentialStore.load()
+        val identity = _ui.value.fiscalIdentity
+        if (credentials == null || identity == null) {
+            _ui.update { it.copy(fiscalAgentMessage = "credentials_or_identity_missing") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(fiscalAgentMessage = "handshake_running") }
+            runCatching {
+                fiscalAgentClient.handshake(
+                    credentials,
+                    fiscalAgentClient.defaultHandshakePayload(identity, _ui.value.fdmSettings)
+                )
+            }.onSuccess {
+                _ui.update { it.copy(fiscalAgentMessage = "handshake_ok") }
+            }.onFailure { error ->
+                _ui.update { it.copy(fiscalAgentMessage = "handshake_failed:${error.message.orEmpty()}") }
+            }
+        }
+    }
+
+    fun heartbeatFiscalAgent() {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) {
+            _ui.update { it.copy(fiscalAgentMessage = "forbidden") }
+            return
+        }
+        val credentials = fiscalAgentCredentialStore.load()
+        val identity = _ui.value.fiscalIdentity
+        if (credentials == null || identity == null) {
+            _ui.update { it.copy(fiscalAgentMessage = "credentials_or_identity_missing") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(fiscalAgentMessage = "heartbeat_running") }
+            val payload = org.json.JSONObject()
+                .put("runtime_id", identity.runtimeId)
+                .put("source_terminal_id", identity.terminalId)
+                .put("runtime_type", "android_pos")
+                .put("provider", _ui.value.fdmSettings.provider)
+            runCatching { fiscalAgentClient.heartbeat(credentials, payload) }
+                .onSuccess { _ui.update { it.copy(fiscalAgentMessage = "heartbeat_ok") } }
+                .onFailure { error ->
+                    _ui.update { it.copy(fiscalAgentMessage = "heartbeat_failed:${error.message.orEmpty()}") }
+                }
+        }
     }
 
     fun setPrinterProvider(provider: PrinterProviderType) {
@@ -418,6 +610,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     throw IllegalStateException("Envoi en cuisine — ${readableError(e)}", e)
                 }
 
+                // Two-phase fiscal guard: durable local evidence MUST exist before the
+                // irreversible payment request. The cloud fiscal profile can remain OFF; this
+                // local invariant is independent from production FDM activation.
+                if (prepareFiscalSaleFromRemote(currentToken, orderId, method.apiValue) == null) {
+                    throw IllegalStateException("Préparation fiscale locale — écriture SQLite impossible")
+                }
+
                 try {
                     api.payOrder(
                         currentToken,
@@ -426,8 +625,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         method
                     )
                 } catch (e: Throwable) {
+                    // Keep the outbox record in PREPARED. On reconnect the reconciliation loop
+                    // checks the server settlement state before deciding whether to activate it.
                     throw IllegalStateException("Encaissement — ${readableError(e)}", e)
                 }
+
+                activateFiscalSale(orderId)
 
                 val fresh = api.orders(currentToken)
                 val freshKots = runCatching { api.kots(currentToken) }.getOrDefault(_ui.value.kots)
@@ -674,8 +877,16 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             _ui.update { it.copy(billingBusy = true, billingError = null) }
-            runCatching { api.paySplitBill(currentToken, billId, bill.amountDue, method) }
+            runCatching {
+                if (prepareFiscalSaleFromRemote(currentToken, context.orderId, "split") == null) {
+                    throw IllegalStateException("Préparation fiscale locale — écriture SQLite impossible")
+                }
+                api.paySplitBill(currentToken, billId, bill.amountDue, method)
+            }
                 .onSuccess { refreshed ->
+                    if (refreshed.amountDue <= 0.0001 || isTerminalSettlement(refreshed.settlementStatus)) {
+                        activateFiscalSale(context.orderId)
+                    }
                     val freshOrders = runCatching { api.orders(currentToken) }.getOrDefault(_ui.value.orders)
                     _ui.update {
                         it.copy(
@@ -730,7 +941,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             _ui.update { it.copy(billingBusy = true, billingError = null) }
             runCatching {
                 openOrders.forEach { row ->
+                    if (prepareFiscalSaleFromRemote(currentToken, row.orderId, method.apiValue) == null) {
+                        throw IllegalStateException("Préparation fiscale locale — écriture SQLite impossible")
+                    }
                     api.payOrder(currentToken, row.orderId, row.amountDue, method)
+                    activateFiscalSale(row.orderId)
                 }
                 val freshOrders = api.orders(currentToken)
                 val freshKots = runCatching { api.kots(currentToken) }.getOrDefault(_ui.value.kots)
@@ -825,7 +1040,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun isTerminalSettlement(status: String?): Boolean = status
         ?.lowercase()
-        ?.let { it in setOf("paid", "cancelled", "canceled", "refunded", "completed") }
+        ?.let { it in setOf("paid", "settled", "cancelled", "canceled", "refunded", "completed") }
         ?: false
 
 
@@ -953,16 +1168,135 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private suspend fun prepareFiscalSaleFromRemote(
+        currentToken: String,
+        orderId: Long,
+        paymentMethod: String
+    ): FiscalOutboxEntity? = runCatching {
+        val remote = api.orderDraft(currentToken, orderId)
+        val identity = fiscalRuntimeRepository.ensureIdentity()
+        fiscalOutboxRepository.prepareRemoteSale(
+            identity = identity,
+            orderId = orderId,
+            orderType = remote.type,
+            lines = remote.lines,
+            amount = remote.total,
+            paymentMethod = paymentMethod
+        )
+    }.onSuccess {
+        refreshFiscalHealth()
+    }.onFailure { error ->
+        _ui.update {
+            it.copy(fiscalLocalDbError = error.message ?: "Préparation fiscale locale impossible")
+        }
+    }.getOrNull()
+
+    private suspend fun activateFiscalSale(orderId: Long) {
+        runCatching {
+            val identity = fiscalRuntimeRepository.ensureIdentity()
+            fiscalOutboxRepository.activate(identity, orderId)
+        }
+            .onSuccess {
+                refreshFiscalHealth()
+                kickFiscalSync()
+            }
+            .onFailure { error ->
+                _ui.update {
+                    it.copy(fiscalLocalDbError = error.message ?: "Activation de la fiscal outbox impossible")
+                }
+            }
+    }
+
+    private suspend fun refreshFiscalHealth() {
+        runCatching {
+            val identity = fiscalRuntimeRepository.ensureIdentity()
+            fiscalOutboxRepository.health(identity)
+        }
+            .onSuccess { health -> _ui.update { it.copy(fiscalOutboxHealth = health) } }
+            .onFailure { error ->
+                _ui.update {
+                    it.copy(fiscalLocalDbError = error.message ?: "Lecture de la fiscal outbox impossible")
+                }
+            }
+    }
+
+    private fun kickFiscalSync() {
+        if (token == null || _ui.value.demoMode) return
+        startFiscalSync(initialDelayMs = 250L)
+    }
+
+    private fun startFiscalSync(initialDelayMs: Long = 1_000L) {
+        fiscalSyncJob?.cancel()
+        fiscalSyncJob = viewModelScope.launch {
+            delay(initialDelayMs)
+            while (true) {
+                val currentToken = token ?: break
+                if (_ui.value.demoMode) break
+
+                runCatching {
+                    val identity = fiscalRuntimeRepository.ensureIdentity()
+                    fiscalSyncEngine.reconcilePrepared(identity) { orderId ->
+                        api.orderDraft(currentToken, orderId)
+                    }
+                    val result = fiscalSyncEngine.sync(currentToken, identity)
+                    refreshFiscalHealth()
+                    result
+                }.onSuccess { result ->
+                    _ui.update { state ->
+                        val message = when {
+                            result.blockedProfileOff > 0 -> "profile_off"
+                            result.failed > 0 -> "retry"
+                            result.queued > 0 -> "cloud_queued"
+                            else -> state.fiscalSyncMessage
+                        }
+                        state.copy(fiscalSyncMessage = message)
+                    }
+                }.onFailure { error ->
+                    _ui.update {
+                        it.copy(fiscalSyncMessage = "retry", fiscalLocalDbError = it.fiscalLocalDbError ?: error.message)
+                    }
+                }
+
+                delay(15_000L)
+            }
+        }
+    }
+
+    private suspend fun initializeFiscalRuntime() {
+        runCatching { fiscalRuntimeRepository.ensureIdentity() }
+            .onSuccess { identity ->
+                _ui.update { it.copy(fiscalIdentity = identity, fiscalLocalDbError = null) }
+                refreshFiscalHealth()
+            }
+            .onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        fiscalLocalDbError = error.message ?: "Initialisation SQLite fiscale impossible"
+                    )
+                }
+            }
+    }
+
     private suspend fun bootstrap(email: String) {
         val currentToken = token ?: return
         _ui.update { it.copy(loading = true, error = null) }
         refreshLiveData(currentToken, email, primeOrders = true)
         _ui.update { it.copy(authenticated = true, demoMode = false, loading = false, online = true) }
+        refreshFiscalHealth()
         startPolling()
+        startFiscalSync()
     }
 
     private suspend fun refreshLiveData(currentToken: String, email: String, primeOrders: Boolean) {
         val platform = api.platform(currentToken, email)
+        val fiscalIdentityResult = runCatching {
+            fiscalRuntimeRepository.bindScope(
+                restaurantId = platform.user.restaurantId,
+                branchId = platform.user.branchId,
+                restaurantName = platform.user.restaurant,
+                branchName = platform.user.branch
+            )
+        }
         val catalog = api.catalog(currentToken)
         val liveOrders = api.orders(currentToken)
         val liveKots = runCatching { api.kots(currentToken) }.getOrDefault(emptyList())
@@ -1006,6 +1340,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 loading = false,
                 user = platform.user,
                 policy = platform.policy,
+                fiscalIdentity = fiscalIdentityResult.getOrNull() ?: it.fiscalIdentity,
+                fiscalLocalDbError = fiscalIdentityResult.exceptionOrNull()?.message,
                 categories = catalog.categories.ifEmpty { DemoRepository.categories },
                 products = liveProducts,
                 orders = liveOrders,
@@ -1085,6 +1421,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         pollingJob?.cancel()
+        fiscalSyncJob?.cancel()
         tone.release()
         super.onCleared()
     }

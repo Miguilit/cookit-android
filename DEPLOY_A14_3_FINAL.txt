@@ -1,0 +1,9 @@
+DO NOT DEPLOY THIS CHECKPOINT SEPARATELY IF YOU ARE WAITING FOR THE CONSOLIDATED FINAL DELIVERY.
+
+Target after final approval:
+- Android versionName 0.14.3
+- Android versionCode 10
+
+A14.3 includes all A14.2 changes plus secure Fiscal Agent provisioning and non-mutating FDM diagnostics.
+The Checkbox/Eutronix signSale mapping remains intentionally disabled.
+The server fiscal profile must remain OFF until real hardware/schema validation.

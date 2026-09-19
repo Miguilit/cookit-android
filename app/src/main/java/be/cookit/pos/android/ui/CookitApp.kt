@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -2013,6 +2014,10 @@ private fun SettingsScreen(
     var printerPort by remember(state.printerPort) { mutableStateOf(state.printerPort.toString()) }
     var starIdentifier by remember(state.starIdentifier) { mutableStateOf(state.starIdentifier) }
     var starInterface by remember(state.starInterface) { mutableStateOf(state.starInterface) }
+    var fdmHost by remember(state.fdmSettings.host) { mutableStateOf(state.fdmSettings.host) }
+    var fdmPort by remember(state.fdmSettings.port) { mutableStateOf(state.fdmSettings.port.toString()) }
+    var fiscalAgentDeviceId by remember(state.fiscalAgentDeviceHint) { mutableStateOf(state.fiscalAgentDeviceHint) }
+    var fiscalAgentToken by remember { mutableStateOf("") }
     val context = LocalContext.current
     var pendingPrinterAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -2075,6 +2080,234 @@ private fun SettingsScreen(
         SettingsRow(Icons.Default.Sync, t.synchronization, if (state.online) "API Cookit ${t.online.lowercase()}" else t.offline)
         SettingsRow(Icons.Default.Person, t.account, "${state.user.name} • ${state.user.role.name.lowercase()}")
         SettingsRow(Icons.Default.Security, t.permissions, "${state.policy.profile.name.lowercase()}")
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Storage, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Runtime fiscal local", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (state.fiscalLocalDbError == null) "Room / SQLite durable • A14.2A" else "SQLite indisponible",
+                            color = if (state.fiscalLocalDbError == null) CookitGreen else MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                val fiscalIdentity = state.fiscalIdentity
+                if (fiscalIdentity != null) {
+                    Text("runtime_id  ${fiscalIdentity.runtimeId}", fontSize = 11.sp, color = CookitMuted)
+                    Text("terminal_id ${fiscalIdentity.terminalId}", fontSize = 11.sp, color = CookitMuted)
+                    val scope = listOfNotNull(
+                        fiscalIdentity.restaurantId?.let { "restaurant=$it" },
+                        fiscalIdentity.branchId?.let { "branch=$it" }
+                    ).joinToString(" • ")
+                    if (scope.isNotBlank()) Text(scope, fontSize = 11.sp, color = CookitMuted)
+                } else if (state.fiscalLocalDbError == null) {
+                    Text("Initialisation de l’identité fiscale locale…", fontSize = 11.sp, color = CookitMuted)
+                }
+
+                state.fiscalLocalDbError?.let {
+                    Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                }
+                val health = state.fiscalOutboxHealth
+                Text(
+                    "Outbox locale • préparés ${health.prepared} • à synchroniser ${health.pending} • cloud ${health.cloudQueued} • fiscalisés ${health.fiscalized}",
+                    fontSize = 11.sp,
+                    color = CookitMuted
+                )
+                health.latestError?.let { lastError ->
+                    Text(
+                        "Dernier état sync: ${lastError.take(180)}",
+                        fontSize = 11.sp,
+                        color = CookitMuted
+                    )
+                }
+                Text(
+                    when (state.fiscalSyncMessage) {
+                        "profile_off" -> "Profil fiscal cloud OFF : l’outbox reste durable et réessaiera sans activer le profil."
+                        "cloud_queued" -> "Événements locaux remis à CookitFiscal."
+                        "retry" -> "Synchronisation fiscale en attente de reconnexion / retry."
+                        else -> "A14.2 : identité + outbox durable + reprise après crash."
+                    },
+                    fontSize = 11.sp,
+                    color = CookitMuted
+                )
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Checkbox / Eutronix FDM", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (state.fdmSettings.configured) "Transport HTTPS /graphql configuré" else "Transport local non configuré",
+                            color = if (state.fdmSettings.configured) CookitGreen else CookitMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (!state.policy.canManageSettings) Icon(Icons.Default.Lock, null, tint = CookitMuted)
+                }
+
+                if (state.policy.canManageSettings || state.demoMode) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = fdmHost,
+                            onValueChange = { fdmHost = it.trim() },
+                            label = { Text("FDM host / IP") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = fdmPort,
+                            onValueChange = { fdmPort = it.filter(Char::isDigit).take(5) },
+                            label = { Text("Port TLS") },
+                            modifier = Modifier.width(120.dp),
+                            singleLine = true
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort) }) {
+                            Text("Enregistrer FDM")
+                        }
+                        OutlinedButton(onClick = { vm.probeFdmConnectivity() }, enabled = !state.fdmProbeBusy) {
+                            if (state.fdmProbeBusy) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text("Tester TLS/GraphQL")
+                        }
+                    }
+                    OutlinedButton(onClick = { vm.verifyFdmAdapterGate() }) {
+                        Text("Vérifier le verrou signSale")
+                    }
+                }
+
+                Text(
+                    "Mutation attendue pour une vente normale : ${state.fdmReadiness.mutationName}. Mapping certifié : ${if (state.fdmReadiness.mappingInstalled) "installé" else "verrouillé"}.",
+                    fontSize = 11.sp,
+                    color = if (state.fdmReadiness.mappingInstalled) CookitGreen else CookitMuted
+                )
+                if (state.fdmProbe.attempted) {
+                    val probe = state.fdmProbe
+                    Text(
+                        buildString {
+                            append(if (probe.tlsConnected) "TLS OK" else "TLS échec")
+                            probe.httpStatus?.let { append(" • HTTP $it") }
+                            if (probe.graphqlResponded) append(" • GraphQL détecté")
+                            probe.latencyMs?.let { append(" • ${it} ms") }
+                        },
+                        fontSize = 11.sp,
+                        color = if (probe.transportReady) CookitGreen else MaterialTheme.colorScheme.error
+                    )
+                    probe.certificateSha256?.let { fingerprint ->
+                        Text("Certificat SHA-256 ${fingerprint.take(16)}…${fingerprint.takeLast(12)}", fontSize = 10.sp, color = CookitMuted)
+                    }
+                    probe.message?.let { Text(it, fontSize = 10.sp, color = CookitMuted) }
+                }
+                Text(
+                    "Le test réseau est non fiscalisant : il ne lance aucune mutation signSale/signOrder. Cookit ne fiscalise rien tant que le mapping certifié n’est pas installé.",
+                    fontSize = 11.sp,
+                    color = CookitMuted
+                )
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.VpnKey, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Cookit Fiscal Agent", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (state.fiscalAgentConfigured) "Identifiants appareil chiffrés dans Android Keystore" else "Appareil fiscal non provisionné",
+                            color = if (state.fiscalAgentConfigured) CookitGreen else CookitMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (!state.policy.canManageSettings) Icon(Icons.Default.Lock, null, tint = CookitMuted)
+                }
+
+                if (state.fiscalAgentConfigured) {
+                    Text("device ${state.fiscalAgentDeviceHint}", fontSize = 11.sp, color = CookitMuted)
+                }
+
+                if (state.policy.canManageSettings && !state.demoMode) {
+                    OutlinedTextField(
+                        value = fiscalAgentDeviceId,
+                        onValueChange = { fiscalAgentDeviceId = it.trim() },
+                        label = { Text("Fiscal Agent device ID") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = fiscalAgentToken,
+                        onValueChange = { fiscalAgentToken = it },
+                        label = { Text("Device token") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            vm.saveFiscalAgentCredentials(fiscalAgentDeviceId, fiscalAgentToken)
+                            fiscalAgentToken = ""
+                        }) { Text("Enregistrer sécurisé") }
+                        OutlinedButton(onClick = { vm.handshakeFiscalAgent() }, enabled = state.fiscalAgentConfigured) {
+                            Text("Handshake")
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { vm.heartbeatFiscalAgent() }, enabled = state.fiscalAgentConfigured) {
+                            Text("Heartbeat")
+                        }
+                        TextButton(onClick = { vm.clearFiscalAgentCredentials() }, enabled = state.fiscalAgentConfigured) {
+                            Text("Effacer les credentials")
+                        }
+                    }
+                }
+
+                val agentStatus = when {
+                    state.fiscalAgentMessage == null -> "Aucun appel Fiscal Agent automatique n’est effectué avant provisioning explicite."
+                    state.fiscalAgentMessage == "credentials_saved" -> "Identifiants Fiscal Agent enregistrés dans Android Keystore."
+                    state.fiscalAgentMessage == "credentials_cleared" -> "Identifiants Fiscal Agent supprimés."
+                    state.fiscalAgentMessage == "handshake_running" -> "Handshake Fiscal Agent en cours…"
+                    state.fiscalAgentMessage == "handshake_ok" -> "Handshake Fiscal Agent réussi."
+                    state.fiscalAgentMessage == "heartbeat_running" -> "Heartbeat Fiscal Agent en cours…"
+                    state.fiscalAgentMessage == "heartbeat_ok" -> "Heartbeat Fiscal Agent réussi."
+                    state.fiscalAgentMessage == "credentials_incomplete" -> "Device ID et token sont requis."
+                    state.fiscalAgentMessage == "credentials_or_identity_missing" -> "Identité runtime ou credentials Fiscal Agent manquants."
+                    state.fiscalAgentMessage == "forbidden" -> "Action réservée à un compte autorisé hors mode démo."
+                    state.fiscalAgentMessage.startsWith("handshake_failed:") -> "Handshake échoué : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
+                    state.fiscalAgentMessage.startsWith("heartbeat_failed:") -> "Heartbeat échoué : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
+                    else -> state.fiscalAgentMessage
+                }
+                Text(agentStatus, fontSize = 11.sp, color = CookitMuted)
+                Text(
+                    "Ces identifiants authentifient Android auprès de Cookit Cloud. Les secrets/certificats propres au FDM Checkbox restent séparés jusqu’au profil de sécurité certifié.",
+                    fontSize = 10.sp,
+                    color = CookitMuted
+                )
+            }
+        }
 
         Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
