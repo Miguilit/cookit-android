@@ -1,0 +1,33 @@
+C3.3-D deterministic ACK-loss test
+
+PRECONDITIONS
+- A14.5.3 installed over A14.5.2.
+- Fiscal Agent credentials still configured.
+- Mock FDM active; UI scenario can stay Success.
+- Fiscal Agent auto=ON.
+- fiscal_profiles.enabled remains 0.
+
+TEST JOB
+Create a test-only cloud transaction with metadata:
+  "scenario": "success",
+  "cloud_submit_delay_ms": 15000,
+  "campaign": "C3.3-D2"
+
+TEST
+1. Wait until server shows status=claimed / attempts=1.
+2. Disable tablet Wi-Fi immediately. Local loopback Mock remains reachable.
+3. Keep Wi-Fi OFF through the 15 s delay and until the 2-minute cloud lease expires.
+4. Re-enable Wi-Fi after lease expiry.
+5. Do not press any Fiscal Agent button.
+
+PASS
+- attempts=2
+- status=fiscalized
+- submitted_at and fiscalized_at are set
+- failed_at is null
+- fiscal_receipts count for the transaction = 1
+- response_meta.local_outcome_journal = true
+- response_meta.replayed_from_local_journal = true
+- duplicate=false is expected: the local journal prevented the second FDM submission
+- tablet shows replayLocal=true
+- profile remains enabled=0, fdm_required=1

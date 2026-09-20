@@ -1,0 +1,11 @@
+a32c497b997f955a88d37298aaf35edb1518f98be9f5f8e176ce9c5faba6db98  app/build.gradle.kts
+4b4d4f23e5cf1fd8db2e247f8cc71f77ce1043e1b39261c9b424e7516463e499  app/src/main/java/be/cookit/pos/android/data/fiscal/CookitLocalDatabase.kt
+3d03b79ab74c65978890f17e14f402e944f16660421129ea4aff5fc294142d38  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentJob.kt
+ea6c12ae5c9ce3e62d95e0e9da9a9ec62d373e62ad65aeff4bd62690bbf7f840  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentOutcomeDao.kt
+6145066c373b3391c63424b69860023eeb928999b12e4107a794fc55f21b69e3  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentOutcomeEntity.kt
+bc91f77b7d4e67f01ff81b76033f9a755d1b82c545d834302f404af5ae928cc6  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentRunner.kt
+0ac452881c1cb9dafe2102683be369ba8597cb489c191963a358df4339f44123  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+e5a582d79e902b25da4a01bb1179fa0d29b98c2dae6544343d9d167903c214a3  app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+089c35f0223053df33cecd4aa00bc04621d513a2bb11f44748b1a24a6fe7ef73  docs/A14_5_3_DURABLE_PROVIDER_OUTCOME_JOURNAL.md
+bc39cd53ab22a6f692f60222aabbfd0f00335171272d0e8889ed293c9038ac7e  DEPLOY_A14_5_3_C3_3D.txt
+bbd0647c2ef5f19ea0993c46b1f0a8d2378a1e215f27411d9bc7c87dcc490ce4  TEST_A14_5_3_C3_3D.txt

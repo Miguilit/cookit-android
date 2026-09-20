@@ -1,0 +1,10 @@
+Cookit Android A14.5.3 / versionCode 20
+Apply over A14.5.2 without uninstalling the app.
+
+1. Verify ZIP SHA256 and unzip into the Android repo.
+2. `git diff --check`
+3. Verify `versionCode = 20` / `versionName = "0.14.5.3"`.
+4. Commit/push and let the existing signed GitHub Actions workflow build the APK.
+5. Install the APK over the existing signed app so Room migration 2 -> 3 runs and Keystore/runtime data remain intact.
+
+No Cookit backend patch is required for A14.5.3.

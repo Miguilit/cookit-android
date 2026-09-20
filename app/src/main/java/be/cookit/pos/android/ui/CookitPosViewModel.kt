@@ -127,7 +127,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fiscalAgentRuntimeStateStore = FiscalAgentRuntimeStateStore(application)
     private val storedFiscalAgentRuntimeState = fiscalAgentRuntimeStateStore.load()
     private val fiscalAgentClient = FiscalAgentClient()
-    private val fiscalAgentRunner = FiscalAgentRunner(fiscalAgentClient, fdmRuntime)
+    private val fiscalAgentRunner = FiscalAgentRunner(fiscalAgentClient, fdmRuntime, localDatabase.fiscalAgentOutcomeDao())
     private val printerService = EscPosPrinterService()
     private val starPrinterService = StarPrinterService(application)
     private val starDiscoveryService = StarDiscoveryService(application)
@@ -665,7 +665,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                             fiscalAgentProcessedJobs = persisted.processedJobs,
                             fiscalAgentLastJobId = persisted.lastJobId,
                             fiscalAgentLastReceipt = persisted.lastReceipt,
-                            fiscalAgentMessage = "job_ok:${result.jobId}:${result.receiptNumber.orEmpty()}:${result.duplicate}"
+                            fiscalAgentMessage = "job_ok:${result.jobId}:${result.receiptNumber.orEmpty()}:${result.duplicate}:${result.replayedFromLocalJournal}"
                         )
                     }
                 }

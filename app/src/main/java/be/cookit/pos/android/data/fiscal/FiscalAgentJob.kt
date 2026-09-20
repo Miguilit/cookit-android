@@ -110,7 +110,8 @@ data class FiscalAgentRunResult(
     val jobId: Long? = null,
     val publicId: String? = null,
     val receiptNumber: String? = null,
-    val duplicate: Boolean = false
+    val duplicate: Boolean = false,
+    val replayedFromLocalJournal: Boolean = false
 )
 
 private fun JSONObject.optNullableString(key: String): String? =

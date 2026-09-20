@@ -2457,7 +2457,7 @@ private fun SettingsScreen(
                     state.fiscalAgentMessage == "forbidden" -> "Action réservée à un compte autorisé hors mode démo."
                     state.fiscalAgentMessage.startsWith("job_ok:") -> {
                         val parts = state.fiscalAgentMessage.split(':')
-                        "C3 PASS • job #${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()}"
+                        "C3 PASS • job #${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()} • replayLocal=${parts.getOrNull(4).orEmpty()}"
                     }
                     state.fiscalAgentMessage.startsWith("job_failed:") -> "C3 job échoué : ${state.fiscalAgentMessage.substringAfter(':').take(220)}"
                     state.fiscalAgentMessage.startsWith("agent_provider_gated:") -> "Adapter FDM verrouillé : ${state.fiscalAgentMessage.substringAfter(':').take(200)}"
