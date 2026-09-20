@@ -32,6 +32,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -122,7 +123,7 @@ class FiscalAgentForegroundService : Service() {
         updateNotification("Fiscal Agent actif • initialisation")
 
         var heartbeatAt = 0L
-        while (isActive && stateStore.load().autoEnabled) {
+        while (currentCoroutineContext().isActive && stateStore.load().autoEnabled) {
             val credentials = credentialStore.load()
             val identity = runtimeRepository.currentIdentity()
             val settings = normalizedSettings(settingsStore.load())

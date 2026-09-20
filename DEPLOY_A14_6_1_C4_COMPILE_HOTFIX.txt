@@ -1,0 +1,12 @@
+Cookit Android A14.6.1 / versionCode 22
+C4 compile hotfix.
+
+Root cause from GitHub Actions:
+FiscalAgentForegroundService.kt:125 used bare `isActive` inside a suspend member function.
+`kotlinx.coroutines.isActive` requires a CoroutineScope or CoroutineContext receiver.
+
+Fix:
+while (currentCoroutineContext().isActive && stateStore.load().autoEnabled)
+
+No functional C4 behavior is changed.
+Apply over A14.6 sources, build, and install over the existing app without uninstalling.
