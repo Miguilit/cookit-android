@@ -36,8 +36,8 @@ android {
         applicationId = "be.cookit.pos.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 22
-        versionName = "0.14.6.1"
+        versionCode = 23
+        versionName = "0.14.6.2"
 
         buildConfigField(
             "String",

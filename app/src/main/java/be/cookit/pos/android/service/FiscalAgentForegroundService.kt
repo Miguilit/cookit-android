@@ -5,11 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.MainActivity
 import be.cookit.pos.android.R
@@ -58,6 +63,17 @@ class FiscalAgentForegroundService : Service() {
     private lateinit var fdmRuntime: FiscalFdmRuntime
     private lateinit var embeddedMock: EmbeddedMockFdmServer
     private lateinit var notifications: NotificationManager
+    private lateinit var powerManager: PowerManager
+    private var screenOffWakeLock: PowerManager.WakeLock? = null
+
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> acquireScreenOffWakeLock()
+                Intent.ACTION_SCREEN_ON -> releaseScreenOffWakeLock()
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -72,6 +88,21 @@ class FiscalAgentForegroundService : Service() {
         runner = FiscalAgentRunner(client, fdmRuntime, database.fiscalAgentOutcomeDao())
         embeddedMock = EmbeddedMockFdmServer(this)
         notifications = getSystemService(NotificationManager::class.java)
+        powerManager = getSystemService(PowerManager::class.java)
+
+        ContextCompat.registerReceiver(
+            this,
+            screenStateReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+
+        if (!powerManager.isInteractive) {
+            acquireScreenOffWakeLock()
+        }
 
         createNotificationChannel()
         startForegroundCompat(buildNotification("Démarrage du Fiscal Agent…"))
@@ -101,6 +132,8 @@ class FiscalAgentForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(screenStateReceiver) }
+        releaseScreenOffWakeLock()
         loopJob?.cancel()
         loopJob = null
         stateStore.setServiceStatus(
@@ -114,8 +147,36 @@ class FiscalAgentForegroundService : Service() {
     }
 
     private fun ensureLoop() {
+        if (!powerManager.isInteractive) {
+            acquireScreenOffWakeLock()
+        }
         if (loopJob?.isActive == true) return
         loopJob = scope.launch { runLoop() }
+    }
+
+    private fun acquireScreenOffWakeLock() {
+        val lock = screenOffWakeLock ?: powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "$packageName:fiscal_agent_screen_off"
+        ).apply {
+            setReferenceCounted(false)
+            screenOffWakeLock = this
+        }
+
+        if (!lock.isHeld) {
+            lock.acquire()
+            stateStore.setServiceStatus(
+                running = true,
+                busy = stateStore.load().serviceBusy,
+                message = "screen_off_wakelock_acquired"
+            )
+        }
+    }
+
+    private fun releaseScreenOffWakeLock() {
+        screenOffWakeLock?.let { lock ->
+            if (lock.isHeld) lock.release()
+        }
     }
 
     private suspend fun runLoop() {

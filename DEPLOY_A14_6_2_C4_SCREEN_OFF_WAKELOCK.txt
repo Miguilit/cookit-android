@@ -1,0 +1,11 @@
+Cookit Android A14.6.2 / versionCode 23
+C4.2 screen-off continuity hardening.
+
+Changes:
+- Foreground Fiscal Agent keeps a PARTIAL_WAKE_LOCK only while the screen is OFF.
+- Wake lock is released immediately when the screen turns ON or the service stops.
+- Adds android.permission.WAKE_LOCK.
+- Preserves A14.6.1 coroutine compile fix and all C3/C4 durable fiscal logic.
+- No backend change. Real Checkbox/Eutronix adapter remains fail-closed.
+
+Test target: UI removed from recents + screen locked + auto=ON; cloud job must be claimed/fiscalized without unlocking.
