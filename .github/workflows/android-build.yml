@@ -90,7 +90,13 @@ jobs:
             echo "APK:      $APK_FP" >&2
             exit 1
           fi
-          printf 'version=0.14.4.4\nversionCode=15\ncertificate_sha256=%s\n' "$APK_FP" > app/build/outputs/apk/debug/COOKIT_SIGNING_INFO.txt
+          VERSION_NAME=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          VERSION_CODE=$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n 1)
+          test -n "$VERSION_NAME"
+          test -n "$VERSION_CODE"
+          printf 'version=%s\nversionCode=%s\ncertificate_sha256=%s\n' \
+            "$VERSION_NAME" "$VERSION_CODE" "$APK_FP" \
+            > app/build/outputs/apk/debug/COOKIT_SIGNING_INFO.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

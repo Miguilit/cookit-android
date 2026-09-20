@@ -1,0 +1,17 @@
+C3 validation
+
+1. Upgrade A14.4.5 -> A14.5 without uninstalling.
+2. Confirm runtime_id and terminal_id are unchanged.
+3. Confirm Fiscal Agent credentials remain provisioned.
+4. In Fiscal/FDM settings, select/activate embedded Mock FDM.
+5. Confirm Handshake and Heartbeat still return success.
+6. Create one synthetic queued C3 test transaction on branch 12 using the provided canonical-snapshot command.
+7. Press "Traiter 1 job".
+8. Expected Android status: "C3 PASS • job #... • reçu CKT-MOCK-...".
+9. Server expected: fiscal transaction status=fiscalized, submitted_at/fiscalized_at set, failed_at null.
+10. Confirm fiscal_receipts contains exactly one receipt for the C3 test transaction.
+11. Confirm fiscal_profiles branch 12 remains enabled=0 and fdm_required=1.
+12. Optional: create a second synthetic job, press "Démarrer auto", and confirm it is processed without pressing the one-shot button.
+13. Stop auto polling after the test.
+
+Do not interpret the Mock receipt as a certified Belgian fiscal receipt.

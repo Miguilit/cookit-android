@@ -1,0 +1,10 @@
+ff670098305f30f87df260e2f895f7cd53aae502a51215a5f55c99aeea930ecb  ./.github/workflows/android-build.yml
+9f045ba7ee5c23dd56746efb85a68d44b9cf5de1c4269d5e917f7f06c83241b0  ./DEPLOY_A14_5_C3.txt
+3d088cfcb0ee95e7651d4d5ad7850f050cd8c4cb8b4383f515c340a4896f90ef  ./TEST_A14_5_C3.txt
+98da71dda870741f4f22ffefa1684310349878aeb6ba328db040cea3b27f3aa3  ./app/build.gradle.kts
+36fcf0653df9835318762b8def9350e2c0b249b419f348c01562e5a774463912  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentClient.kt
+10daebb1b12865cefe0a74311956a9f96fd3ab712ef721a83e1defe12b02fba8  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentJob.kt
+32c88c0d8c2ab3efa6c97767ff104e7c19c318ff3e21095fc09c4183d18dc213  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentRunner.kt
+d69f8ec3ce08c78248455d887c39c07382f42ad32443118797ba03aee15aeb8c  ./app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+da5fb91eda24a45c224261d713a39f4af03840d973192ade74fc696033dde4f2  ./app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+c7db7a3faa7d27b8513a2ecbd4f3aaf0939a3f25dd709cf6f8a6584efc20a2ac  ./docs/A14_5_C3_CLOUD_AGENT_MOCK_LOOP.md

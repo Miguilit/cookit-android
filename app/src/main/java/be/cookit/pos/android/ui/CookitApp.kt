@@ -2403,30 +2403,71 @@ private fun SettingsScreen(
                         OutlinedButton(onClick = { vm.heartbeatFiscalAgent() }, enabled = state.fiscalAgentConfigured) {
                             Text("Heartbeat")
                         }
+                        OutlinedButton(
+                            onClick = { vm.processNextFiscalAgentJob() },
+                            enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy && !state.fiscalAgentAutoRunning
+                        ) {
+                            Text("Traiter 1 job")
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.fiscalAgentAutoRunning) {
+                            Button(onClick = { vm.stopFiscalAgentAuto() }) {
+                                Text("Arrêter auto")
+                            }
+                        } else {
+                            Button(
+                                onClick = { vm.startFiscalAgentAuto() },
+                                enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy
+                            ) {
+                                Text("Démarrer auto")
+                            }
+                        }
                         TextButton(onClick = { vm.clearFiscalAgentCredentials() }, enabled = state.fiscalAgentConfigured) {
                             Text("Effacer les credentials")
                         }
                     }
+                    if (state.fiscalAgentConfigured) {
+                        Text(
+                            "C3 • auto=${if (state.fiscalAgentAutoRunning) "ON" else "OFF"} • traités=${state.fiscalAgentProcessedJobs}" +
+                                (state.fiscalAgentLastJobId?.let { " • dernier job #$it" } ?: "") +
+                                (state.fiscalAgentLastReceipt?.let { " • reçu $it" } ?: ""),
+                            fontSize = 10.sp,
+                            color = if (state.fiscalAgentAutoRunning) CookitGreen else CookitMuted
+                        )
+                    }
                 }
 
                 val agentStatus = when {
-                    state.fiscalAgentMessage == null -> "Aucun appel Fiscal Agent automatique n’est effectué avant provisioning explicite."
+                    state.fiscalAgentMessage == null -> "C3 prêt après provisioning : traitement manuel ou polling automatique des jobs cloud."
                     state.fiscalAgentMessage == "credentials_saved" -> "Identifiants Fiscal Agent enregistrés dans Android Keystore."
                     state.fiscalAgentMessage == "credentials_cleared" -> "Identifiants Fiscal Agent supprimés."
                     state.fiscalAgentMessage == "handshake_running" -> "Handshake Fiscal Agent en cours…"
                     state.fiscalAgentMessage == "handshake_ok" -> "Handshake Fiscal Agent réussi."
                     state.fiscalAgentMessage == "heartbeat_running" -> "Heartbeat Fiscal Agent en cours…"
                     state.fiscalAgentMessage == "heartbeat_ok" -> "Heartbeat Fiscal Agent réussi."
+                    state.fiscalAgentMessage == "job_polling" -> "C3 : récupération du prochain job fiscal cloud…"
+                    state.fiscalAgentMessage == "job_idle" -> "C3 : aucun job fiscal en attente."
+                    state.fiscalAgentMessage == "auto_started" -> "C3 : polling automatique démarré."
+                    state.fiscalAgentMessage == "auto_polling" -> "C3 : polling automatique actif…"
+                    state.fiscalAgentMessage == "auto_stopped" -> "C3 : polling automatique arrêté."
                     state.fiscalAgentMessage == "credentials_incomplete" -> "Device ID et token sont requis."
                     state.fiscalAgentMessage == "credentials_or_identity_missing" -> "Identité runtime ou credentials Fiscal Agent manquants."
                     state.fiscalAgentMessage == "forbidden" -> "Action réservée à un compte autorisé hors mode démo."
+                    state.fiscalAgentMessage.startsWith("job_ok:") -> {
+                        val parts = state.fiscalAgentMessage.split(':')
+                        "C3 PASS • job #${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()}"
+                    }
+                    state.fiscalAgentMessage.startsWith("job_failed:") -> "C3 job échoué : ${state.fiscalAgentMessage.substringAfter(':').take(220)}"
+                    state.fiscalAgentMessage.startsWith("agent_provider_gated:") -> "Adapter FDM verrouillé : ${state.fiscalAgentMessage.substringAfter(':').take(200)}"
+                    state.fiscalAgentMessage.startsWith("agent_mock_unavailable:") -> "Mock FDM embarqué indisponible : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
                     state.fiscalAgentMessage.startsWith("handshake_failed:") -> "Handshake échoué : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
                     state.fiscalAgentMessage.startsWith("heartbeat_failed:") -> "Heartbeat échoué : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
                     else -> state.fiscalAgentMessage
                 }
                 Text(agentStatus, fontSize = 11.sp, color = CookitMuted)
                 Text(
-                    "Ces identifiants authentifient Android auprès de Cookit Cloud. Les secrets/certificats propres au FDM Checkbox restent séparés jusqu’au profil de sécurité certifié.",
+                    "C3 exécute cloud → Android → adapter FDM → submitted/ack cloud. Le Mock reste debug-only ; l’adapter Checkbox/Eutronix reste fail-closed jusqu’au mapping certifié et ne peut donc pas être lancé par le worker.",
                     fontSize = 10.sp,
                     color = CookitMuted
                 )

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> = try {
@@ -82,6 +83,11 @@ data class PosUiState(
     val fiscalAgentConfigured: Boolean = false,
     val fiscalAgentDeviceHint: String = "",
     val fiscalAgentMessage: String? = null,
+    val fiscalAgentBusy: Boolean = false,
+    val fiscalAgentAutoRunning: Boolean = false,
+    val fiscalAgentProcessedJobs: Int = 0,
+    val fiscalAgentLastJobId: Long? = null,
+    val fiscalAgentLastReceipt: String? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
     val printerPort: Int = 9100,
@@ -119,6 +125,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fdmConnectivityProbe = FdmConnectivityProbe()
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
     private val fiscalAgentClient = FiscalAgentClient()
+    private val fiscalAgentRunner = FiscalAgentRunner(fiscalAgentClient, fdmRuntime)
     private val printerService = EscPosPrinterService()
     private val starPrinterService = StarPrinterService(application)
     private val starDiscoveryService = StarDiscoveryService(application)
@@ -147,6 +154,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private var token: String? = null
     private var pollingJob: Job? = null
     private var fiscalSyncJob: Job? = null
+    private var fiscalAgentWorkerJob: Job? = null
     private val knownOrderIds = linkedSetOf<Long>()
     private val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
 
@@ -189,6 +197,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun enterDemo() {
         pollingJob?.cancel()
         fiscalSyncJob?.cancel()
+        fiscalAgentWorkerJob?.cancel()
         _ui.update {
             PosUiState(
                 authenticated = true,
@@ -209,6 +218,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
+                fiscalAgentProcessedJobs = it.fiscalAgentProcessedJobs,
+                fiscalAgentLastJobId = it.fiscalAgentLastJobId,
+                fiscalAgentLastReceipt = it.fiscalAgentLastReceipt,
                 printerProvider = it.printerProvider,
                 printerHost = it.printerHost,
                 printerPort = it.printerPort,
@@ -221,6 +233,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun logout() {
         pollingJob?.cancel()
         fiscalSyncJob?.cancel()
+        fiscalAgentWorkerJob?.cancel()
         token = null
         knownOrderIds.clear()
         sessionStore.clearSession()
@@ -244,6 +257,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
+                fiscalAgentProcessedJobs = it.fiscalAgentProcessedJobs,
+                fiscalAgentLastJobId = it.fiscalAgentLastJobId,
+                fiscalAgentLastReceipt = it.fiscalAgentLastReceipt,
                 printerProvider = it.printerProvider,
                 printerHost = it.printerHost,
                 printerPort = it.printerPort,
@@ -427,12 +443,16 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearFiscalAgentCredentials() {
         if (!_ui.value.policy.canManageSettings) return
+        fiscalAgentWorkerJob?.cancel()
+        fiscalAgentWorkerJob = null
         fiscalAgentCredentialStore.clear()
         _ui.update {
             it.copy(
                 fiscalAgentConfigured = false,
                 fiscalAgentDeviceHint = "",
-                fiscalAgentMessage = "credentials_cleared"
+                fiscalAgentMessage = "credentials_cleared",
+                fiscalAgentBusy = false,
+                fiscalAgentAutoRunning = false
             )
         }
     }
@@ -476,17 +496,152 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
         viewModelScope.launch {
             _ui.update { it.copy(fiscalAgentMessage = "heartbeat_running") }
-            val payload = org.json.JSONObject()
-                .put("runtime_id", identity.runtimeId)
-                .put("source_terminal_id", identity.terminalId)
-                .put("runtime_type", "android_pos")
-                .put("provider", _ui.value.fdmSettings.provider)
+            val payload = fiscalAgentClient.defaultHeartbeatPayload(identity, _ui.value.fdmSettings)
             runCatching { fiscalAgentClient.heartbeat(credentials, payload) }
                 .onSuccess { _ui.update { it.copy(fiscalAgentMessage = "heartbeat_ok") } }
                 .onFailure { error ->
                     _ui.update { it.copy(fiscalAgentMessage = "heartbeat_failed:${error.message.orEmpty()}") }
                 }
         }
+    }
+
+    fun processNextFiscalAgentJob() {
+        if (_ui.value.fiscalAgentAutoRunning || _ui.value.fiscalAgentBusy) return
+        if (!canRunFiscalAgent()) return
+        viewModelScope.launch { processFiscalAgentIteration(auto = false) }
+    }
+
+    fun startFiscalAgentAuto() {
+        if (_ui.value.fiscalAgentAutoRunning) return
+        if (!canRunFiscalAgent()) return
+
+        fiscalAgentWorkerJob?.cancel()
+        fiscalAgentWorkerJob = viewModelScope.launch {
+            _ui.update { it.copy(fiscalAgentAutoRunning = true, fiscalAgentMessage = "auto_started") }
+            var heartbeatAt = 0L
+            try {
+                while (isActive) {
+                    val now = System.currentTimeMillis()
+                    if (now - heartbeatAt >= 60_000L) {
+                        heartbeatFiscalAgentSilently()
+                        heartbeatAt = now
+                    }
+                    val result = processFiscalAgentIteration(auto = true)
+                    delay(if (result?.processed == true) 1_000L else 5_000L)
+                }
+            } finally {
+                _ui.update { it.copy(fiscalAgentAutoRunning = false, fiscalAgentBusy = false) }
+            }
+        }
+    }
+
+    fun stopFiscalAgentAuto() {
+        fiscalAgentWorkerJob?.cancel()
+        fiscalAgentWorkerJob = null
+        _ui.update {
+            it.copy(
+                fiscalAgentAutoRunning = false,
+                fiscalAgentBusy = false,
+                fiscalAgentMessage = "auto_stopped"
+            )
+        }
+    }
+
+    private fun canRunFiscalAgent(): Boolean {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) {
+            _ui.update { it.copy(fiscalAgentMessage = "forbidden") }
+            return false
+        }
+        val credentials = fiscalAgentCredentialStore.load()
+        val identity = _ui.value.fiscalIdentity
+        if (credentials == null || identity == null || identity.restaurantId == null || identity.branchId == null) {
+            _ui.update { it.copy(fiscalAgentMessage = "credentials_or_identity_missing") }
+            return false
+        }
+
+        val settings = _ui.value.fdmSettings
+        if (settings.isMock) {
+            val status = embeddedMockFdmServer.start()
+            _ui.update { it.copy(embeddedMockFdmStatus = status) }
+            if (!status.running) {
+                _ui.update { it.copy(fiscalAgentMessage = "agent_mock_unavailable:${status.lastError.orEmpty()}") }
+                return false
+            }
+        }
+
+        val readiness = fdmRuntime.readiness(settings)
+        if (!readiness.readyForFiscalization) {
+            _ui.update {
+                it.copy(
+                    fdmReadiness = readiness,
+                    fiscalAgentMessage = "agent_provider_gated:${readiness.reason.orEmpty()}"
+                )
+            }
+            return false
+        }
+        return true
+    }
+
+    private suspend fun heartbeatFiscalAgentSilently() {
+        val credentials = fiscalAgentCredentialStore.load() ?: return
+        val identity = _ui.value.fiscalIdentity ?: return
+        runCatching {
+            fiscalAgentClient.heartbeat(
+                credentials,
+                fiscalAgentClient.defaultHeartbeatPayload(identity, _ui.value.fdmSettings)
+            )
+        }
+    }
+
+    private suspend fun processFiscalAgentIteration(auto: Boolean): FiscalAgentRunResult? {
+        val credentials = fiscalAgentCredentialStore.load()
+        val identity = _ui.value.fiscalIdentity
+        if (credentials == null || identity == null) {
+            _ui.update {
+                it.copy(
+                    fiscalAgentBusy = false,
+                    fiscalAgentMessage = "credentials_or_identity_missing"
+                )
+            }
+            return null
+        }
+
+        _ui.update {
+            it.copy(
+                fiscalAgentBusy = true,
+                fiscalAgentMessage = if (auto) "auto_polling" else "job_polling"
+            )
+        }
+
+        return runCatchingPreservingCancellation {
+            fiscalAgentRunner.processNext(credentials, identity, _ui.value.fdmSettings)
+        }.fold(
+            onSuccess = { result ->
+                if (!result.processed) {
+                    _ui.update { it.copy(fiscalAgentBusy = false, fiscalAgentMessage = "job_idle") }
+                } else {
+                    _ui.update {
+                        it.copy(
+                            fiscalAgentBusy = false,
+                            fiscalAgentProcessedJobs = it.fiscalAgentProcessedJobs + 1,
+                            fiscalAgentLastJobId = result.jobId,
+                            fiscalAgentLastReceipt = result.receiptNumber,
+                            fiscalAgentMessage = "job_ok:${result.jobId}:${result.receiptNumber.orEmpty()}:${result.duplicate}"
+                        )
+                    }
+                }
+                result
+            },
+            onFailure = { error ->
+                _ui.update {
+                    it.copy(
+                        fiscalAgentBusy = false,
+                        fiscalAgentMessage = "job_failed:${error.message.orEmpty().take(220)}"
+                    )
+                }
+                null
+            }
+        )
     }
 
     fun setPrinterProvider(provider: PrinterProviderType) {
