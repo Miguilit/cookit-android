@@ -2449,6 +2449,7 @@ private fun SettingsScreen(
                     state.fiscalAgentMessage == "job_polling" -> "C3 : récupération du prochain job fiscal cloud…"
                     state.fiscalAgentMessage == "job_idle" -> "C3 : aucun job fiscal en attente."
                     state.fiscalAgentMessage == "auto_started" -> "C3 : polling automatique démarré."
+                    state.fiscalAgentMessage == "auto_resumed" -> "C3 : polling automatique restauré après redémarrage."
                     state.fiscalAgentMessage == "auto_polling" -> "C3 : polling automatique actif…"
                     state.fiscalAgentMessage == "auto_stopped" -> "C3 : polling automatique arrêté."
                     state.fiscalAgentMessage == "credentials_incomplete" -> "Device ID et token sont requis."

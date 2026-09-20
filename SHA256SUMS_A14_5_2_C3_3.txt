@@ -1,0 +1,5 @@
+c66cbd123e7b29c1ad042da14d0820bb38347a21716e94af862f12a318497983  app/build.gradle.kts
+9f7ac70ac5e3e628e067f482ebf71259453222bb36099ea71d86f0a0e0d9eb83  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentRuntimeStateStore.kt
+130ddd6abfc0a850f6a7534eaa1ed2bd48224717aca9a232299c9b031766cbd5  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+4876c3ec85436dd912e1afa1ff2b1e6fc3e6ca58105907ad71e33c7c65f2571a  app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+56f5df7a7dd4dac94f5c6a417485b00980d3d871588d801b3eee48d773c18b2a  docs/A14_5_2_C3_3_PROCESS_RESTART_PERSISTENCE.md

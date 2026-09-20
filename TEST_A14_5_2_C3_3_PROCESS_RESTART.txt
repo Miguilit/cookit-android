@@ -1,0 +1,14 @@
+C3.3-B test
+1. Install A14.5.2 over A14.5.1 (no uninstall).
+2. Confirm runtime_id and Fiscal Agent credentials survived.
+3. Start auto once and confirm auto=ON.
+4. Create a test_only cloud job with metadata.scenario=lost_response_once.
+5. Wait until Cloud shows claimed / attempts=1 and no submitted_at.
+6. Android Settings > Apps > Cookit > Force stop.
+7. Wait until the cloud claim lease has expired, then manually launch Cookit.
+8. Do not press Start auto. Expected: auto returns ON by itself after bootstrap.
+9. Expected final Cloud state: attempts=2, fiscalized, exactly one receipt, duplicate=true.
+10. fiscal_profiles.enabled must remain 0.
+
+Note: Android force-stop intentionally prevents the package from restarting itself until the user
+launches the app again. This test validates durable resume after that relaunch.

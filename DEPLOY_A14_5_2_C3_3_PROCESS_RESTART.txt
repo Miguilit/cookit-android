@@ -1,0 +1,8 @@
+Cookit Android A14.5.2 / versionCode 19
+
+Apply over A14.5.1 without uninstalling the app.
+The patch persists Fiscal Agent auto-poll preference and C3 counters across process death/upgrades.
+After installation, enable auto once; subsequent process relaunches restore auto automatically after
+session/policy/runtime identity are ready.
+
+Do not clear app data. Do not remove the signing key. Do not enable the real fiscal profile for C3 tests.

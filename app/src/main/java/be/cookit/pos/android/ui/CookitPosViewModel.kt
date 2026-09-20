@@ -124,6 +124,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fdmRuntime = FiscalFdmRuntime(fdmGraphqlClient)
     private val fdmConnectivityProbe = FdmConnectivityProbe()
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
+    private val fiscalAgentRuntimeStateStore = FiscalAgentRuntimeStateStore(application)
+    private val storedFiscalAgentRuntimeState = fiscalAgentRuntimeStateStore.load()
     private val fiscalAgentClient = FiscalAgentClient()
     private val fiscalAgentRunner = FiscalAgentRunner(fiscalAgentClient, fdmRuntime)
     private val printerService = EscPosPrinterService()
@@ -142,6 +144,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             embeddedMockFdmStatus = embeddedMockFdmServer.status(),
             fiscalAgentConfigured = fiscalAgentCredentialStore.configured(),
             fiscalAgentDeviceHint = fiscalAgentCredentialStore.deviceHint(),
+            fiscalAgentProcessedJobs = storedFiscalAgentRuntimeState.processedJobs,
+            fiscalAgentLastJobId = storedFiscalAgentRuntimeState.lastJobId,
+            fiscalAgentLastReceipt = storedFiscalAgentRuntimeState.lastReceipt,
             printerProvider = printerStore.provider(),
             printerHost = printerStore.host(),
             printerPort = printerStore.port(),
@@ -446,13 +451,17 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         fiscalAgentWorkerJob?.cancel()
         fiscalAgentWorkerJob = null
         fiscalAgentCredentialStore.clear()
+        fiscalAgentRuntimeStateStore.clear()
         _ui.update {
             it.copy(
                 fiscalAgentConfigured = false,
                 fiscalAgentDeviceHint = "",
                 fiscalAgentMessage = "credentials_cleared",
                 fiscalAgentBusy = false,
-                fiscalAgentAutoRunning = false
+                fiscalAgentAutoRunning = false,
+                fiscalAgentProcessedJobs = 0,
+                fiscalAgentLastJobId = null,
+                fiscalAgentLastReceipt = null
             )
         }
     }
@@ -515,9 +524,34 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (_ui.value.fiscalAgentAutoRunning) return
         if (!canRunFiscalAgent()) return
 
+        fiscalAgentRuntimeStateStore.setAutoEnabled(true)
+        launchFiscalAgentWorker(resumed = false)
+    }
+
+    fun stopFiscalAgentAuto() {
+        fiscalAgentRuntimeStateStore.setAutoEnabled(false)
+        fiscalAgentWorkerJob?.cancel()
+        fiscalAgentWorkerJob = null
+        _ui.update {
+            it.copy(
+                fiscalAgentAutoRunning = false,
+                fiscalAgentBusy = false,
+                fiscalAgentMessage = "auto_stopped"
+            )
+        }
+    }
+
+    private fun launchFiscalAgentWorker(resumed: Boolean) {
+        if (fiscalAgentWorkerJob?.isActive == true) return
+
         fiscalAgentWorkerJob?.cancel()
         fiscalAgentWorkerJob = viewModelScope.launch {
-            _ui.update { it.copy(fiscalAgentAutoRunning = true, fiscalAgentMessage = "auto_started") }
+            _ui.update {
+                it.copy(
+                    fiscalAgentAutoRunning = true,
+                    fiscalAgentMessage = if (resumed) "auto_resumed" else "auto_started"
+                )
+            }
             var heartbeatAt = 0L
             try {
                 while (isActive) {
@@ -535,16 +569,17 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun stopFiscalAgentAuto() {
-        fiscalAgentWorkerJob?.cancel()
-        fiscalAgentWorkerJob = null
-        _ui.update {
-            it.copy(
-                fiscalAgentAutoRunning = false,
-                fiscalAgentBusy = false,
-                fiscalAgentMessage = "auto_stopped"
-            )
-        }
+    private fun maybeResumeFiscalAgentAuto() {
+        if (!fiscalAgentRuntimeStateStore.load().autoEnabled) return
+        if (_ui.value.fiscalAgentAutoRunning || fiscalAgentWorkerJob?.isActive == true) return
+        if (!_ui.value.authenticated || _ui.value.demoMode) return
+        if (!_ui.value.policy.canManageSettings) return
+        if (!fiscalAgentCredentialStore.configured()) return
+        val identity = _ui.value.fiscalIdentity ?: return
+        if (identity.restaurantId == null || identity.branchId == null) return
+        if (!canRunFiscalAgent()) return
+
+        launchFiscalAgentWorker(resumed = true)
     }
 
     private fun canRunFiscalAgent(): Boolean {
@@ -620,12 +655,16 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 if (!result.processed) {
                     _ui.update { it.copy(fiscalAgentBusy = false, fiscalAgentMessage = "job_idle") }
                 } else {
+                    val persisted = fiscalAgentRuntimeStateStore.recordProcessed(
+                        jobId = result.jobId,
+                        receiptNumber = result.receiptNumber
+                    )
                     _ui.update {
                         it.copy(
                             fiscalAgentBusy = false,
-                            fiscalAgentProcessedJobs = it.fiscalAgentProcessedJobs + 1,
-                            fiscalAgentLastJobId = result.jobId,
-                            fiscalAgentLastReceipt = result.receiptNumber,
+                            fiscalAgentProcessedJobs = persisted.processedJobs,
+                            fiscalAgentLastJobId = persisted.lastJobId,
+                            fiscalAgentLastReceipt = persisted.lastReceipt,
                             fiscalAgentMessage = "job_ok:${result.jobId}:${result.receiptNumber.orEmpty()}:${result.duplicate}"
                         )
                     }
@@ -1551,6 +1590,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             .onSuccess { identity ->
                 _ui.update { it.copy(fiscalIdentity = identity, fiscalLocalDbError = null) }
                 refreshFiscalHealth()
+                maybeResumeFiscalAgentAuto()
             }
             .onFailure { error ->
                 _ui.update {
@@ -1571,6 +1611,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             refreshFiscalHealth()
             startPolling()
             startFiscalSync()
+            maybeResumeFiscalAgentAuto()
             return
         }
 
@@ -1594,6 +1635,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         refreshFiscalHealth()
         startPolling()
         startFiscalSync()
+        maybeResumeFiscalAgentAuto()
     }
 
     private suspend fun restoreOfflineBootstrap(cause: Throwable): Boolean {
