@@ -35,6 +35,7 @@ import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.DemoRepository
 import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmContract
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
+import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeStateStore
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.ui.theme.*
 import java.net.URL
@@ -2461,6 +2462,13 @@ private fun SettingsScreen(
                             fontSize = 10.sp,
                             color = healthColor
                         )
+                        if (state.fiscalAgentActiveJobId != null) {
+                            Text(
+                                "Job actif #${state.fiscalAgentActiveJobId} • phase ${state.fiscalAgentActiveJobPhase ?: "?"}",
+                                fontSize = 10.sp,
+                                color = if (state.fiscalAgentActiveJobPhase == FiscalAgentRuntimeStateStore.PHASE_ERROR) MaterialTheme.colorScheme.error else CookitOrange
+                            )
+                        }
                         state.fiscalAgentLastError?.let { error ->
                             Text(
                                 "Dernière erreur (${fiscalAgentAgeLabel(state.fiscalAgentLastErrorEpochMs)}) : ${error.take(220)}",

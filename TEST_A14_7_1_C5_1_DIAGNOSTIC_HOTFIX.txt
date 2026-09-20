@@ -1,0 +1,6 @@
+1. Install over A14.7 without uninstalling.
+2. Keep fiscal profile OFF and Mock debug mode enabled.
+3. Stop Auto before replacing the APK, then re-enable Auto after install.
+4. Create one synthetic success job.
+5. Expected: fiscalized, attempts=1, receipt_count=1.
+6. If it fails, Settings must retain the exact last error and active job phase=ERROR; it must not return to CONNECTED merely because jobs/next is empty while the lease is active.

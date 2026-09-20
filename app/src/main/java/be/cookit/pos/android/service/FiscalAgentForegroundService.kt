@@ -24,6 +24,7 @@ import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmContract
 import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmServer
 import be.cookit.pos.android.data.fiscal.FdmGraphqlClient
 import be.cookit.pos.android.data.fiscal.FdmGraphqlException
+import be.cookit.pos.android.data.fiscal.FdmConnectivityProbe
 import be.cookit.pos.android.data.fiscal.FiscalAgentClient
 import be.cookit.pos.android.data.fiscal.FiscalAgentCredentialStore
 import be.cookit.pos.android.data.fiscal.FiscalAgentException
@@ -74,6 +75,7 @@ class FiscalAgentForegroundService : Service() {
     private lateinit var runner: FiscalAgentRunner
     private lateinit var outcomeDao: FiscalAgentOutcomeDao
     private lateinit var fdmRuntime: FiscalFdmRuntime
+    private lateinit var fdmProbe: FdmConnectivityProbe
     private lateinit var embeddedMock: EmbeddedMockFdmServer
     private lateinit var notifications: NotificationManager
     private lateinit var powerManager: PowerManager
@@ -98,6 +100,7 @@ class FiscalAgentForegroundService : Service() {
         runtimeRepository = FiscalRuntimeRepository(database.fiscalRuntimeDao())
         client = FiscalAgentClient()
         fdmRuntime = FiscalFdmRuntime(FdmGraphqlClient())
+        fdmProbe = FdmConnectivityProbe()
         outcomeDao = database.fiscalAgentOutcomeDao()
         runner = FiscalAgentRunner(client, fdmRuntime, outcomeDao)
         embeddedMock = EmbeddedMockFdmServer(this)
@@ -291,6 +294,25 @@ class FiscalAgentForegroundService : Service() {
                 continue
             }
 
+            if (settings.isMock) {
+                var probe = fdmProbe.probe(settings)
+                if (!probe.transportReady || !probe.graphqlResponded) {
+                    // The embedded Mock is process-global. Heal a stale loopback listener before
+                    // claiming any Cloud job so a local harness issue cannot consume a lease.
+                    embeddedMock.stop()
+                    delay(MOCK_RESTART_GRACE_MS)
+                    embeddedMock.start()
+                    probe = fdmProbe.probe(settings)
+                }
+                if (!probe.transportReady || !probe.graphqlResponded) {
+                    val error = "mock_preflight:${probe.message.orEmpty()}"
+                    stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_FDM_ERROR, error)
+                    publishIdle(error, "FDM ERROR • Mock local non joignable")
+                    delay(RETRY_NOT_READY_MS)
+                    continue
+                }
+            }
+
             val now = System.currentTimeMillis()
             if (now - heartbeatAt >= HEARTBEAT_INTERVAL_MS) {
                 try {
@@ -325,12 +347,22 @@ class FiscalAgentForegroundService : Service() {
             markLoopProgress()
 
             val result = try {
-                runner.processNext(credentials, identity, settings)
+                runner.processNext(credentials, identity, settings) { jobId, phase ->
+                    stateStore.setActiveJob(jobId, phase)
+                    stateStore.setServiceStatus(true, true, "job_phase:$jobId:$phase")
+                    updateNotification("${stateStore.load().health} • Job #$jobId • $phase")
+                    markLoopProgress()
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 val health = classifyFailure(error)
-                stateStore.recordFailure(health, "job:${error.message.orEmpty()}")
+                val runtimeState = stateStore.load()
+                if (runtimeState.activeJobId != null) {
+                    stateStore.markActiveJobError(health, "job:${error.message.orEmpty()}")
+                } else {
+                    stateStore.recordFailure(health, "job:${error.message.orEmpty()}")
+                }
                 stateStore.setServiceStatus(
                     running = true,
                     busy = false,
@@ -349,7 +381,7 @@ class FiscalAgentForegroundService : Service() {
             markLoopProgress()
 
             if (!result.processed) {
-                stateStore.recordHealthy(completedAt)
+                stateStore.recordHealthy(completedAt, clearError = false)
                 stateStore.setServiceStatus(true, false, "job_idle")
                 updateNotification("CONNECTED • aucun job en attente")
                 delay(IDLE_POLL_MS)
@@ -360,7 +392,7 @@ class FiscalAgentForegroundService : Service() {
                 jobId = result.jobId,
                 receiptNumber = result.receiptNumber
             )
-            stateStore.recordHealthy(completedAt)
+            stateStore.clearActiveJobAfterSuccess(completedAt)
             stateStore.setServiceStatus(
                 running = true,
                 busy = false,
@@ -492,5 +524,6 @@ class FiscalAgentForegroundService : Service() {
         private const val WATCHDOG_CHECK_MS = 15_000L
         private const val WATCHDOG_STALL_MS = 90_000L
         private const val WATCHDOG_RESTART_GRACE_MS = 500L
+        private const val MOCK_RESTART_GRACE_MS = 150L
     }
 }

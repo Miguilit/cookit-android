@@ -1,0 +1,10 @@
+Cookit Android A14.7.1 / versionCode 26
+
+Hotfix C5.1:
+- preserves the last fiscal job failure instead of masking it with a subsequent empty poll;
+- tracks the active job phase (CLAIMED/FDM_CALL/PROVIDER_ACCEPTED/REPLAY_LOCAL/CLOUD_SUBMIT/CLOUD_ACK/ERROR);
+- performs a debug-Mock GraphQL preflight before claiming a Cloud job;
+- self-heals a stale embedded Mock listener once before claiming;
+- clears the active failure only after a fiscal job completes successfully.
+
+The certified Checkbox/Eutronix adapter remains fail-closed.

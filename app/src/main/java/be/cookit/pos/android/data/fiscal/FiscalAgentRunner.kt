@@ -19,7 +19,8 @@ class FiscalAgentRunner(
     suspend fun processNext(
         credentials: FiscalAgentCredentials,
         identity: FiscalRuntimeIdentity,
-        settings: FiscalFdmSettings
+        settings: FiscalFdmSettings,
+        onProgress: (Long, String) -> Unit = { _, _ -> }
     ): FiscalAgentRunResult {
         val readiness = fdmRuntime.readiness(settings)
         check(readiness.readyForFiscalization) {
@@ -27,6 +28,7 @@ class FiscalAgentRunner(
         }
 
         val job = client.nextJob(credentials, identity) ?: return FiscalAgentRunResult(processed = false)
+        onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_CLAIMED)
         val event = job.asProviderEvent(identity)
 
         val existing = outcomeDao.byTransactionId(job.id)
@@ -43,6 +45,7 @@ class FiscalAgentRunner(
             }
             val mockHeaders = mockScenario?.let { mapOf("X-Cookit-Mock-Scenario" to it) }.orEmpty()
 
+            onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_FDM_CALL)
             val envelope = fdmRuntime.submitSale(settings, event, headers = mockHeaders)
             val sale = envelope.optJSONObject("data")?.optJSONObject("signSale")
                 ?: throw FdmGraphqlException("FDM response does not contain data.signSale", envelope.toString())
@@ -79,6 +82,12 @@ class FiscalAgentRunner(
             }
         }
 
+        onProgress(
+            job.id,
+            if (replayedFromJournal) FiscalAgentRuntimeStateStore.PHASE_REPLAY_LOCAL
+            else FiscalAgentRuntimeStateStore.PHASE_PROVIDER_ACCEPTED
+        )
+
         // Test-only deterministic window: the provider result is already durable locally, but the
         // cloud transition is intentionally delayed so Wi-Fi can be disabled after FDM acceptance.
         if (!replayedFromJournal && settings.isMock && job.metadata?.optBoolean("test_only", false) == true) {
@@ -88,6 +97,7 @@ class FiscalAgentRunner(
         }
 
         if (outcome.state == FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED) {
+            onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_CLOUD_SUBMIT)
             client.submitted(credentials, job.id, identity)
             outcomeDao.updateState(
                 job.id,
@@ -98,6 +108,7 @@ class FiscalAgentRunner(
 
         val freshOutcome = outcomeDao.byTransactionId(job.id) ?: outcome
         if (freshOutcome.state != FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED) {
+            onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_CLOUD_ACK)
             client.acknowledge(
                 credentials = credentials,
                 transactionId = job.id,

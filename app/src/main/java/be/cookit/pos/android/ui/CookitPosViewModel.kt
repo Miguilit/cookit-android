@@ -103,6 +103,8 @@ data class PosUiState(
     val fiscalAgentWatchdogRestarts: Int = 0,
     val fiscalAgentWakeLockHeld: Boolean = false,
     val fiscalAgentPendingOutcomes: Int = 0,
+    val fiscalAgentActiveJobId: Long? = null,
+    val fiscalAgentActiveJobPhase: String? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
     val printerPort: Int = 9100,
@@ -179,6 +181,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             fiscalAgentWatchdogRestarts = storedFiscalAgentRuntimeState.watchdogRestarts,
             fiscalAgentWakeLockHeld = storedFiscalAgentRuntimeState.wakeLockHeld,
             fiscalAgentPendingOutcomes = storedFiscalAgentRuntimeState.pendingOutcomeCount,
+            fiscalAgentActiveJobId = storedFiscalAgentRuntimeState.activeJobId,
+            fiscalAgentActiveJobPhase = storedFiscalAgentRuntimeState.activeJobPhase,
             printerProvider = printerStore.provider(),
             printerHost = printerStore.host(),
             printerPort = printerStore.port(),
@@ -511,7 +515,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fiscalAgentConsecutiveFailures = 0,
                 fiscalAgentWatchdogRestarts = 0,
                 fiscalAgentWakeLockHeld = false,
-                fiscalAgentPendingOutcomes = 0
+                fiscalAgentPendingOutcomes = 0,
+                fiscalAgentActiveJobId = null,
+                fiscalAgentActiveJobPhase = null
             )
         }
     }
@@ -636,6 +642,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         fiscalAgentWatchdogRestarts = persisted.watchdogRestarts,
                         fiscalAgentWakeLockHeld = persisted.wakeLockHeld,
                         fiscalAgentPendingOutcomes = persisted.pendingOutcomeCount,
+                        fiscalAgentActiveJobId = persisted.activeJobId,
+                        fiscalAgentActiveJobPhase = persisted.activeJobPhase,
                         fiscalAgentMessage = if (persisted.autoEnabled || persisted.serviceRunning) {
                             persisted.lastMessage ?: current.fiscalAgentMessage
                         } else {

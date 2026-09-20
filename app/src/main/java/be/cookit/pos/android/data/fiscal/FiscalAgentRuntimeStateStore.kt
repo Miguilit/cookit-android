@@ -29,7 +29,9 @@ data class FiscalAgentRuntimeState(
     val consecutiveFailures: Int = 0,
     val watchdogRestarts: Int = 0,
     val wakeLockHeld: Boolean = false,
-    val pendingOutcomeCount: Int = 0
+    val pendingOutcomeCount: Int = 0,
+    val activeJobId: Long? = null,
+    val activeJobPhase: String? = null
 ) {
     companion object {
         const val HEALTH_STOPPED = "STOPPED"
@@ -67,7 +69,9 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         consecutiveFailures = prefs.getInt(KEY_CONSECUTIVE_FAILURES, 0).coerceAtLeast(0),
         watchdogRestarts = prefs.getInt(KEY_WATCHDOG_RESTARTS, 0).coerceAtLeast(0),
         wakeLockHeld = prefs.getBoolean(KEY_WAKE_LOCK_HELD, false),
-        pendingOutcomeCount = prefs.getInt(KEY_PENDING_OUTCOMES, 0).coerceAtLeast(0)
+        pendingOutcomeCount = prefs.getInt(KEY_PENDING_OUTCOMES, 0).coerceAtLeast(0),
+        activeJobId = prefs.getLong(KEY_ACTIVE_JOB_ID, NO_JOB_ID).takeIf { it != NO_JOB_ID },
+        activeJobPhase = prefs.getString(KEY_ACTIVE_JOB_PHASE, null)?.takeIf { it.isNotBlank() }
     )
 
     fun setAutoEnabled(enabled: Boolean): FiscalAgentRuntimeState {
@@ -121,18 +125,54 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         return load()
     }
 
-    fun recordHealthy(epochMs: Long, message: String? = null): FiscalAgentRuntimeState {
+    fun recordHealthy(epochMs: Long, message: String? = null, clearError: Boolean = false): FiscalAgentRuntimeState {
+        val current = load()
+        val unresolvedJobFailure = current.activeJobId != null && current.activeJobPhase == PHASE_ERROR
+        val editor = prefs.edit().putLong(KEY_LAST_SUCCESS, epochMs)
+
+        if (!unresolvedJobFailure) {
+            editor.putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_CONNECTED)
+        }
+        if (clearError) {
+            editor.putInt(KEY_CONSECUTIVE_FAILURES, 0)
+                .remove(KEY_LAST_ERROR)
+                .remove(KEY_LAST_ERROR_AT)
+        }
+        if (!message.isNullOrBlank()) editor.putString(KEY_LAST_MESSAGE, message)
+        editor.apply()
+        return load()
+    }
+
+    fun setActiveJob(jobId: Long, phase: String): FiscalAgentRuntimeState {
+        prefs.edit()
+            .putLong(KEY_ACTIVE_JOB_ID, jobId)
+            .putString(KEY_ACTIVE_JOB_PHASE, phase)
+            .apply()
+        return load()
+    }
+
+    fun markActiveJobError(health: String, error: String, epochMs: Long = System.currentTimeMillis()): FiscalAgentRuntimeState {
+        val current = load()
         val editor = prefs.edit()
+            .putString(KEY_ACTIVE_JOB_PHASE, PHASE_ERROR)
+            .putString(KEY_HEALTH, health)
+            .putLong(KEY_LAST_ERROR_AT, epochMs)
+            .putString(KEY_LAST_ERROR, error.take(320))
+            .putInt(KEY_CONSECUTIVE_FAILURES, current.consecutiveFailures + 1)
+        editor.apply()
+        return load()
+    }
+
+    fun clearActiveJobAfterSuccess(epochMs: Long): FiscalAgentRuntimeState {
+        prefs.edit()
+            .remove(KEY_ACTIVE_JOB_ID)
+            .remove(KEY_ACTIVE_JOB_PHASE)
             .putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_CONNECTED)
             .putLong(KEY_LAST_SUCCESS, epochMs)
             .putInt(KEY_CONSECUTIVE_FAILURES, 0)
             .remove(KEY_LAST_ERROR)
-        if (message.isNullOrBlank()) {
-            // Keep the operational lastMessage (job_idle/job_ok/etc.) when no replacement is supplied.
-        } else {
-            editor.putString(KEY_LAST_MESSAGE, message)
-        }
-        editor.apply()
+            .remove(KEY_LAST_ERROR_AT)
+            .apply()
         return load()
     }
 
@@ -211,6 +251,17 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         private const val KEY_WATCHDOG_RESTARTS = "watchdog_restarts"
         private const val KEY_WAKE_LOCK_HELD = "wake_lock_held"
         private const val KEY_PENDING_OUTCOMES = "pending_outcome_count"
+        private const val KEY_ACTIVE_JOB_ID = "active_job_id"
+        private const val KEY_ACTIVE_JOB_PHASE = "active_job_phase"
+
+        const val PHASE_CLAIMED = "CLAIMED"
+        const val PHASE_FDM_CALL = "FDM_CALL"
+        const val PHASE_PROVIDER_ACCEPTED = "PROVIDER_ACCEPTED"
+        const val PHASE_REPLAY_LOCAL = "REPLAY_LOCAL"
+        const val PHASE_CLOUD_SUBMIT = "CLOUD_SUBMIT"
+        const val PHASE_CLOUD_ACK = "CLOUD_ACK"
+        const val PHASE_ERROR = "ERROR"
+
         private const val NO_JOB_ID = Long.MIN_VALUE
         private const val NO_EPOCH = Long.MIN_VALUE
     }
