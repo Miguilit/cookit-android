@@ -313,8 +313,10 @@ class EmbeddedMockFdmServer(context: Context) {
         val receipt = remembered.receipt
         val duplicate = remembered.duplicate
 
-        if (scenario == "lost_response") {
+        if (scenario == "lost_response" || (scenario == "lost_response_once" && !duplicate)) {
             // The mock has durably accepted the idempotency key, but intentionally drops the HTTP reply.
+            // lost_response always drops; lost_response_once drops only the first acceptance so the
+            // lease retry can recover the same receipt with duplicate=true.
             return
         }
 

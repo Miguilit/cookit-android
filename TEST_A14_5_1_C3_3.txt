@@ -1,0 +1,17 @@
+C3.3-A expected flow with auto worker ON:
+
+1. Create a Cloud test transaction with metadata:
+   test_only=true
+   scenario=lost_response_once
+   campaign=C3.3-A
+2. Android claims attempt #1.
+3. Mock durably creates the receipt but drops the HTTP reply.
+4. Cloud transaction remains claimed, with no submitted_at/fiscalized_at.
+5. Wait for claim lease expiry (currently ~120s).
+6. Android auto polling claims the same transaction again; attempts becomes 2.
+7. Mock returns the SAME receipt and duplicate=true.
+8. Android posts submitted then acknowledge.
+9. Cloud transaction becomes fiscalized and exactly one fiscal_receipts row exists.
+10. fiscal_profiles.enabled must remain 0.
+
+Do not use this test result as fiscal certification evidence.

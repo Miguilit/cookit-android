@@ -1,0 +1,9 @@
+Base required: Cookit Android A14.5 (versionCode 17).
+Target: A14.5.1 (versionCode 18).
+
+1. Backup the three overwritten files if desired.
+2. unzip -o CookitAndroid_A14_5_1_C3_3_LOST_RESPONSE_ONCE_20260920.zip -d "$ANDROID_ROOT"
+3. git diff --check
+4. grep -nE 'versionCode|versionName' app/build.gradle.kts
+5. Commit/push and let GitHub Actions build the signed APK.
+6. Install over A14.5; do not uninstall, so runtime identity and Android Keystore credentials stay intact.

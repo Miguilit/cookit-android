@@ -29,7 +29,18 @@ class FiscalAgentRunner(
         val job = client.nextJob(credentials, identity) ?: return FiscalAgentRunResult(processed = false)
         val event = job.asProviderEvent(identity)
 
-        val envelope = fdmRuntime.submitSale(settings, event)
+        val metadata = job.metadata
+        val mockScenario = if (settings.isMock && metadata?.optBoolean("test_only", false) == true) {
+            metadata.optString("scenario")
+                .trim()
+                .lowercase()
+                .takeIf { it in ALLOWED_MOCK_SCENARIOS }
+        } else {
+            null
+        }
+        val mockHeaders = mockScenario?.let { mapOf("X-Cookit-Mock-Scenario" to it) }.orEmpty()
+
+        val envelope = fdmRuntime.submitSale(settings, event, headers = mockHeaders)
         val sale = envelope.optJSONObject("data")?.optJSONObject("signSale")
             ?: throw FdmGraphqlException("FDM response does not contain data.signSale", envelope.toString())
         if (!sale.optBoolean("success", false)) {
@@ -73,6 +84,20 @@ class FiscalAgentRunner(
             publicId = job.publicId,
             receiptNumber = receiptNumber,
             duplicate = duplicate
+        )
+    }
+
+    companion object {
+        private val ALLOWED_MOCK_SCENARIOS = setOf(
+            "success",
+            "lost_response",
+            "lost_response_once",
+            "graphql_error",
+            "http_500",
+            "malformed",
+            "auth_required",
+            "slow",
+            "timeout"
         )
     }
 }

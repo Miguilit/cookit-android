@@ -1,0 +1,4 @@
+7e10816e2a73d910edb8e37fbb86b4a267930a0eef2ceeaabb182c2dd273cc10  app/build.gradle.kts
+03ffff70b6d4a5ef1779d955a0d9844e6b6236cfde376c368b4c096fb67d768b  app/src/debug/java/be/cookit/pos/android/data/fiscal/EmbeddedMockFdmServer.kt
+c6fe572ecb483e273db19612c7a978b79433e14693195e1d00769833e54944d5  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentRunner.kt
+d9976e7ddec9e4d8aae0b4db92772c5009c555921e52eb2beccae1a67c0a12a8  docs/A14_5_1_C3_3_LOST_RESPONSE_ONCE.md
