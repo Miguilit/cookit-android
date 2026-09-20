@@ -1,0 +1,24 @@
+Cookit Android A14.7 / C5.1 — Fiscal Agent Health + Watchdog
+============================================================
+
+Base attendue: A14.6.3 / versionCode 24.
+Livrable: 0.14.7 / versionCode 25.
+Aucune migration Room. Les nouvelles métriques sont non secrètes et persistent dans le même SharedPreferences du Fiscal Agent.
+
+Ajouts:
+- health persistant: STARTING / CONNECTED / DEGRADED / OFFLINE / FDM_ERROR / CONFIG_ERROR / STOPPED;
+- timestamps: service start, loop tick, heartbeat, poll attempt, poll success, success/error;
+- compteurs: consecutive failures, watchdog restarts, pending provider outcomes;
+- état screen-off wake-lock visible;
+- notification système reflétant l'état health;
+- watchdog indépendant de la boucle fiscale.
+
+Règle anti-double du watchdog:
+- un stall détecté alors que serviceBusy=true ne lance JAMAIS une seconde boucle fiscale en parallèle;
+- le runtime passe DEGRADED et laisse l'appel borné en cours se terminer;
+- seul un stall idle/non-busy peut entraîner une relance de boucle.
+
+Invariant:
+- Mock FDM reste debug-only;
+- Checkbox/Eutronix réel reste fail-closed;
+- aucune activation de fiscal_profiles.enabled.

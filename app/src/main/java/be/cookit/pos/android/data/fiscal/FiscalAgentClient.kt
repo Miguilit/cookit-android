@@ -108,7 +108,7 @@ class FiscalAgentClient {
         .put("provider", settings.provider)
         .put("agent_version", BuildConfig.VERSION_NAME)
         .put("protocol_version", "sce2_graphql")
-        .put("capabilities", JSONArray(listOf("durable_outbox", "offline_recovery", "local_fdm_graphql", "cloud_job_runner_c3", "foreground_service_c4", "durable_provider_outcome_journal")))
+        .put("capabilities", JSONArray(listOf("durable_outbox", "offline_recovery", "local_fdm_graphql", "cloud_job_runner_c3", "foreground_service_c4", "durable_provider_outcome_journal", "health_watchdog_c5_1")))
 
     fun defaultHeartbeatPayload(
         identity: FiscalRuntimeIdentity,

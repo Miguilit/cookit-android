@@ -1,0 +1,19 @@
+Cookit Android A14.7 / C5.1 — Test rapide
+=========================================
+
+1. Installer par-dessus A14.6.3, sans désinstaller.
+2. Ouvrir Cookit > Réglages > Fiscal Agent.
+3. Auto doit conserver son état précédent.
+4. Après 10-15 s en ligne, attendu:
+   - Health CONNECTED
+   - loop récent (<10 s environ)
+   - poll récent (<10 s environ)
+   - pending=0 en régime normal
+   - watchdog=0 en régime normal
+5. Créer un job Mock normal. Attendu: fiscalized / attempts=1 / receipt_count=1.
+6. Couper le Wi-Fi 25-40 s. Attendu: OFFLINE ou DEGRADED + dernière erreur renseignée.
+7. Rallumer le Wi-Fi sans relancer Cookit. Attendu: retour CONNECTED et consecutiveFailures remis à 0 après un poll réussi.
+8. Verrouiller l'écran: C4 screen-off wake-lock continue de fonctionner; après déverrouillage, health doit revenir/être CONNECTED.
+
+Note watchdog:
+Le watchdog a un seuil de stall de 90 s. Par sécurité fiscale, il ne crée jamais un retry parallèle si une opération est marquée busy.

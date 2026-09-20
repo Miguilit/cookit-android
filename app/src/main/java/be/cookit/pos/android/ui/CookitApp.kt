@@ -34,6 +34,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.DemoRepository
 import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmContract
+import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.ui.theme.*
 import java.net.URL
@@ -86,6 +87,17 @@ private fun mobileScreens(policy: NativePolicy): List<Screen> = buildList {
     if (policy.canUsePos) add(Screen.CASH)
     add(Screen.SETTINGS)
 }.distinct()
+
+private fun fiscalAgentAgeLabel(epochMs: Long?): String {
+    if (epochMs == null) return "—"
+    val ageSeconds = ((System.currentTimeMillis() - epochMs).coerceAtLeast(0L) / 1_000L)
+    return when {
+        ageSeconds < 2L -> "<2s"
+        ageSeconds < 60L -> "${ageSeconds}s"
+        ageSeconds < 3_600L -> "${ageSeconds / 60L}m"
+        else -> "${ageSeconds / 3_600L}h"
+    }
+}
 
 @Composable
 fun CookitApp(vm: CookitPosViewModel = viewModel()) {
@@ -2429,40 +2441,64 @@ private fun SettingsScreen(
                     }
                     if (state.fiscalAgentConfigured) {
                         Text(
-                            "C4 • auto=${if (state.fiscalAgentAutoRunning) "ON" else "OFF"} • service=${if (state.fiscalAgentServiceRunning) "RUNNING" else "STOPPED"} • traités=${state.fiscalAgentProcessedJobs}" +
+                            "C5.1 • auto=${if (state.fiscalAgentAutoRunning) "ON" else "OFF"} • service=${if (state.fiscalAgentServiceRunning) "RUNNING" else "STOPPED"} • traités=${state.fiscalAgentProcessedJobs}" +
                                 (state.fiscalAgentLastJobId?.let { " • dernier job #$it" } ?: "") +
                                 (state.fiscalAgentLastReceipt?.let { " • reçu $it" } ?: ""),
                             fontSize = 10.sp,
                             color = if (state.fiscalAgentAutoRunning) CookitGreen else CookitMuted
                         )
+
+                        val healthColor = when (state.fiscalAgentHealth) {
+                            FiscalAgentRuntimeState.HEALTH_CONNECTED -> CookitGreen
+                            FiscalAgentRuntimeState.HEALTH_DEGRADED -> CookitOrange
+                            FiscalAgentRuntimeState.HEALTH_OFFLINE,
+                            FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
+                            FiscalAgentRuntimeState.HEALTH_CONFIG_ERROR -> MaterialTheme.colorScheme.error
+                            else -> CookitMuted
+                        }
+                        Text(
+                            "Health ${state.fiscalAgentHealth} • loop ${fiscalAgentAgeLabel(state.fiscalAgentLastLoopTickEpochMs)} • heartbeat ${fiscalAgentAgeLabel(state.fiscalAgentLastHeartbeatEpochMs)} • poll ${fiscalAgentAgeLabel(state.fiscalAgentLastPollEpochMs)} • pending=${state.fiscalAgentPendingOutcomes} • watchdog=${state.fiscalAgentWatchdogRestarts} • wake=${if (state.fiscalAgentWakeLockHeld) "ON" else "OFF"}",
+                            fontSize = 10.sp,
+                            color = healthColor
+                        )
+                        state.fiscalAgentLastError?.let { error ->
+                            Text(
+                                "Dernière erreur (${fiscalAgentAgeLabel(state.fiscalAgentLastErrorEpochMs)}) : ${error.take(220)}",
+                                fontSize = 10.sp,
+                                color = CookitMuted
+                            )
+                        }
                     }
                 }
 
                 val agentStatus = when {
-                    state.fiscalAgentMessage == null -> "C4 prêt : le mode Auto exécute désormais le Fiscal Agent dans un service Android de premier plan indépendant de l’écran POS."
+                    state.fiscalAgentMessage == null -> "C5.1 prêt : service autonome + health ledger + watchdog persistant."
                     state.fiscalAgentMessage == "credentials_saved" -> "Identifiants Fiscal Agent enregistrés dans Android Keystore."
                     state.fiscalAgentMessage == "credentials_cleared" -> "Identifiants Fiscal Agent supprimés."
                     state.fiscalAgentMessage == "handshake_running" -> "Handshake Fiscal Agent en cours…"
                     state.fiscalAgentMessage == "handshake_ok" -> "Handshake Fiscal Agent réussi."
                     state.fiscalAgentMessage == "heartbeat_running" -> "Heartbeat Fiscal Agent en cours…"
                     state.fiscalAgentMessage == "heartbeat_ok" -> "Heartbeat Fiscal Agent réussi."
-                    state.fiscalAgentMessage == "service_starting" -> "C4 : démarrage du service Fiscal Agent…"
-                    state.fiscalAgentMessage == "service_running" -> "C4 : service Fiscal Agent actif en arrière-plan."
-                    state.fiscalAgentMessage == "service_restarting" -> "C4 : Android redémarre le service Fiscal Agent…"
-                    state.fiscalAgentMessage == "job_polling" -> "C4 : récupération manuelle du prochain job fiscal cloud…"
-                    state.fiscalAgentMessage == "job_idle" -> "C4 : service actif, aucun job fiscal en attente."
-                    state.fiscalAgentMessage == "auto_started" -> "C4 : service Fiscal Agent démarré."
-                    state.fiscalAgentMessage == "auto_resumed" -> "C4 : service Fiscal Agent restauré après redémarrage."
-                    state.fiscalAgentMessage == "auto_polling" -> "C4 : service Fiscal Agent actif, polling cloud…"
-                    state.fiscalAgentMessage == "auto_stopped" -> "C4 : service Fiscal Agent arrêté."
+                    state.fiscalAgentMessage == "service_starting" -> "C5.1 : démarrage du service Fiscal Agent…"
+                    state.fiscalAgentMessage == "service_running" -> "C5.1 : service Fiscal Agent actif en arrière-plan."
+                    state.fiscalAgentMessage == "service_restarting" -> "C5.1 : Android redémarre le service Fiscal Agent…"
+                    state.fiscalAgentMessage == "job_polling" -> "C5.1 : récupération manuelle du prochain job fiscal cloud…"
+                    state.fiscalAgentMessage == "job_idle" -> "C5.1 : service actif, aucun job fiscal en attente."
+                    state.fiscalAgentMessage == "auto_started" -> "C5.1 : service Fiscal Agent démarré."
+                    state.fiscalAgentMessage == "auto_resumed" -> "C5.1 : service Fiscal Agent restauré après redémarrage."
+                    state.fiscalAgentMessage == "auto_polling" -> "C5.1 : service Fiscal Agent actif, polling cloud…"
+                    state.fiscalAgentMessage == "auto_stopped" -> "C5.1 : service Fiscal Agent arrêté."
+                    state.fiscalAgentMessage == "watchdog_restart" -> "C5.1 : watchdog — boucle fiscale relancée après détection d’un stall."
+                    state.fiscalAgentMessage == "watchdog_busy_stall" -> "C5.1 : watchdog — opération en vol potentiellement bloquée ; aucun retry parallèle n’est lancé pour éviter un doublon FDM."
+                    state.fiscalAgentMessage == "screen_off_wakelock_acquired" -> "C5.1 : écran éteint — wake lock fiscal actif."
                     state.fiscalAgentMessage == "credentials_incomplete" -> "Device ID et token sont requis."
                     state.fiscalAgentMessage == "credentials_or_identity_missing" -> "Identité runtime ou credentials Fiscal Agent manquants."
                     state.fiscalAgentMessage == "forbidden" -> "Action réservée à un compte autorisé hors mode démo."
                     state.fiscalAgentMessage.startsWith("job_ok:") -> {
                         val parts = state.fiscalAgentMessage.split(':')
-                        "C4 PASS • job #${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()} • replayLocal=${parts.getOrNull(4).orEmpty()}"
+                        "C5.1 PASS • job #${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()} • replayLocal=${parts.getOrNull(4).orEmpty()}"
                     }
-                    state.fiscalAgentMessage.startsWith("job_failed:") -> "C4 job/retry : ${state.fiscalAgentMessage.substringAfter(':').take(220)}"
+                    state.fiscalAgentMessage.startsWith("job_failed:") -> "C5.1 job/retry : ${state.fiscalAgentMessage.substringAfter(':').take(220)}"
                     state.fiscalAgentMessage.startsWith("agent_provider_gated:") -> "Adapter FDM verrouillé : ${state.fiscalAgentMessage.substringAfter(':').take(200)}"
                     state.fiscalAgentMessage.startsWith("agent_mock_unavailable:") -> "Mock FDM embarqué indisponible : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
                     state.fiscalAgentMessage.startsWith("handshake_failed:") -> "Handshake échoué : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
@@ -2471,7 +2507,7 @@ private fun SettingsScreen(
                 }
                 Text(agentStatus, fontSize = 11.sp, color = CookitMuted)
                 Text(
-                    "C4 exécute cloud → service Android → adapter FDM → journal Room durable → submitted/ack cloud, même lorsque l’écran POS est fermé. Le Mock reste debug-only ; l’adapter Checkbox/Eutronix reste fail-closed jusqu’au mapping certifié.",
+                    "C5.1 ajoute santé persistante, compteur d’échecs, pending outcomes et watchdog de boucle au runtime C4. Le Mock reste debug-only ; l’adapter Checkbox/Eutronix reste fail-closed jusqu’au mapping certifié.",
                     fontSize = 10.sp,
                     color = CookitMuted
                 )
