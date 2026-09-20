@@ -414,9 +414,16 @@ class FiscalAgentForegroundService : Service() {
     private fun classifyFailure(error: Throwable): String = when (error) {
         is FdmGraphqlException,
         is FiscalProviderMappingUnavailable -> FiscalAgentRuntimeState.HEALTH_FDM_ERROR
+        is FiscalAgentTransportException,
         is FiscalAgentException -> FiscalAgentRuntimeState.HEALTH_OFFLINE
         is FiscalAgentIntegrityException -> FiscalAgentRuntimeState.HEALTH_DEGRADED
-        is IOException -> FiscalAgentRuntimeState.HEALTH_DEGRADED
+        is IOException -> {
+            if (stateStore.load().activeJobPhase == FiscalAgentRuntimeStateStore.PHASE_FDM_CALL) {
+                FiscalAgentRuntimeState.HEALTH_FDM_ERROR
+            } else {
+                FiscalAgentRuntimeState.HEALTH_DEGRADED
+            }
+        }
         else -> FiscalAgentRuntimeState.HEALTH_DEGRADED
     }
 

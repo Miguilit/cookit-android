@@ -131,7 +131,9 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         val editor = prefs.edit().putLong(KEY_LAST_SUCCESS, epochMs)
 
         if (!unresolvedJobFailure) {
-            editor.putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_CONNECTED)
+            editor
+                .putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_CONNECTED)
+                .putInt(KEY_CONSECUTIVE_FAILURES, 0)
         }
         if (clearError) {
             editor.putInt(KEY_CONSECUTIVE_FAILURES, 0)

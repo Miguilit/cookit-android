@@ -4,6 +4,7 @@ import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.domain.FiscalRuntimeIdentity
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
@@ -21,6 +22,7 @@ data class FiscalAgentCredentials(
 }
 
 class FiscalAgentException(message: String, val responseBody: String = "") : Exception(message)
+class FiscalAgentTransportException(message: String, cause: Throwable) : Exception(message, cause)
 
 /**
  * Device-auth transport for the Cookit Fiscal Agent contract.
@@ -50,24 +52,33 @@ class FiscalAgentClient {
         require(credentials.configured) { "Fiscal Agent credentials not configured" }
         val runtime = URLEncoder.encode(identity.runtimeId, StandardCharsets.UTF_8.name())
         val path = "/api/v1/fiscal/agent/jobs/next?runtime_id=$runtime&runtime_type=android_pos"
-        val connection = open(path, "GET", credentials)
         try {
-            val code = connection.responseCode
-            if (code == 204) return@withContext null
-            val text = readResponse(connection, code)
-            if (code !in 200..299) throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text)
-            if (text.isBlank()) return@withContext null
+            val connection = open(path, "GET", credentials)
+            try {
+                val code = connection.responseCode
+                if (code == 204) return@withContext null
+                val text = readResponse(connection, code)
+                if (code !in 200..299) throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text)
+                if (text.isBlank()) return@withContext null
 
-            val envelope = JSONObject(text)
-            if (!envelope.optBoolean("success", true)) {
-                throw FiscalAgentException("Cookit Fiscal Agent returned success=false", text)
+                val envelope = JSONObject(text)
+                if (!envelope.optBoolean("success", true)) {
+                    throw FiscalAgentException("Cookit Fiscal Agent returned success=false", text)
+                }
+                if (envelope.isNull("data")) return@withContext null
+                val data = envelope.optJSONObject("data")
+                    ?: throw FiscalAgentException("Cookit Fiscal Agent returned malformed job data", text)
+                FiscalAgentJob.fromJson(data)
+            } finally {
+                connection.disconnect()
             }
-            if (envelope.isNull("data")) return@withContext null
-            val data = envelope.optJSONObject("data")
-                ?: throw FiscalAgentException("Cookit Fiscal Agent returned malformed job data", text)
-            FiscalAgentJob.fromJson(data)
-        } finally {
-            connection.disconnect()
+        } catch (error: FiscalAgentException) {
+            throw error
+        } catch (error: IOException) {
+            throw FiscalAgentTransportException(
+                "Cookit Cloud transport unavailable: ${error.message.orEmpty()}",
+                error
+            )
         }
     }
 
@@ -129,15 +140,24 @@ class FiscalAgentClient {
         body: JSONObject
     ): JSONObject = withContext(Dispatchers.IO) {
         require(credentials.configured) { "Fiscal Agent credentials not configured" }
-        val connection = open(path, "POST", credentials).apply { doOutput = true }
         try {
-            connection.outputStream.bufferedWriter(StandardCharsets.UTF_8).use { it.write(body.toString()) }
-            val code = connection.responseCode
-            val text = readResponse(connection, code)
-            if (code !in 200..299) throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text)
-            if (text.isBlank()) JSONObject() else JSONObject(text)
-        } finally {
-            connection.disconnect()
+            val connection = open(path, "POST", credentials).apply { doOutput = true }
+            try {
+                connection.outputStream.bufferedWriter(StandardCharsets.UTF_8).use { it.write(body.toString()) }
+                val code = connection.responseCode
+                val text = readResponse(connection, code)
+                if (code !in 200..299) throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text)
+                if (text.isBlank()) JSONObject() else JSONObject(text)
+            } finally {
+                connection.disconnect()
+            }
+        } catch (error: FiscalAgentException) {
+            throw error
+        } catch (error: IOException) {
+            throw FiscalAgentTransportException(
+                "Cookit Cloud transport unavailable: ${error.message.orEmpty()}",
+                error
+            )
         }
     }
 

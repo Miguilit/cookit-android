@@ -1,0 +1,7 @@
+C5.1-B validation
+1. auto=ON, service=RUNNING, health CONNECTED.
+2. Disable Wi-Fi for 20-30 seconds.
+3. Expected: Health OFFLINE; last error contains Cookit Cloud transport unavailable / resolve host; heartbeat/poll ages increase.
+4. Re-enable Wi-Fi without touching auto.
+5. Expected: Health CONNECTED automatically; consecutiveFailures reset to 0; last error may remain visible as historical diagnostic.
+6. Verify agent last_seen_at resumes.

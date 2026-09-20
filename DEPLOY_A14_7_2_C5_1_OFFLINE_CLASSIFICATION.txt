@@ -1,0 +1,9 @@
+Cookit Android A14.7.2 / versionCode 27
+
+C5.1-B hotfix:
+- Wrap Cookit Cloud I/O failures in FiscalAgentTransportException.
+- Classify Cloud transport failures as OFFLINE instead of DEGRADED.
+- Keep local FDM I/O failures distinct (FDM_ERROR while phase=FDM_CALL).
+- Successful recovery resets consecutive failure counter while preserving last-error history unless explicitly cleared.
+
+No backend change. No Room migration. Fiscal profile stays OFF.
