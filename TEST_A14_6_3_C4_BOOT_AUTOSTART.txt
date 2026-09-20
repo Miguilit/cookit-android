@@ -1,0 +1,11 @@
+C4.3 test
+1. Install A14.6.3 over A14.6.2; do not clear app data.
+2. Open Cookit once; verify Auto=ON and service running.
+3. Reboot tablet normally. Do not open Cookit after reboot.
+4. Wait for Android boot to complete and Wi-Fi to reconnect.
+5. Create a synthetic Mock fiscal job from Cloud.
+6. PASS: job becomes fiscalized while Cookit UI was never opened after reboot; attempts=1; receipt_count=1.
+7. Verify fiscal profile remains enabled=0 / fdm_required=1.
+
+Negative control after PASS:
+- Stop Auto intentionally, reboot, create a test job. It must remain queued until Auto is enabled again.

@@ -1,0 +1,12 @@
+Cookit Android A14.6.3 / versionCode 24
+C4.3 boot autostart hardening
+
+Changes:
+- RECEIVE_BOOT_COMPLETED permission
+- FiscalAgentBootReceiver
+- Restarts FiscalAgentForegroundService after BOOT_COMPLETED only when autoEnabled=true
+- Restarts after MY_PACKAGE_REPLACED when autoEnabled=true
+- Keeps A14.6.2 screen-off PARTIAL_WAKE_LOCK behavior
+- Does not start Fiscal Agent when Auto was OFF
+- No backend schema/API changes
+- Real Checkbox/Eutronix adapter remains fail-closed
