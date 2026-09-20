@@ -43,15 +43,21 @@ class EmbeddedMockFdmServer(context: Context) {
         val error: String? = null
     )
 
-    private val running = AtomicBoolean(false)
     private val receiptLock = Any()
     private val receiptPrefs = context.applicationContext.getSharedPreferences(
         "cookit_embedded_mock_fdm_receipts",
         Context.MODE_PRIVATE
     )
-    @Volatile private var serverSocket: ServerSocket? = null
-    @Volatile private var acceptThread: Thread? = null
-    @Volatile private var lastError: String? = null
+
+    // C4: the debug Mock is process-global. The POS ViewModel and foreground Fiscal Agent service
+    // may each instantiate this wrapper, but there must still be only one loopback server bound to
+    // 127.0.0.1:8787. Shared process state also lets the service recover after the UI is destroyed.
+    companion object {
+        private val running = AtomicBoolean(false)
+        @Volatile private var serverSocket: ServerSocket? = null
+        @Volatile private var acceptThread: Thread? = null
+        @Volatile private var lastError: String? = null
+    }
 
     fun start(): EmbeddedMockFdmStatus {
         if (running.get()) return status()

@@ -1,0 +1,10 @@
+A14.6 / versionCode 21
+Apply on top of A14.5.3.
+
+unzip -o CookitAndroid_A14_6_C4_FOREGROUND_FISCAL_AGENT_20260920.zip -d "$ANDROID_ROOT"
+git diff --check
+grep -nE 'versionCode|versionName' app/build.gradle.kts
+
+Expected:
+versionCode = 21
+versionName = "0.14.6"

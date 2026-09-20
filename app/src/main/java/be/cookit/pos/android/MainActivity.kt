@@ -6,12 +6,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import be.cookit.pos.android.service.FiscalAgentServiceController
 import be.cookit.pos.android.ui.CookitApp
 import be.cookit.pos.android.ui.theme.CookitTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // C4: once an authorized operator enabled Auto, reopening Cookit resumes the device-level
+        // foreground Fiscal Agent even before the POS UI finishes its cloud bootstrap.
+        FiscalAgentServiceController.resumeIfEnabled(this)
 
         // Dark status bar: date/time/Wi-Fi/battery remain readable on restaurant tablets.
         enableEdgeToEdge(

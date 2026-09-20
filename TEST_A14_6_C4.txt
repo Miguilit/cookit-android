@@ -1,0 +1,17 @@
+C4 smoke / lifecycle test
+
+1. Install A14.6 over A14.5.3 without uninstalling.
+2. Verify runtime ID, terminal ID, Fiscal Agent credentials and Room history are preserved.
+3. In Fiscal Agent, enable Auto.
+4. Expected UI: C4 • auto=ON • service=RUNNING.
+5. Android should keep a foreground-service notification/active-app indication (visibility depends on notification permission/settings).
+6. Press Home and remove Cookit from Recents. DO NOT Force stop.
+7. Create a test-only cloud fiscal job while Cookit UI is closed.
+8. Expected: foreground service claims and fiscalizes the job through the debug Mock, with one cloud receipt.
+9. Reopen Cookit: counters/last job/receipt must reflect the service-processed job.
+10. Tap Arrêter auto: service=STOPPED and no further cloud jobs are claimed.
+11. Release build must keep Mock unavailable and Checkbox/Eutronix mapping fail-closed.
+
+Force-stop rule:
+- Android Force stop intentionally stops the service and blocks background restart.
+- Reopening Cookit must resume the service if Auto remained persisted ON.

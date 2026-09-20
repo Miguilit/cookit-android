@@ -9,6 +9,7 @@ import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.*
 import be.cookit.pos.android.data.fiscal.*
 import be.cookit.pos.android.domain.*
+import be.cookit.pos.android.service.FiscalAgentServiceController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -85,6 +86,7 @@ data class PosUiState(
     val fiscalAgentMessage: String? = null,
     val fiscalAgentBusy: Boolean = false,
     val fiscalAgentAutoRunning: Boolean = false,
+    val fiscalAgentServiceRunning: Boolean = false,
     val fiscalAgentProcessedJobs: Int = 0,
     val fiscalAgentLastJobId: Long? = null,
     val fiscalAgentLastReceipt: String? = null,
@@ -144,6 +146,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             embeddedMockFdmStatus = embeddedMockFdmServer.status(),
             fiscalAgentConfigured = fiscalAgentCredentialStore.configured(),
             fiscalAgentDeviceHint = fiscalAgentCredentialStore.deviceHint(),
+            fiscalAgentAutoRunning = storedFiscalAgentRuntimeState.autoEnabled,
+            fiscalAgentServiceRunning = storedFiscalAgentRuntimeState.serviceRunning,
+            fiscalAgentBusy = storedFiscalAgentRuntimeState.serviceBusy,
+            fiscalAgentMessage = storedFiscalAgentRuntimeState.lastMessage,
             fiscalAgentProcessedJobs = storedFiscalAgentRuntimeState.processedJobs,
             fiscalAgentLastJobId = storedFiscalAgentRuntimeState.lastJobId,
             fiscalAgentLastReceipt = storedFiscalAgentRuntimeState.lastReceipt,
@@ -159,7 +165,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private var token: String? = null
     private var pollingJob: Job? = null
     private var fiscalSyncJob: Job? = null
-    private var fiscalAgentWorkerJob: Job? = null
+    private var fiscalAgentStateMirrorJob: Job? = null
     private val knownOrderIds = linkedSetOf<Long>()
     private val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
 
@@ -170,6 +176,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             val embeddedStatus = embeddedMockFdmServer.start()
             _ui.update { it.copy(embeddedMockFdmStatus = embeddedStatus) }
         }
+        startFiscalAgentStateMirror()
         viewModelScope.launch { initializeFiscalRuntime() }
         val savedToken = sessionStore.token()
         val savedEmail = sessionStore.email()
@@ -202,7 +209,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun enterDemo() {
         pollingJob?.cancel()
         fiscalSyncJob?.cancel()
-        fiscalAgentWorkerJob?.cancel()
         _ui.update {
             PosUiState(
                 authenticated = true,
@@ -223,6 +229,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
+                fiscalAgentBusy = it.fiscalAgentBusy,
+                fiscalAgentAutoRunning = it.fiscalAgentAutoRunning,
+                fiscalAgentServiceRunning = it.fiscalAgentServiceRunning,
                 fiscalAgentProcessedJobs = it.fiscalAgentProcessedJobs,
                 fiscalAgentLastJobId = it.fiscalAgentLastJobId,
                 fiscalAgentLastReceipt = it.fiscalAgentLastReceipt,
@@ -238,7 +247,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun logout() {
         pollingJob?.cancel()
         fiscalSyncJob?.cancel()
-        fiscalAgentWorkerJob?.cancel()
         token = null
         knownOrderIds.clear()
         sessionStore.clearSession()
@@ -262,6 +270,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
+                fiscalAgentBusy = it.fiscalAgentBusy,
+                fiscalAgentAutoRunning = it.fiscalAgentAutoRunning,
+                fiscalAgentServiceRunning = it.fiscalAgentServiceRunning,
                 fiscalAgentProcessedJobs = it.fiscalAgentProcessedJobs,
                 fiscalAgentLastJobId = it.fiscalAgentLastJobId,
                 fiscalAgentLastReceipt = it.fiscalAgentLastReceipt,
@@ -448,8 +459,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearFiscalAgentCredentials() {
         if (!_ui.value.policy.canManageSettings) return
-        fiscalAgentWorkerJob?.cancel()
-        fiscalAgentWorkerJob = null
+        FiscalAgentServiceController.stop(getApplication())
         fiscalAgentCredentialStore.clear()
         fiscalAgentRuntimeStateStore.clear()
         _ui.update {
@@ -459,6 +469,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fiscalAgentMessage = "credentials_cleared",
                 fiscalAgentBusy = false,
                 fiscalAgentAutoRunning = false,
+                fiscalAgentServiceRunning = false,
                 fiscalAgentProcessedJobs = 0,
                 fiscalAgentLastJobId = null,
                 fiscalAgentLastReceipt = null
@@ -524,54 +535,31 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (_ui.value.fiscalAgentAutoRunning) return
         if (!canRunFiscalAgent()) return
 
-        fiscalAgentRuntimeStateStore.setAutoEnabled(true)
-        launchFiscalAgentWorker(resumed = false)
+        FiscalAgentServiceController.start(getApplication())
+        val persisted = fiscalAgentRuntimeStateStore.load()
+        _ui.update {
+            it.copy(
+                fiscalAgentAutoRunning = true,
+                fiscalAgentServiceRunning = persisted.serviceRunning,
+                fiscalAgentMessage = "auto_started"
+            )
+        }
     }
 
     fun stopFiscalAgentAuto() {
-        fiscalAgentRuntimeStateStore.setAutoEnabled(false)
-        fiscalAgentWorkerJob?.cancel()
-        fiscalAgentWorkerJob = null
+        FiscalAgentServiceController.stop(getApplication())
         _ui.update {
             it.copy(
                 fiscalAgentAutoRunning = false,
+                fiscalAgentServiceRunning = false,
                 fiscalAgentBusy = false,
                 fiscalAgentMessage = "auto_stopped"
             )
         }
     }
 
-    private fun launchFiscalAgentWorker(resumed: Boolean) {
-        if (fiscalAgentWorkerJob?.isActive == true) return
-
-        fiscalAgentWorkerJob?.cancel()
-        fiscalAgentWorkerJob = viewModelScope.launch {
-            _ui.update {
-                it.copy(
-                    fiscalAgentAutoRunning = true,
-                    fiscalAgentMessage = if (resumed) "auto_resumed" else "auto_started"
-                )
-            }
-            var heartbeatAt = 0L
-            try {
-                while (isActive) {
-                    val now = System.currentTimeMillis()
-                    if (now - heartbeatAt >= 60_000L) {
-                        heartbeatFiscalAgentSilently()
-                        heartbeatAt = now
-                    }
-                    val result = processFiscalAgentIteration(auto = true)
-                    delay(if (result?.processed == true) 1_000L else 5_000L)
-                }
-            } finally {
-                _ui.update { it.copy(fiscalAgentAutoRunning = false, fiscalAgentBusy = false) }
-            }
-        }
-    }
-
     private fun maybeResumeFiscalAgentAuto() {
         if (!fiscalAgentRuntimeStateStore.load().autoEnabled) return
-        if (_ui.value.fiscalAgentAutoRunning || fiscalAgentWorkerJob?.isActive == true) return
         if (!_ui.value.authenticated || _ui.value.demoMode) return
         if (!_ui.value.policy.canManageSettings) return
         if (!fiscalAgentCredentialStore.configured()) return
@@ -579,7 +567,33 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (identity.restaurantId == null || identity.branchId == null) return
         if (!canRunFiscalAgent()) return
 
-        launchFiscalAgentWorker(resumed = true)
+        FiscalAgentServiceController.resumeIfEnabled(getApplication())
+        _ui.update { it.copy(fiscalAgentAutoRunning = true, fiscalAgentMessage = "auto_resumed") }
+    }
+
+    private fun startFiscalAgentStateMirror() {
+        if (fiscalAgentStateMirrorJob?.isActive == true) return
+        fiscalAgentStateMirrorJob = viewModelScope.launch {
+            while (isActive) {
+                val persisted = fiscalAgentRuntimeStateStore.load()
+                _ui.update { current ->
+                    current.copy(
+                        fiscalAgentAutoRunning = persisted.autoEnabled,
+                        fiscalAgentServiceRunning = persisted.serviceRunning,
+                        fiscalAgentBusy = if (persisted.autoEnabled) persisted.serviceBusy else current.fiscalAgentBusy,
+                        fiscalAgentProcessedJobs = persisted.processedJobs,
+                        fiscalAgentLastJobId = persisted.lastJobId,
+                        fiscalAgentLastReceipt = persisted.lastReceipt,
+                        fiscalAgentMessage = if (persisted.autoEnabled || persisted.serviceRunning) {
+                            persisted.lastMessage ?: current.fiscalAgentMessage
+                        } else {
+                            current.fiscalAgentMessage
+                        }
+                    )
+                }
+                delay(1_000L)
+            }
+        }
     }
 
     private fun canRunFiscalAgent(): Boolean {
@@ -615,17 +629,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             return false
         }
         return true
-    }
-
-    private suspend fun heartbeatFiscalAgentSilently() {
-        val credentials = fiscalAgentCredentialStore.load() ?: return
-        val identity = _ui.value.fiscalIdentity ?: return
-        runCatching {
-            fiscalAgentClient.heartbeat(
-                credentials,
-                fiscalAgentClient.defaultHeartbeatPayload(identity, _ui.value.fdmSettings)
-            )
-        }
     }
 
     private suspend fun processFiscalAgentIteration(auto: Boolean): FiscalAgentRunResult? {
