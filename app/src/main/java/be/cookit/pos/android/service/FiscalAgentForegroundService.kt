@@ -33,6 +33,7 @@ import be.cookit.pos.android.data.fiscal.FiscalAgentOutcomeDao
 import be.cookit.pos.android.data.fiscal.FiscalAgentRunner
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeStateStore
+import be.cookit.pos.android.data.fiscal.FiscalAgentTransportException
 import be.cookit.pos.android.data.fiscal.FiscalFdmRuntime
 import be.cookit.pos.android.data.fiscal.FiscalFdmSettings
 import be.cookit.pos.android.data.fiscal.FiscalFdmSettingsStore

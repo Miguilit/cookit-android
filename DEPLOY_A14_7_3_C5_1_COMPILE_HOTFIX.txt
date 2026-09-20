@@ -1,0 +1,8 @@
+Cookit Android A14.7.3 / versionCode 28
+C5.1 compile-only hotfix.
+
+Fix:
+- imports top-level FiscalAgentTransportException in FiscalAgentForegroundService.kt.
+- no runtime behavior change versus A14.7.2.
+
+Apply on top of A14.7.2 failed branch, then run git diff --check and GitHub Actions.
