@@ -1052,7 +1052,23 @@ private fun extractVatRate(obj: JSONObject): Double? {
     obj.doubleAny("vat_rate", "vat_percentage", "vat_percent", "tax_rate", "tax_percentage", "tax_percent", "tax")?.let { return it }
     for (key in arrayOf("vat", "tax", "tax_rate", "vat_rate")) {
         val nested = obj.optJSONObject(key) ?: continue
-        nested.doubleAny("rate", "percentage", "percent", "value", "vat_rate", "tax_rate")?.let { return it }
+        nested.doubleAny("rate", "percentage", "percent", "value", "vat_rate", "tax_rate", "tax_percent")?.let { return it }
+    }
+
+    // Cookit RestApi serializes MenuItem::taxes as a JSON array. Belgian fiscal
+    // items must resolve to one effective VAT rate for the GKS sale line. Keep
+    // this fail-closed when several distinct rates are returned.
+    val taxes = obj.optJSONArray("taxes")
+    if (taxes != null) {
+        val rates = buildList {
+            for (index in 0 until taxes.length()) {
+                val tax = taxes.optJSONObject(index) ?: continue
+                val rate = tax.doubleAny("tax_percent", "rate", "percentage", "percent", "vat_rate", "tax_rate")
+                    ?: continue
+                add(rate)
+            }
+        }.distinctBy { kotlin.math.round(it * 10000.0) / 10000.0 }
+        if (rates.size == 1) return rates.first()
     }
     return null
 }
@@ -1062,6 +1078,21 @@ private fun extractVatLabel(obj: JSONObject): String? {
     for (key in arrayOf("vat", "tax", "tax_rate", "vat_rate")) {
         val nested = obj.optJSONObject(key) ?: continue
         nested.optText("label", "code", "vat_label", "tax_label")?.trim()?.takeIf { it.isNotBlank() }?.let { return it.uppercase(Locale.ROOT) }
+    }
+
+    val taxes = obj.optJSONArray("taxes")
+    if (taxes != null) {
+        val labels = buildList {
+            for (index in 0 until taxes.length()) {
+                val tax = taxes.optJSONObject(index) ?: continue
+                val label = tax.optText("vat_label", "tax_label", "vat_code", "tax_code", "code")
+                    ?.trim()?.uppercase(Locale.ROOT)
+                    ?.takeIf { it in setOf("A", "B", "C", "D", "X") }
+                    ?: continue
+                add(label)
+            }
+        }.distinct()
+        if (labels.size == 1) return labels.first()
     }
     return null
 }
