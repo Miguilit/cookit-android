@@ -484,17 +484,11 @@ private fun ScreenContent(
             inboundOrders = state.orders.filter { it.unread },
             onReadInbound = vm::markInboundRead
         )
-        Screen.ORDERS -> OrdersScreen(
-            state = state,
-            onOpen = { order ->
-                vm.openOrderForPos(order)
-                onNavigate(Screen.POS)
-            }
-        )
+        Screen.ORDERS -> OrdersScreen(state, vm::openOrderForPos, vm::createKotForOrder, t)
         Screen.CASH -> CashScreen(state, vm, t)
-        Screen.DASHBOARD -> DashboardScreen(state)
+        Screen.DASHBOARD -> DashboardScreen(state, vm, t)
         Screen.KDS -> KdsScreen(state, t, vm::advanceKitchenTicket)
-        Screen.DELIVERY -> DeliveryScreen(state.orders, t)
+        Screen.DELIVERY -> DeliveryScreen(state, vm, t)
         Screen.FISCALITY -> FiscalityScreen(state, vm)
         Screen.SETTINGS -> SettingsScreen(
             state,
@@ -573,7 +567,13 @@ private fun PosScreen(
             Spacer(Modifier.weight(1f))
             OrderTypeChip(t.dineIn, orderType == OrderType.DINE_IN) { vm.setDraftOrderType(OrderType.DINE_IN) }
             OrderTypeChip(t.takeaway, orderType == OrderType.TAKEAWAY) { vm.setDraftOrderType(OrderType.TAKEAWAY) }
-            OrderTypeChip(t.deliveryType, orderType == OrderType.DELIVERY) { vm.setDraftOrderType(OrderType.DELIVERY) }
+            OrderTypeChip(t.deliveryType, orderType == OrderType.DELIVERY) {
+                vm.setDraftOrderType(OrderType.DELIVERY)
+                vm.openDeliveryDetails()
+            }
+            if (state.deliveryDetailsOpen) {
+                DeliveryOrderDialog(state = state, vm = vm, t = t)
+            }
         }
 
         if (orderType == OrderType.DINE_IN && state.tables.isNotEmpty()) {
@@ -627,12 +627,12 @@ private fun PosScreen(
                 TextButton(onClick = vm::refreshOpenedOrder, enabled = !state.orderLoadBusy) {
                     Icon(Icons.Default.Refresh, null)
                     Spacer(Modifier.width(4.dp))
-                    Text("Rafraîchir")
+                    Text(t.refresh)
                 }
                 TextButton(onClick = vm::startNewOrder, enabled = !state.orderLoadBusy) {
                     Icon(Icons.Default.Add, null)
                     Spacer(Modifier.width(4.dp))
-                    Text("Nouvelle commande")
+                    Text(t.newOrder)
                 }
             }
         }
@@ -1554,7 +1554,7 @@ private fun CartPane(
                 ) {
                     Icon(Icons.Default.SoupKitchen, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Envoyer en cuisine (KOT)", fontWeight = FontWeight.Black)
+                    Text(t.sendToKitchen, fontWeight = FontWeight.Black)
                 }
                 Spacer(Modifier.height(8.dp))
             } else {
@@ -1599,29 +1599,156 @@ private fun SummaryLine(label: String, amount: Double, muted: Boolean = false) {
 }
 
 @Composable
+private fun DeliveryOrderDialog(
+    state: PosUiState,
+    vm: CookitPosViewModel,
+    t: UiStrings
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = vm::dismissDeliveryDetails) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(t.deliveryDetails, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                OutlinedTextField(
+                    value = state.deliveryCustomerName,
+                    onValueChange = vm::updateDeliveryCustomerName,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(t.customerName) },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = state.deliveryCustomerPhone,
+                    onValueChange = vm::updateDeliveryCustomerPhone,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(t.customerPhone) },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = state.deliveryAddress,
+                    onValueChange = vm::updateDeliveryAddress,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(t.deliveryAddressLabel) },
+                    minLines = 2
+                )
+                OutlinedTextField(
+                    value = state.deliveryFeeText,
+                    onValueChange = vm::updateDeliveryFee,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(t.deliveryFeeLabel) },
+                    singleLine = true
+                )
+
+                Text(t.deliveryDriver, fontWeight = FontWeight.Bold)
+                if (state.deliveryConfigBusy) {
+                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else if (state.deliveryExecutives.isEmpty()) {
+                    Text(t.noDeliveryDrivers, color = CookitMuted)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        state.deliveryExecutives.forEach { executive ->
+                            val selected = executive.id == state.deliveryExecutiveId
+                            OutlinedButton(
+                                onClick = { vm.selectDeliveryExecutive(executive.id) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, if (selected) CookitOrange else CookitLine)
+                            ) {
+                                Text(
+                                    executive.name,
+                                    color = if (selected) CookitOrange else CookitInk,
+                                    fontWeight = if (selected) FontWeight.Black else FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                state.deliveryConfigError?.let { error ->
+                    Text(
+                        if (error == "required") t.deliveryRequired else t.deliveryLoadFailed,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = vm::dismissDeliveryDetails) { Text(t.cancel) }
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = vm::confirmDeliveryDetails,
+                        enabled = !state.deliveryConfigBusy && state.deliveryExecutives.isNotEmpty()
+                    ) { Text(t.save, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+    }
+}
+
+private fun localizedOrderStatus(raw: String, t: UiStrings): String {
+    return when (raw.trim().lowercase(Locale.ROOT)) {
+        "paid" -> t.paid
+        "delivered", "livré", "livree", "livrée", "geleverd", "geliefert" -> t.statusDelivered
+        "in_kitchen", "en cuisine", "in kitchen", "in keuken", "in küche" -> t.statusInKitchen
+        "food_ready", "ready", "prêt", "prete", "prête", "klaar", "bereit" -> t.statusReady
+        "preparing", "cooking", "en préparation", "in bereiding", "in zubereitung" -> t.statusPreparing
+        "placed", "received", "reçue", "ontvangen", "eingegangen" -> t.statusPlaced
+        "confirmed", "confirmée", "bevestigd", "bestätigt" -> t.statusConfirmed
+        "canceled", "cancelled", "annulée", "geannuleerd", "storniert" -> t.statusCancelled
+        "billed", "facturée", "gefactureerd", "abgerechnet" -> t.statusBilled
+        else -> raw.replace('_', ' ').replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+    }
+}
+
+private fun localizedRelativeAge(minutes: Int, t: UiStrings): String = when {
+    minutes < 1 -> t.justNow
+    minutes < 60 -> t.minutesAgo.replace("{n}", minutes.toString())
+    minutes < 1440 -> t.hoursAgo.replace("{n}", (minutes / 60).toString())
+    else -> t.daysAgo.replace("{n}", (minutes / 1440).toString())
+}
+
+private fun dashboardChange(value: Double, suffix: String): String {
+    val sign = if (value > 0.0) "+" else ""
+    return "$sign${String.format(Locale.FRANCE, "%.1f", value)}% $suffix"
+}
+
+@Composable
 private fun OrdersScreen(
     state: PosUiState,
-    onOpen: (PosOrder) -> Unit
+    onOpen: (PosOrder) -> Unit,
+    onCreateKot: (PosOrder) -> Unit,
+    t: UiStrings
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Commandes", fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text("Touchez une commande non payée pour la rouvrir dans la caisse.", color = CookitMuted)
+        Text(t.orders, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text(t.ordersHelp, color = CookitMuted)
 
         state.orderLoadError?.let { error ->
             Spacer(Modifier.height(8.dp))
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
-                Text(error, Modifier.padding(10.dp), color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(
+                    if (error == "kot_create_failed") t.kotCreateFailed else error,
+                    Modifier.padding(10.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
             }
         }
 
         Spacer(Modifier.height(16.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(state.orders, key = { it.id }) { order ->
-                val paid = order.settlementStatus.lowercase(Locale.ROOT) in setOf("paid", "cancelled", "canceled", "refunded", "completed")
+                val settlement = order.settlementStatus.lowercase(Locale.ROOT)
+                val paid = settlement in setOf("paid", "refunded", "completed")
+                val cancelled = settlement in setOf("cancelled", "canceled") || order.remoteStatus.lowercase(Locale.ROOT) in setOf("cancelled", "canceled")
+                val hasKot = state.kots.any { it.orderId == order.id }
+                val kotBusy = order.id in state.orderKotBusyIds
+
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = !paid && !state.orderLoadBusy) { onOpen(order) },
+                        .clickable(enabled = !paid && !cancelled && !state.orderLoadBusy) { onOpen(order) },
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(18.dp),
                     border = BorderStroke(1.dp, CookitLine)
@@ -1649,20 +1776,28 @@ private fun OrdersScreen(
                                 }
                             }
                             Text(
-                                "${order.customer} • ${relativeAge(order.minutesAgo)}",
+                                "${order.customer} • ${localizedRelativeAge(order.minutesAgo, t)}",
                                 color = CookitMuted,
                                 fontSize = 12.sp
                             )
+                            if (!cancelled && !hasKot) {
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { onCreateKot(order) },
+                                    enabled = !kotBusy,
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    if (kotBusy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    else Text(t.createKot, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = CookitSoftGreen
-                                ) {
+                                Surface(shape = RoundedCornerShape(10.dp), color = CookitSoftGreen) {
                                     Text(
-                                        order.status,
+                                        localizedOrderStatus(order.status, t),
                                         Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                                         color = CookitGreen,
                                         fontWeight = FontWeight.Bold,
@@ -1674,7 +1809,7 @@ private fun OrdersScreen(
                                     color = if (paid) CookitSoftGreen else CookitSoftOrange
                                 ) {
                                     Text(
-                                        if (paid) "PAYÉ" else order.settlementStatus.uppercase(Locale.ROOT),
+                                        if (paid) t.paid else settlement.replace('_', ' ').uppercase(Locale.getDefault()),
                                         Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                                         color = if (paid) CookitGreen else CookitOrange,
                                         fontWeight = FontWeight.Black,
@@ -1683,10 +1818,7 @@ private fun OrdersScreen(
                                 }
                             }
                             Spacer(Modifier.height(7.dp))
-                            Text(
-                                String.format(Locale.FRANCE, "%.2f €", order.total),
-                                fontWeight = FontWeight.Black
-                            )
+                            Text(String.format(Locale.FRANCE, "%.2f €", order.total), fontWeight = FontWeight.Black)
                         }
                     }
                 }
@@ -1694,6 +1826,7 @@ private fun OrdersScreen(
         }
     }
 }
+
 
 private fun relativeAge(minutes: Int): String = when {
     minutes < 1 -> "à l'instant"
@@ -1722,7 +1855,7 @@ private fun KdsScreen(
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text(t.kitchen, fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text("Flux KOT réel Cookit : les changements mettent à jour le suivi de commande.", color = CookitMuted)
+        Text(t.kitchenFlowHelp, color = CookitMuted)
         state.kdsError?.let { error ->
             Spacer(Modifier.height(8.dp))
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
@@ -1751,6 +1884,7 @@ private fun KdsScreen(
         }
     }
 }
+
 
 @Composable
 private fun KotTicketCard(
@@ -1835,29 +1969,64 @@ private fun KotTicketCard(
 }
 
 @Composable
-private fun DeliveryScreen(orders: List<PosOrder>, t: UiStrings) {
-    val deliveryOrders = orders.filter { it.type == OrderType.DELIVERY }
+private fun DeliveryScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshDeliveryOrders() }
+    val executiveNames = state.deliveryExecutives.associate { it.id to it.name }
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text(t.delivery, fontSize = 28.sp, fontWeight = FontWeight.Black)
-        Text("Commandes livraison internes et plateformes dans le même flux.", color = CookitMuted)
+        Text(t.deliveryFlowHelp, color = CookitMuted)
         Spacer(Modifier.height(16.dp))
 
-        if (deliveryOrders.isEmpty()) {
-            EmptyOperationalState(Icons.Default.DeliveryDining, "Aucune livraison active")
+        if (state.deliveryOrders.isEmpty()) {
+            EmptyOperationalState(Icons.Default.DeliveryDining, t.noActiveDelivery)
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(280.dp),
+                columns = GridCells.Adaptive(300.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(deliveryOrders, key = { it.id }) { order ->
-                    OperationalOrderCard(order = order, accent = CookitGreen)
+                items(state.deliveryOrders, key = { it.id }) { order ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, CookitLine)
+                    ) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(order.code, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                                Spacer(Modifier.weight(1f))
+                                Surface(shape = RoundedCornerShape(12.dp), color = CookitSoftGreen) {
+                                    Text(
+                                        localizedOrderStatus(order.status, t),
+                                        Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        color = CookitGreen,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            Text(order.customer, fontWeight = FontWeight.SemiBold)
+                            order.deliveryAddress?.let { Text(it, color = CookitMuted, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+                            order.deliveryExecutiveId?.let { id ->
+                                Text("${t.deliveryDriver}: ${executiveNames[id] ?: "#$id"}", color = CookitMuted, fontSize = 12.sp)
+                            }
+                            HorizontalDivider(color = CookitLine)
+                            Row(Modifier.fillMaxWidth()) {
+                                Text(String.format(Locale.FRANCE, "%.2f €", order.total), fontWeight = FontWeight.Black, fontSize = 18.sp)
+                                Spacer(Modifier.weight(1f))
+                                if (order.deliveryFee > 0.0) {
+                                    Text("${t.deliveryFeeLabel}: ${String.format(Locale.FRANCE, "%.2f €", order.deliveryFee)}", color = CookitMuted, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
+
 
 @Composable
 private fun OperationalOrderCard(order: PosOrder, accent: Color) {
@@ -2008,28 +2177,120 @@ private fun CashScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) 
 }
 
 @Composable
-private fun DashboardScreen(state: PosUiState) {
-    val orders = state.orders
+private fun DashboardScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshDashboard() }
+    val dashboard = state.dashboard
+    val firstName = state.user.name.substringBefore(' ')
+
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Bonjour ${state.user.name.substringBefore(' ')}", fontSize = 30.sp, fontWeight = FontWeight.Black)
+        Text("${t.greeting} $firstName", fontSize = 30.sp, fontWeight = FontWeight.Black)
         Text("${state.user.restaurant} • ${state.user.branch}", color = CookitMuted)
         Spacer(Modifier.height(18.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(220.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item { MetricCard("CA chargé", String.format(Locale.FRANCE, "%.2f €", orders.sumOf { it.total }), "session courante", Icons.Default.TrendingUp) }
-            item { MetricCard("Commandes", orders.size.toString(), "flux API", Icons.Default.ReceiptLong) }
-            item { MetricCard("En cuisine", orders.count { it.status == "En cuisine" }.toString(), "à préparer", Icons.Default.SoupKitchen) }
-            item { MetricCard("Livraisons", orders.count { it.type == OrderType.DELIVERY }.toString(), "commandes delivery", Icons.Default.DeliveryDining) }
+
+        if (dashboard == null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                MetricCard(t.dashboardTodayRevenue, String.format(Locale.FRANCE, "%.2f €", state.orders.sumOf { it.total }), "—", Icons.Default.TrendingUp, Modifier.weight(1f))
+                MetricCard(t.dashboardTodayOrders, state.orders.size.toString(), "—", Icons.Default.ReceiptLong, Modifier.weight(1f))
+            }
+            return@Column
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            MetricCard(t.dashboardTodayOrders, dashboard.todayOrders.toString(), dashboardChange(dashboard.todayOrdersChange, t.dashboardSinceYesterday), Icons.Default.ReceiptLong, Modifier.weight(1f))
+            MetricCard(t.dashboardTodayRevenue, String.format(Locale.FRANCE, "%.2f €", dashboard.todayRevenue), dashboardChange(dashboard.todayRevenueChange, t.dashboardSinceYesterday), Icons.Default.TrendingUp, Modifier.weight(1f))
+            MetricCard(t.dashboardTodayCustomers, dashboard.todayCustomers.toString(), dashboardChange(dashboard.todayCustomersChange, t.dashboardSinceYesterday), Icons.Default.ReceiptLong, Modifier.weight(1f))
+            MetricCard(t.dashboardAverageRevenue, String.format(Locale.FRANCE, "%.2f €", dashboard.averageDailyRevenue), dashboardChange(dashboard.averageDailyRevenueChange, t.dashboardSincePreviousMonth), Icons.Default.Payments, Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card(
+                modifier = Modifier.weight(2f),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(1.dp, CookitLine)
+            ) {
+                Column(Modifier.padding(18.dp)) {
+                    Text(t.dashboardMonthlySales, color = CookitMuted, fontWeight = FontWeight.SemiBold)
+                    Text(String.format(Locale.FRANCE, "%.2f €", dashboard.monthlyRevenue), fontSize = 24.sp, fontWeight = FontWeight.Black)
+                    Text(dashboardChange(dashboard.monthlyRevenueChange, t.dashboardSincePreviousMonth), color = CookitGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(14.dp))
+                    DashboardSalesChart(dashboard.salesData)
+                }
+            }
+
+            Card(
+                modifier = Modifier.weight(1f),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(1.dp, CookitLine)
+            ) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(t.dashboardTodayOrdersList, fontWeight = FontWeight.Black)
+                    if (dashboard.todayOrdersList.isEmpty()) {
+                        Text(t.dashboardWaitingOrder, color = CookitMuted)
+                    } else {
+                        dashboard.todayOrdersList.take(6).forEach { order ->
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(order.code, fontWeight = FontWeight.Bold)
+                                    Text(localizedOrderStatus(order.status, t), color = CookitMuted, fontSize = 11.sp)
+                                }
+                                Text(String.format(Locale.FRANCE, "%.2f €", order.total), fontWeight = FontWeight.Black)
+                            }
+                            HorizontalDivider(color = CookitLine)
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
+
 @Composable
-private fun MetricCard(title: String, value: String, note: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+private fun DashboardSalesChart(points: List<be.cookit.pos.android.domain.DashboardSalesPoint>) {
+    if (points.isEmpty()) {
+        Spacer(Modifier.height(190.dp))
+        return
+    }
+    val totals = points.map { it.total }
+    val min = totals.minOrNull() ?: 0.0
+    val max = totals.maxOrNull() ?: 0.0
+    val range = (max - min).takeIf { it > 0.0001 } ?: 1.0
+
+    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(190.dp)) {
+        val stepX = if (points.size <= 1) 0f else size.width / (points.size - 1).toFloat()
+        for (grid in 0..4) {
+            val y = size.height * grid / 4f
+            drawLine(CookitLine, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 1f)
+        }
+        val path = androidx.compose.ui.graphics.Path()
+        points.forEachIndexed { index, point ->
+            val x = if (points.size <= 1) size.width / 2f else index * stepX
+            val ratio = ((point.total - min) / range).toFloat()
+            val y = size.height - (ratio * (size.height * 0.82f)) - size.height * 0.09f
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, CookitOrange, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
+    }
+    Row(Modifier.fillMaxWidth()) {
+        Text(points.first().date, color = CookitMuted, fontSize = 10.sp)
+        Spacer(Modifier.weight(1f))
+        Text(points.last().date, color = CookitMuted, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun MetricCard(
+    title: String,
+    value: String,
+    note: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
     Card(
+        modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(22.dp),
         border = BorderStroke(1.dp, CookitLine)
@@ -2043,6 +2304,7 @@ private fun MetricCard(title: String, value: String, note: String, icon: android
         }
     }
 }
+
 
 @Composable
 private fun SettingsScreen(

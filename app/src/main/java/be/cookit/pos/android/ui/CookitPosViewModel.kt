@@ -1345,6 +1345,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         online = true
                     )
                 }
+                clearDeliveryDraft()
             }.onFailure { e ->
                 _ui.update {
                     it.copy(
