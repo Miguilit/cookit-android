@@ -131,7 +131,9 @@ class CookitHttpClient {
                 val price = obj.doubleAny("price", "selling_price", "base_price", "amount") ?: 0.0
                 val available = obj.boolAny("available", "is_available", "status") ?: true
                 val imageUrl = normalizeMediaUrl(extractMediaCandidate(obj))
-                add(Product(id, categoryId, name, description, price, emojiForProduct(name), available, imageUrl))
+                val vatRate = extractVatRate(obj)
+                val vatLabel = extractVatLabel(obj)
+                add(Product(id, categoryId, name, description, price, emojiForProduct(name), available, imageUrl, vatRate, vatLabel))
             }
         }.distinctBy { it.id }
 
@@ -241,7 +243,11 @@ class CookitHttpClient {
                     ?: 0.0
                 val name = item.optText("menu_item_name", "item_name", "name")
                     ?: nestedMenu?.optText("item_name", "name")
-                add(RemoteOrderLine(menuItemId, qty, price, name))
+                val categoryId = item.longAny("category_id", "item_category_id", "menu_item_category_id")
+                    ?: nestedMenu?.longAny("category_id", "item_category_id", "menu_item_category_id")
+                val vatRate = extractVatRate(item) ?: nestedMenu?.let(::extractVatRate)
+                val vatLabel = extractVatLabel(item) ?: nestedMenu?.let(::extractVatLabel)
+                add(RemoteOrderLine(menuItemId, qty, price, name, categoryId, vatRate, vatLabel))
             }
         }
 
@@ -1037,6 +1043,25 @@ private fun JSONObject.optText(vararg keys: String): String? {
         if (!has(key) || isNull(key)) continue
         val value = optString(key).trim()
         if (value.isNotEmpty() && value != "null") return value
+    }
+    return null
+}
+
+
+private fun extractVatRate(obj: JSONObject): Double? {
+    obj.doubleAny("vat_rate", "vat_percentage", "vat_percent", "tax_rate", "tax_percentage", "tax_percent", "tax")?.let { return it }
+    for (key in arrayOf("vat", "tax", "tax_rate", "vat_rate")) {
+        val nested = obj.optJSONObject(key) ?: continue
+        nested.doubleAny("rate", "percentage", "percent", "value", "vat_rate", "tax_rate")?.let { return it }
+    }
+    return null
+}
+
+private fun extractVatLabel(obj: JSONObject): String? {
+    obj.optText("vat_label", "tax_label", "vat_code", "tax_code")?.trim()?.takeIf { it.isNotBlank() }?.let { return it.uppercase(Locale.ROOT) }
+    for (key in arrayOf("vat", "tax", "tax_rate", "vat_rate")) {
+        val nested = obj.optJSONObject(key) ?: continue
+        nested.optText("label", "code", "vat_label", "tax_label")?.trim()?.takeIf { it.isNotBlank() }?.let { return it.uppercase(Locale.ROOT) }
     }
     return null
 }

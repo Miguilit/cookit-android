@@ -64,6 +64,17 @@ data class Module2StatusResult(
 
 
 
+data class Module2CookitTrainingLine(
+    val productId: String,
+    val productName: String,
+    val departmentId: String,
+    val departmentName: String,
+    val quantity: Int,
+    val unitPrice: Double,
+    val vatRate: Double?,
+    val vatLabel: String? = null
+)
+
 data class Module2TrainingSaleResult(
     val attempted: Boolean = false,
     val success: Boolean = false,
@@ -412,6 +423,172 @@ class Module2StatusClient(private val context: Context) {
             )
         }
     }
+
+    /**
+     * A15.0D maps the actual Cookit cart/order lines to GKS SaleInput while keeping the simulator
+     * identity in TRAINING mode. Missing/unsupported VAT metadata is fail-closed: Cookit refuses
+     * to send rather than guessing a fiscal rate.
+     */
+    suspend fun trainingSaleFromCookit(
+        settings: FiscalFdmSettings,
+        bearerToken: String,
+        lines: List<Module2CookitTrainingLine>,
+        paymentMethod: String,
+        terminalId: String
+    ): Module2TrainingSaleResult = withContext(Dispatchers.IO) {
+        require(settings.isModule2) { "Module2 provider is not selected" }
+        require(settings.useTls) { "Module2 requires HTTPS/mTLS" }
+        require(settings.configured) { "Module2 endpoint is not configured" }
+        require(lines.isNotEmpty()) { "Cookit cart is empty" }
+        val token = bearerToken.trim().removePrefix("Bearer ").trim()
+        require(token.isNotBlank()) { "Module2 Bearer token is not configured" }
+
+        val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
+        val ticketNo = nextTrainingTicketNo()
+        val now = OffsetDateTime.now().withNano(0)
+        val deviceId = trainingDeviceId()
+        val bookingPeriodId = trainingBookingPeriodId(now.toLocalDate().toString())
+        val transactionLines = JSONArray()
+        var transactionTotal = 0.0
+
+        lines.forEach { line ->
+            require(line.quantity > 0) { "Invalid quantity for ${line.productName}" }
+            require(line.unitPrice >= 0.0) { "Invalid price for ${line.productName}" }
+            val lineTotal = money2(line.unitPrice * line.quantity)
+            val label = normalizeVatLabel(line.vatLabel, line.vatRate)
+            transactionTotal = money2(transactionTotal + lineTotal)
+            transactionLines.put(
+                JSONObject()
+                    .put("lineType", "SINGLE_PRODUCT")
+                    .put(
+                        "mainProduct",
+                        JSONObject()
+                            .put("productId", line.productId.take(600))
+                            .put("productName", line.productName.take(600))
+                            .put("departmentId", line.departmentId.take(600))
+                            .put("departmentName", line.departmentName.take(600))
+                            .put("quantity", line.quantity)
+                            .put("quantityType", "PIECE")
+                            .put("unitPrice", money2(line.unitPrice))
+                            .put("vats", JSONArray().put(JSONObject().put("label", label).put("price", lineTotal)))
+                    )
+                    .put("lineTotal", lineTotal)
+            )
+        }
+
+        val normalizedPayment = paymentMethod.trim().lowercase()
+        val paymentType = when (normalizedPayment) {
+            "cash" -> "CASH"
+            "card" -> "CARD_UNKNOWN"
+            else -> error("Unsupported Cookit payment method for Module2 TRAINING: $paymentMethod")
+        }
+        val paymentName = if (paymentType == "CASH") "CASH" else "CARD"
+        val payment = JSONObject()
+            .put("id", if (paymentType == "CASH") "cash" else "card")
+            .put("name", paymentName)
+            .put("type", paymentType)
+            .put("inputMethod", "MANUAL")
+            .put("amount", transactionTotal)
+            .put("amountType", "PAYMENT")
+        if (paymentType == "CASH") {
+            payment.put("drawer", JSONObject().put("id", "1").put("name", "Drawer 1"))
+        }
+
+        val data = JSONObject()
+            .put("language", "EN")
+            // Simulator identity remains intentionally fixed until Cookit production provisioning is implemented.
+            .put("vatNo", "BE0000000097")
+            .put("estNo", "2000000042")
+            .put("posId", "CPOS0031234567")
+            .put("posFiscalTicketNo", ticketNo)
+            .put("posDateTime", now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
+            .put("posSwVersion", BuildConfig.VERSION_NAME)
+            .put("deviceId", deviceId)
+            .put("terminalId", terminalId.ifBlank { "COOKIT-ANDROID-TRAINING" }.take(600))
+            .put("bookingPeriodId", bookingPeriodId)
+            .put("bookingDate", now.toLocalDate().toString())
+            .put("ticketMedium", "PAPER")
+            .put("employeeId", "84022899837")
+            .put("transaction", JSONObject().put("transactionLines", transactionLines).put("transactionTotal", transactionTotal))
+            .put("financials", JSONArray().put(payment))
+
+        executeTrainingSale(endpoint, token, ticketNo, data, "CookitModule2CookitCartTrainingSale")
+    }
+
+    private suspend fun executeTrainingSale(
+        endpoint: String,
+        token: String,
+        ticketNo: Int,
+        data: JSONObject,
+        operationName: String
+    ): Module2TrainingSaleResult {
+        val query = """
+            mutation $operationName(${ '$' }data: SaleInput!, ${ '$' }training: Boolean! = true) {
+              signSale(data: ${ '$' }data, isTraining: ${ '$' }training) {
+                posId posFiscalTicketNo posDateTime terminalId deviceId eventOperation fdmSwVersion
+                digitalSignature shortSignature verificationUrl bufferCapacityUsed
+                fdmRef { fdmId fdmDateTime eventLabel eventCounter totalCounter }
+                vatCalc { label rate taxableAmount vatAmount totalAmount outOfScope }
+                warnings { message }
+                informations { message }
+                footer
+              }
+            }
+        """.trimIndent()
+        return try {
+            val response = post(
+                endpoint = endpoint,
+                bearerToken = token,
+                sslContext = createModule2SslContext(),
+                operationName = operationName,
+                query = query,
+                variables = JSONObject().put("data", data).put("training", true)
+            )
+            val envelope = runCatching { JSONObject(response.body) }.getOrNull()
+            val graphqlErrors = envelope?.graphqlErrors().orEmpty()
+            val sale = envelope?.optJSONObject("data")?.optJSONObject("signSale")
+            if (response.status !in 200..299 || sale == null || graphqlErrors.isNotEmpty()) {
+                Module2TrainingSaleResult(
+                    attempted = true, success = false, httpStatus = response.status, latencyMs = response.latencyMs,
+                    posFiscalTicketNo = ticketNo, graphqlErrors = graphqlErrors,
+                    message = graphqlErrors.firstOrNull()
+                        ?: if (response.status !in 200..299) "Module2 HTTP ${response.status}" else "data.signSale missing"
+                )
+            } else {
+                val fdmRef = sale.optJSONObject("fdmRef")
+                Module2TrainingSaleResult(
+                    attempted = true, success = true, httpStatus = response.status, latencyMs = response.latencyMs,
+                    posFiscalTicketNo = sale.optInt("posFiscalTicketNo").takeIf { sale.has("posFiscalTicketNo") },
+                    eventOperation = sale.optNonBlank("eventOperation"), fdmId = fdmRef?.optNonBlank("fdmId"),
+                    fdmDateTime = fdmRef?.optNonBlank("fdmDateTime"), eventLabel = fdmRef?.optNonBlank("eventLabel"),
+                    eventCounter = fdmRef?.optNullableInt("eventCounter"), totalCounter = fdmRef?.optNullableInt("totalCounter"),
+                    digitalSignature = sale.optNonBlank("digitalSignature"), shortSignature = sale.optNonBlank("shortSignature"),
+                    verificationUrl = sale.optNonBlank("verificationUrl"), bufferCapacityUsed = sale.optNullableDouble("bufferCapacityUsed"),
+                    vatCalc = sale.vatCalcList(), warnings = sale.messageList("warnings"),
+                    informations = sale.messageList("informations"), footer = sale.stringList("footer"),
+                    message = "Module2 Cookit TRAINING signSale OK"
+                )
+            }
+        } catch (error: Throwable) {
+            Module2TrainingSaleResult(attempted = true, success = false, posFiscalTicketNo = ticketNo, message = error.message ?: error::class.java.simpleName)
+        }
+    }
+
+    private fun normalizeVatLabel(explicit: String?, rate: Double?): String {
+        val normalized = explicit?.trim()?.uppercase()?.takeIf { it in setOf("A", "B", "C", "D", "X") }
+        if (normalized != null) return normalized
+        val rawRate = rate ?: error("VAT metadata missing; Cookit refuses to guess a fiscal VAT label")
+        val r = if (rawRate > 0.0 && rawRate <= 1.0) rawRate * 100.0 else rawRate
+        return when {
+            kotlin.math.abs(r - 21.0) < 0.001 -> "A"
+            kotlin.math.abs(r - 12.0) < 0.001 -> "B"
+            kotlin.math.abs(r - 6.0) < 0.001 -> "C"
+            kotlin.math.abs(r) < 0.001 -> "D"
+            else -> error("Unsupported VAT rate $rawRate; expected 21%, 12%, 6% or 0%")
+        }
+    }
+
+    private fun money2(value: Double): Double = kotlin.math.round(value * 100.0) / 100.0
 
     private fun trainingPreferences() =
         context.getSharedPreferences("cookit_module2_training", Context.MODE_PRIVATE)

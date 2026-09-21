@@ -2880,7 +2880,7 @@ private fun FiscalityScreen(
                     Text(
                         when {
                             state.fdmSettings.isMock -> fs.testMode
-                            state.fdmSettings.isModule2 -> "Module2 A15.0C"
+                            state.fdmSettings.isModule2 -> "Module2 A15.0D"
                             else -> fs.productionMode
                         },
                         color = if (state.fdmSettings.isMock || state.fdmSettings.isModule2) CookitOrange else CookitGreen,
@@ -3112,6 +3112,55 @@ private fun FiscalityScreen(
                                 Spacer(Modifier.width(6.dp))
                             }
                             Text(if (state.module2TrainingSaleBusy) "Sending TRAINING sale…" else "Send TRAINING signSale")
+                        }
+
+                        HorizontalDivider(color = CookitLine)
+                        Text("Cookit cart → Module2 TRAINING", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        val cookitTrainingTotal = state.draftCart.sumOf { it.total }
+                        val vatMissingProducts = state.draftCart.filter { line ->
+                            line.product.vatLabel.isNullOrBlank() && line.product.vatRate == null
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FiscalCompactMetric(Modifier.weight(1f), "Cookit lines", state.draftCart.size.toString())
+                            FiscalCompactMetric(Modifier.weight(1f), "Total", String.format(Locale.US, "€%.2f", cookitTrainingTotal))
+                            FiscalCompactMetric(
+                                Modifier.weight(1f),
+                                "VAT mapping",
+                                if (state.draftCart.isEmpty()) "No cart" else if (vatMissingProducts.isEmpty()) "Ready" else "Missing ${vatMissingProducts.size}"
+                            )
+                            FiscalCompactMetric(
+                                Modifier.weight(1f),
+                                "Source",
+                                if (state.resumedRemoteOrderId != null) "Server order" else "Current cart"
+                            )
+                        }
+                        if (vatMissingProducts.isNotEmpty()) {
+                            Text(
+                                "VAT metadata missing for: ${vatMissingProducts.joinToString(", ") { it.product.name }.take(220)}. Cookit will not guess a fiscal VAT code.",
+                                color = CookitOrange,
+                                fontSize = 10.sp
+                            )
+                        } else if (state.draftCart.isNotEmpty()) {
+                            Text(
+                                "Uses actual Cookit products, quantities, prices, departments and VAT metadata. Simulator VAT/establishment identity remains TRAINING-only.",
+                                color = CookitMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { vm.runModule2CookitCartTrainingSale(PosPaymentMethod.CASH) },
+                                enabled = !state.module2TrainingSaleBusy && state.module2TokenConfigured &&
+                                    state.fdmProviderStatus.transportConnected && state.draftCart.isNotEmpty() && vatMissingProducts.isEmpty()
+                            ) { Text("Send Cookit cart • CASH") }
+                            OutlinedButton(
+                                onClick = { vm.runModule2CookitCartTrainingSale(PosPaymentMethod.CARD_TERMINAL) },
+                                enabled = !state.module2TrainingSaleBusy && state.module2TokenConfigured &&
+                                    state.fdmProviderStatus.transportConnected && state.draftCart.isNotEmpty() && vatMissingProducts.isEmpty()
+                            ) { Text("Send Cookit cart • CARD") }
+                        }
+                        state.module2Message?.takeIf { it.startsWith("module2_cookit_training") }?.let { message ->
+                            Text(message, color = if ("_ok" in message) CookitGreen else CookitOrange, fontSize = 10.sp)
                         }
 
                         val training = state.module2TrainingSale

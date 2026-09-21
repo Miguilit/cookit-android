@@ -561,6 +561,96 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun runModule2CookitCartTrainingSale(paymentMethod: PosPaymentMethod) {
+        val state = _ui.value
+        val settings = state.fdmSettings
+        if (!settings.isModule2 || !settings.configured) {
+            _ui.update { it.copy(module2Message = "module2_not_configured") }
+            return
+        }
+        val bearer = module2CredentialStore.loadBearerToken()
+        if (bearer.isNullOrBlank()) {
+            _ui.update { it.copy(module2TokenConfigured = false, module2Message = "module2_token_required") }
+            return
+        }
+        if (!state.fdmProviderStatus.transportConnected) {
+            _ui.update { it.copy(module2Message = "module2_training_requires_status_test") }
+            return
+        }
+        if (state.draftCart.isEmpty()) {
+            _ui.update { it.copy(module2Message = "module2_cookit_training_cart_empty") }
+            return
+        }
+
+        val categoriesById = state.categories.associateBy { it.id }
+        val mapped = state.draftCart.map { cartLine ->
+            val product = cartLine.product
+            Module2CookitTrainingLine(
+                productId = product.id.toString(),
+                productName = product.name,
+                departmentId = product.categoryId.toString(),
+                departmentName = categoriesById[product.categoryId]?.name ?: "Cookit",
+                quantity = cartLine.quantity,
+                unitPrice = product.price,
+                vatRate = product.vatRate,
+                vatLabel = product.vatLabel
+            )
+        }
+        val missingVat = mapped.filter { it.vatLabel.isNullOrBlank() && it.vatRate == null }
+        if (missingVat.isNotEmpty()) {
+            val names = missingVat.joinToString(", ") { it.productName }.take(240)
+            _ui.update { it.copy(module2Message = "module2_cookit_training_vat_missing:$names") }
+            return
+        }
+
+        val terminal = state.fiscalIdentity?.terminalId ?: "COOKIT-ANDROID-TRAINING"
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    module2TrainingSaleBusy = true,
+                    module2TrainingSale = Module2TrainingSaleResult(),
+                    module2Message = "module2_cookit_training_running"
+                )
+            }
+            try {
+                val result = module2StatusClient.trainingSaleFromCookit(
+                    settings = settings,
+                    bearerToken = bearer,
+                    lines = mapped,
+                    paymentMethod = paymentMethod.apiValue,
+                    terminalId = terminal
+                )
+                val refreshedStatus = if (result.success) {
+                    runCatchingPreservingCancellation { module2StatusClient.status(settings, bearer) }.getOrNull()
+                } else null
+                _ui.update { current ->
+                    current.copy(
+                        module2TrainingSaleBusy = false,
+                        module2TrainingSale = result,
+                        module2Status = refreshedStatus ?: current.module2Status,
+                        fdmProviderStatus = refreshedStatus?.normalized() ?: current.fdmProviderStatus,
+                        module2Message = if (result.success) {
+                            "module2_cookit_training_ok"
+                        } else {
+                            "module2_cookit_training_failed:${result.message.orEmpty()}"
+                        }
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }
+                _ui.update {
+                    it.copy(
+                        module2TrainingSaleBusy = false,
+                        module2TrainingSale = Module2TrainingSaleResult(attempted = true, success = false, message = message),
+                        module2Message = "module2_cookit_training_failed:$message"
+                    )
+                }
+            }
+        }
+    }
+
     fun restartEmbeddedMockFdm() {
         if (!BuildConfig.ENABLE_MOCK_FDM) return
         embeddedMockFdmServer.stop()
@@ -1592,16 +1682,21 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     val product = _ui.value.products.firstOrNull { it.id == line.menuItemId }
                         ?: Product(
                             id = line.menuItemId,
-                            categoryId = 0,
+                            categoryId = line.categoryId ?: 0,
                             name = line.name ?: "Article ${line.menuItemId}",
                             description = "",
                             price = line.price,
-                            emoji = "🍽️"
+                            emoji = "🍽️",
+                            vatRate = line.vatRate,
+                            vatLabel = line.vatLabel
                         )
-                    CartLine(
-                        product = if (line.price > 0 && product.price != line.price) product.copy(price = line.price) else product,
-                        quantity = line.quantity
+                    val enriched = product.copy(
+                        categoryId = line.categoryId ?: product.categoryId,
+                        price = line.price.takeIf { it > 0 } ?: product.price,
+                        vatRate = line.vatRate ?: product.vatRate,
+                        vatLabel = line.vatLabel ?: product.vatLabel
                     )
+                    CartLine(product = enriched, quantity = line.quantity)
                 }
 
                 // A reopened server order is not an idempotency-pending local checkout.

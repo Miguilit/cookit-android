@@ -55,7 +55,9 @@ data class Product(
     val price: Double,
     val emoji: String,
     val available: Boolean = true,
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val vatRate: Double? = null,
+    val vatLabel: String? = null
 )
 
 data class CartLine(
@@ -146,7 +148,10 @@ data class RemoteOrderLine(
     val menuItemId: Long,
     val quantity: Int,
     val price: Double,
-    val name: String? = null
+    val name: String? = null,
+    val categoryId: Long? = null,
+    val vatRate: Double? = null,
+    val vatLabel: String? = null
 )
 
 data class RemoteOrderDraft(
