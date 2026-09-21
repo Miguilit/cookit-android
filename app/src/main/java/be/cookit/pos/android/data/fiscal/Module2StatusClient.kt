@@ -8,11 +8,14 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.SecureRandom
+import java.security.KeyFactory
+import java.security.spec.PKCS8EncodedKeySpec
 import java.security.cert.CertificateFactory
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -175,8 +178,29 @@ class Module2StatusClient(private val context: Context) {
     }
 
     private fun statusCandidates(): List<Module2StatusQueryCandidate> = listOf(
+        // First mirror the Module2 developer manual exactly: status without arguments.
         Module2StatusQueryCandidate(
-            variant = "GKS_2_CURRENT",
+            variant = "MODULE2_MANUAL",
+            query = """
+                query CookitModule2Status {
+                  status {
+                    device {
+                      fdmId
+                      fdmSwVersion
+                      fdmDateTime
+                      bufferCapacityUsed
+                    }
+                    initialized
+                    informations { message }
+                    warnings { message }
+                    errors { message }
+                  }
+                }
+            """.trimIndent()
+        ),
+        // Keep a language-qualified form for GKS schema revisions that expose the argument.
+        Module2StatusQueryCandidate(
+            variant = "GKS_2_LANGUAGE_EN",
             query = """
                 query CookitModule2Status {
                   status(language: EN) {
@@ -194,11 +218,12 @@ class Module2StatusClient(private val context: Context) {
                 }
             """.trimIndent()
         ),
+        // Historic public revisions contained fmdSwVersion; alias it to our normalized name.
         Module2StatusQueryCandidate(
             variant = "GKS_2_LEGACY_FMD_SW",
             query = """
                 query CookitModule2Status {
-                  status(language: EN) {
+                  status {
                     device {
                       fdmId
                       fdmSwVersion: fmdSwVersion
@@ -217,7 +242,7 @@ class Module2StatusClient(private val context: Context) {
             variant = "GKS_2_MINIMAL",
             query = """
                 query CookitModule2Status {
-                  status(language: EN) {
+                  status {
                     device {
                       fdmId
                       fdmDateTime
@@ -309,16 +334,43 @@ class Module2StatusClient(private val context: Context) {
     }
 
     private fun createModule2SslContext(): SSLContext {
-        val clientStore = KeyStore.getInstance("PKCS12").apply {
-            context.resources.openRawResource(R.raw.module2_client).use { stream -> load(stream, charArrayOf()) }
+        // Module2 distributes the client identity with an empty-password PKCS#12 bundle.
+        // Android providers are inconsistent when decrypting empty-password PKCS#12 files
+        // (some devices throw IllegalArgumentException: password empty).  Load the same
+        // published client certificate + unencrypted PKCS#8 key directly instead.
+        val certificateFactory = CertificateFactory.getInstance("X.509")
+        val clientCertificate = context.resources.openRawResource(R.raw.module2_client_cert).use { stream ->
+            certificateFactory.generateCertificate(stream)
+        }
+        val caCertificate = context.resources.openRawResource(R.raw.module2_ca).use { stream ->
+            certificateFactory.generateCertificate(stream)
+        }
+        val privateKey = context.resources.openRawResource(R.raw.module2_client_key).use { stream ->
+            val pem = stream.bufferedReader(StandardCharsets.US_ASCII).use { it.readText() }
+            val base64 = pem
+                .replace("-----BEGIN PRIVATE KEY-----", "")
+                .replace("-----END PRIVATE KEY-----", "")
+                .replace(Regex("\\s"), "")
+            val encoded = Base64.decode(base64, Base64.DEFAULT)
+            KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(encoded))
+        }
+
+        // The password below protects only this in-memory KeyStore entry. It is not a
+        // Module2 credential and is never transmitted or persisted.
+        val inMemoryKeyPassword = "cookit-module2-mtls".toCharArray()
+        val clientStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+            load(null, null)
+            setKeyEntry(
+                "module2-client",
+                privateKey,
+                inMemoryKeyPassword,
+                arrayOf(clientCertificate, caCertificate)
+            )
         }
         val keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply {
-            init(clientStore, charArrayOf())
+            init(clientStore, inMemoryKeyPassword)
         }.keyManagers
 
-        val caCertificate = context.resources.openRawResource(R.raw.module2_ca).use { stream ->
-            CertificateFactory.getInstance("X.509").generateCertificate(stream)
-        }
         val trustStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
             load(null, null)
             setCertificateEntry("module2-root-ca", caCertificate)
