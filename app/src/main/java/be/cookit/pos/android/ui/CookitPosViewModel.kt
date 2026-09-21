@@ -364,12 +364,23 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             path = if (module2Selected) "/graphql/" else EmbeddedMockFdmContract.PATH,
             useTls = !mockSelected
         )
+        val readiness = fdmRuntime.readiness(settings)
+        val previousSettings = _ui.value.fdmSettings
+        val runtimeBeforeSave = fiscalAgentRuntimeStateStore.load()
+        val mustStopAuto = runtimeBeforeSave.autoEnabled &&
+            (previousSettings.provider != settings.provider || !readiness.readyForFiscalization)
+        if (mustStopAuto) {
+            // Provider changes are a hard runtime boundary. Never let an already-running fiscal
+            // loop continue against a newly selected provider whose sale mapping is not enabled.
+            FiscalAgentServiceController.stop(getApplication())
+        }
+
         val embeddedStatus = if (mockSelected) embeddedMockFdmServer.start() else embeddedMockFdmServer.status()
         fdmSettingsStore.save(settings)
         _ui.update {
             it.copy(
                 fdmSettings = settings,
-                fdmReadiness = fdmRuntime.readiness(settings),
+                fdmReadiness = readiness,
                 fdmMessage = when {
                     !settings.configured -> null
                     settings.isMock && embeddedStatus.running -> "mock_embedded_ready"
@@ -383,7 +394,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 module2Status = if (module2Selected) it.module2Status else Module2StatusResult(),
                 fdmProviderStatus = if (module2Selected) it.fdmProviderStatus else FiscalProviderStatus(),
                 mockFdmMessage = null,
-                embeddedMockFdmStatus = embeddedStatus
+                embeddedMockFdmStatus = embeddedStatus,
+                fiscalAgentAutoRunning = if (mustStopAuto) false else it.fiscalAgentAutoRunning,
+                fiscalAgentServiceRunning = if (mustStopAuto) false else it.fiscalAgentServiceRunning,
+                fiscalAgentBusy = if (mustStopAuto) false else it.fiscalAgentBusy,
+                fiscalAgentMessage = if (mustStopAuto) "auto_stopped_provider_change" else it.fiscalAgentMessage
             )
         }
     }
@@ -426,30 +441,54 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             _ui.update { it.copy(module2StatusBusy = true, fdmProbeBusy = true, module2Message = "module2_status_running") }
-            val result = module2StatusClient.status(settings, token)
-            val probe = FdmConnectivityProbeResult(
-                endpoint = result.endpoint,
-                attempted = true,
-                tlsConnected = result.connected,
-                httpStatus = result.httpStatus,
-                graphqlResponded = result.connected,
-                latencyMs = result.latencyMs,
-                message = result.message
-            )
-            _ui.update {
-                it.copy(
-                    module2StatusBusy = false,
-                    fdmProbeBusy = false,
-                    module2Status = result,
-                    fdmProviderStatus = result.normalized(),
-                    fdmProbe = probe,
-                    module2Message = when {
-                        result.statusAvailable -> "module2_status_ok"
-                        result.connected -> "module2_transport_ok_status_unavailable:${result.message.orEmpty()}"
-                        else -> "module2_status_failed:${result.message.orEmpty()}"
-                    },
-                    fdmMessage = if (result.connected) "probe_reachable" else "probe_failed"
+            try {
+                val result = module2StatusClient.status(settings, token)
+                val probe = FdmConnectivityProbeResult(
+                    endpoint = result.endpoint,
+                    attempted = true,
+                    tlsConnected = result.connected,
+                    httpStatus = result.httpStatus,
+                    graphqlResponded = result.connected,
+                    latencyMs = result.latencyMs,
+                    message = result.message
                 )
+                _ui.update {
+                    it.copy(
+                        module2StatusBusy = false,
+                        fdmProbeBusy = false,
+                        module2Status = result,
+                        fdmProviderStatus = result.normalized(),
+                        fdmProbe = probe,
+                        module2Message = when {
+                            result.statusAvailable -> "module2_status_ok"
+                            result.connected -> "module2_transport_ok_status_unavailable:${result.message.orEmpty()}"
+                            else -> "module2_status_failed:${result.message.orEmpty()}"
+                        },
+                        fdmMessage = if (result.connected) "probe_reachable" else "probe_failed"
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }
+                _ui.update {
+                    it.copy(
+                        module2StatusBusy = false,
+                        fdmProbeBusy = false,
+                        module2Status = Module2StatusResult(message = message),
+                        fdmProviderStatus = FiscalProviderStatus(
+                            provider = FiscalFdmSettings.PROVIDER_MODULE2,
+                            message = message
+                        ),
+                        fdmProbe = FdmConnectivityProbeResult(
+                            endpoint = settings.endpoint.orEmpty(),
+                            attempted = true,
+                            message = message
+                        ),
+                        module2Message = "module2_status_failed:$message",
+                        fdmMessage = "probe_failed"
+                    )
+                }
             }
         }
     }

@@ -45,6 +45,7 @@ import be.cookit.pos.android.data.fiscal.FiscalProviderMappingUnavailable
 import be.cookit.pos.android.data.fiscal.FiscalRuntimeRepository
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,7 +66,26 @@ import kotlinx.coroutines.launch
  * The real Checkbox/Eutronix adapter remains fail-closed until the certified mapping is installed.
  */
 class FiscalAgentForegroundService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val serviceExceptionHandler = CoroutineExceptionHandler { _, error ->
+        // A background fiscal coroutine must never terminate the POS process. Persist the failure,
+        // disable automatic processing and leave the UI available for diagnosis/recovery.
+        runCatching {
+            if (::stateStore.isInitialized) {
+                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }.take(240)
+                stateStore.setAutoEnabled(false)
+                stateStore.recordFailure(
+                    FiscalAgentRuntimeState.HEALTH_DEGRADED,
+                    "service_uncaught:$message"
+                )
+                stateStore.setServiceStatus(
+                    running = true,
+                    busy = false,
+                    message = "service_uncaught_stopped"
+                )
+            }
+        }
+    }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + serviceExceptionHandler)
     private var loopJob: Job? = null
     private var watchdogJob: Job? = null
 
@@ -326,20 +346,22 @@ class FiscalAgentForegroundService : Service() {
             val readiness = fdmRuntime.readiness(settings)
             if (!readiness.readyForFiscalization) {
                 val error = readiness.reason.orEmpty().ifBlank { "provider_not_ready" }
-                stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_FDM_ERROR, error)
+                // A deliberately gated provider (for example Module2 before signSale mapping) is
+                // configuration state, not a recoverable runtime outage. Auto-processing must stop
+                // instead of spinning forever or touching Cloud jobs while the adapter is disabled.
+                stateStore.setAutoEnabled(false)
+                stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_CONFIG_ERROR, error)
                 diagnosticLogger.record(
                     eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
-                    health = FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
+                    health = FiscalAgentRuntimeState.HEALTH_CONFIG_ERROR,
                     provider = settings.provider,
                     runtimeId = identity.runtimeId,
                     message = error
                 )
-                publishIdle(
-                    "agent_provider_gated:$error",
-                    "FDM ERROR • adapter verrouillé"
-                )
-                delay(RETRY_NOT_READY_MS)
-                continue
+                stateStore.setServiceStatus(true, false, "provider_gated_auto_stopped")
+                updateNotification("CONFIG • adapter fiscal non activé, auto arrêté")
+                stopSelf()
+                return
             }
 
             if (settings.isMock) {

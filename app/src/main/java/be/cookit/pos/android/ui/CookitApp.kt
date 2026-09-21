@@ -2880,7 +2880,7 @@ private fun FiscalityScreen(
                     Text(
                         when {
                             state.fdmSettings.isMock -> fs.testMode
-                            state.fdmSettings.isModule2 -> "Module2 A15.0A"
+                            state.fdmSettings.isModule2 -> "Module2 A15.0B1"
                             else -> fs.productionMode
                         },
                         color = if (state.fdmSettings.isMock || state.fdmSettings.isModule2) CookitOrange else CookitGreen,
@@ -3095,7 +3095,7 @@ private fun FiscalityScreen(
                         OutlinedButton(onClick = vm::verifyFdmAdapterGate) { Text(fs.verifyAdapterGate) }
                     } else if (state.fdmSettings.isModule2) {
                         Text(
-                            "A15.0B: normalized Module2 status/health enabled. signSale remains fail-closed until the fiscal mapping is completed.",
+                            "A15.0B1: Module2 status is read-only and crash-guarded. Automatic fiscal processing is stopped while signSale remains gated.",
                             color = CookitOrange,
                             fontSize = 11.sp
                         )

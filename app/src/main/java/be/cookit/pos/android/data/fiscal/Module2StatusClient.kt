@@ -84,11 +84,11 @@ class Module2StatusClient(private val context: Context) {
         require(token.isNotBlank()) { "Module2 Bearer token is not configured" }
 
         val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
-        val sslContext = createModule2SslContext()
         var totalLatency = 0L
         val failures = mutableListOf<String>()
 
         try {
+            val sslContext = createModule2SslContext()
             for (candidate in statusCandidates()) {
                 val response = post(
                     endpoint = endpoint,
@@ -252,7 +252,7 @@ class Module2StatusClient(private val context: Context) {
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Authorization", "Bearer $bearerToken")
-                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0B")
+                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0B1")
             }
             connection = conn
 
