@@ -1014,10 +1014,40 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun refreshDashboard() {
-        val currentToken = token ?: return
         viewModelScope.launch {
-            runCatching { api.dashboard(currentToken) }
-                .onSuccess { dashboard -> _ui.update { it.copy(dashboard = dashboard) } }
+            var lastError: Throwable? = null
+
+            repeat(4) { attempt ->
+                val currentToken = token
+
+                if (currentToken.isNullOrBlank()) {
+                    lastError = IllegalStateException("Session Cookit indisponible")
+                } else {
+                    val result = runCatching { api.dashboard(currentToken) }
+
+                    result.onSuccess { dashboard ->
+                        _ui.update { state ->
+                            state.copy(
+                                dashboard = dashboard,
+                                error = if (state.error?.startsWith("Dashboard —") == true) null else state.error
+                            )
+                        }
+                        return@launch
+                    }
+
+                    lastError = result.exceptionOrNull()
+                }
+
+                if (attempt < 3) {
+                    delay(500L * (attempt + 1))
+                }
+            }
+
+            lastError?.let { error ->
+                _ui.update {
+                    it.copy(error = "Dashboard — ${readableError(error)}")
+                }
+            }
         }
     }
 
