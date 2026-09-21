@@ -45,6 +45,27 @@ class CheckboxFiscalProviderAdapter : FiscalProviderAdapter {
     }
 }
 
+
+/** A15.0A Module2 boundary: status/mTLS is enabled separately; sale mapping remains fail-closed. */
+class Module2FiscalProviderAdapter : FiscalProviderAdapter {
+    override val providerId: String = FiscalFdmSettings.PROVIDER_MODULE2
+    override val saleMutationName: String = "signSale"
+
+    override fun readiness(settings: FiscalFdmSettings): FiscalProviderReadiness = FiscalProviderReadiness(
+        provider = providerId,
+        networkConfigured = settings.configured && settings.useTls,
+        mappingInstalled = false,
+        mutationName = saleMutationName,
+        reason = "A15.0A Module2 mTLS/status available; signSale mapping intentionally gated until fiscal field mapping is complete"
+    )
+
+    override fun buildSaleOperation(event: FiscalOutboxEntity): FdmGraphqlOperation {
+        throw FiscalProviderMappingUnavailable(
+            "Module2 signSale is intentionally disabled in A15.0A; only the read-only status handshake is enabled."
+        )
+    }
+}
+
 /**
  * A14.4 debug-only contract used by the separately distributed Cookit Mock FDM harness.
  *

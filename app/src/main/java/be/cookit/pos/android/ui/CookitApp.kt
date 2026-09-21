@@ -2650,17 +2650,20 @@ private fun FiscalityScreen(
     val context = LocalContext.current
     var fdmHost by remember(state.fdmSettings.host) { mutableStateOf(state.fdmSettings.host) }
     var fdmPort by remember(state.fdmSettings.port) { mutableStateOf(state.fdmSettings.port.toString()) }
-    var mockFdmMode by remember(state.fdmSettings.provider) {
-        mutableStateOf(BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock)
-    }
+    var fdmProvider by remember(state.fdmSettings.provider) { mutableStateOf(state.fdmSettings.provider) }
+    val mockFdmMode = BuildConfig.ENABLE_MOCK_FDM && fdmProvider == be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_MOCK
+    val module2Mode = fdmProvider == be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_MODULE2
+    var module2Token by remember { mutableStateOf("") }
     var mockScenario by remember { mutableStateOf("success") }
     var fiscalAgentDeviceId by remember(state.fiscalAgentDeviceHint) { mutableStateOf(state.fiscalAgentDeviceHint) }
     var fiscalAgentToken by remember { mutableStateOf("") }
 
     val cloudConnected = state.online && state.fiscalAgentHealth != FiscalAgentRuntimeState.HEALTH_OFFLINE
-    val fdmConnected = state.fdmSettings.configured &&
-        state.fdmReadiness.readyForFiscalization &&
-        state.fiscalAgentHealth != FiscalAgentRuntimeState.HEALTH_FDM_ERROR
+    val fdmConnected = state.fdmSettings.configured && if (state.fdmSettings.isModule2) {
+        state.module2Status.connected
+    } else {
+        state.fdmReadiness.readyForFiscalization && state.fiscalAgentHealth != FiscalAgentRuntimeState.HEALTH_FDM_ERROR
+    }
     val operational = state.fiscalAgentServiceRunning &&
         state.fiscalAgentHealth == FiscalAgentRuntimeState.HEALTH_CONNECTED
     val powerManager = remember(context) { context.getSystemService(PowerManager::class.java) }
@@ -2839,14 +2842,14 @@ private fun FiscalityScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = vm::processNextFiscalAgentJob,
-                            enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy && !state.fiscalAgentAutoRunning
+                            enabled = state.fiscalAgentConfigured && state.fdmReadiness.readyForFiscalization && !state.fiscalAgentBusy && !state.fiscalAgentAutoRunning
                         ) { Text(fs.processOneJob) }
                         if (state.fiscalAgentAutoRunning) {
                             Button(onClick = vm::stopFiscalAgentAuto) { Text(fs.stopAuto) }
                         } else {
                             Button(
                                 onClick = vm::startFiscalAgentAuto,
-                                enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy
+                                enabled = state.fiscalAgentConfigured && state.fdmReadiness.readyForFiscalization && !state.fiscalAgentBusy
                             ) { Text(fs.startAuto) }
                         }
                         TextButton(onClick = vm::clearFiscalAgentCredentials, enabled = state.fiscalAgentConfigured) {
@@ -2875,8 +2878,12 @@ private fun FiscalityScreen(
                         )
                     }
                     Text(
-                        if (state.fdmSettings.isMock) fs.testMode else fs.productionMode,
-                        color = if (state.fdmSettings.isMock) CookitOrange else CookitGreen,
+                        when {
+                            state.fdmSettings.isMock -> fs.testMode
+                            state.fdmSettings.isModule2 -> "Module2 A15.0A"
+                            else -> fs.productionMode
+                        },
+                        color = if (state.fdmSettings.isMock || state.fdmSettings.isModule2) CookitOrange else CookitGreen,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
@@ -2889,22 +2896,43 @@ private fun FiscalityScreen(
                     FiscalCompactMetric(Modifier.weight(1f), fs.lastReceipt, state.fiscalAgentLastReceipt ?: "—")
                 }
 
-                if (BuildConfig.ENABLE_MOCK_FDM && state.policy.canManageSettings) {
-                    FilterChip(
-                        selected = mockFdmMode,
-                        onClick = {
-                            mockFdmMode = !mockFdmMode
-                            if (mockFdmMode) {
-                                fdmHost = EmbeddedMockFdmContract.HOST
-                                fdmPort = EmbeddedMockFdmContract.PORT.toString()
-                            } else {
-                                if (fdmHost == EmbeddedMockFdmContract.HOST) fdmHost = ""
+                if (state.policy.canManageSettings) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = fdmProvider == be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_CHECKBOX,
+                            onClick = {
+                                fdmProvider = be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_CHECKBOX
+                                if (fdmHost == EmbeddedMockFdmContract.HOST || fdmHost == "fdm.module2.be") fdmHost = ""
                                 if (fdmPort == EmbeddedMockFdmContract.PORT.toString()) fdmPort = "443"
-                            }
-                        },
-                        label = { Text(fs.mockMode) },
-                        leadingIcon = { Icon(Icons.Default.BugReport, null, Modifier.size(16.dp)) }
-                    )
+                            },
+                            label = { Text("Checkbox") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = module2Mode,
+                            onClick = {
+                                fdmProvider = be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_MODULE2
+                                fdmHost = "fdm.module2.be"
+                                fdmPort = "443"
+                            },
+                            label = { Text("Module2") },
+                            leadingIcon = { Icon(Icons.Default.Api, null, Modifier.size(16.dp)) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (BuildConfig.ENABLE_MOCK_FDM) {
+                            FilterChip(
+                                selected = mockFdmMode,
+                                onClick = {
+                                    fdmProvider = be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_MOCK
+                                    fdmHost = EmbeddedMockFdmContract.HOST
+                                    fdmPort = EmbeddedMockFdmContract.PORT.toString()
+                                },
+                                label = { Text(fs.mockMode) },
+                                leadingIcon = { Icon(Icons.Default.BugReport, null, Modifier.size(16.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                 }
 
                 if (state.policy.canManageSettings) {
@@ -2927,8 +2955,11 @@ private fun FiscalityScreen(
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort, mockFdmMode) }) { Text(fs.save) }
-                        OutlinedButton(onClick = vm::probeFdmConnectivity, enabled = !state.fdmProbeBusy) {
+                        OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort, fdmProvider) }) { Text(fs.save) }
+                        OutlinedButton(
+                            onClick = { if (state.fdmSettings.isModule2) vm.testModule2Status() else vm.probeFdmConnectivity() },
+                            enabled = !state.fdmProbeBusy && (!state.fdmSettings.isModule2 || state.module2TokenConfigured)
+                        ) {
                             if (state.fdmProbeBusy) {
                                 CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(6.dp))
@@ -2938,6 +2969,53 @@ private fun FiscalityScreen(
                         if (BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock && !state.embeddedMockFdmStatus.running) {
                             OutlinedButton(onClick = vm::restartEmbeddedMockFdm) { Text(fs.restart) }
                         }
+                    }
+                }
+
+                if (module2Mode && state.policy.canManageSettings) {
+                    HorizontalDivider(color = CookitLine)
+                    Text("Module2 simulator / FDM", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = module2Token,
+                        onValueChange = { module2Token = it.trim() },
+                        label = { Text("Bearer token") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(
+                            onClick = {
+                                vm.saveModule2BearerToken(module2Token)
+                                module2Token = ""
+                            },
+                            enabled = module2Token.isNotBlank()
+                        ) { Text(fs.saveSecurely) }
+                        TextButton(
+                            onClick = vm::clearModule2BearerToken,
+                            enabled = state.module2TokenConfigured
+                        ) { Text(fs.clearCredentials) }
+                        Text(
+                            if (state.module2TokenConfigured) fs.configured else fs.notConfigured,
+                            color = if (state.module2TokenConfigured) CookitGreen else CookitMuted,
+                            fontSize = 11.sp
+                        )
+                    }
+                    if (state.module2Status.connected) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FiscalCompactMetric(Modifier.weight(1f), "FDM", state.module2Status.fdmId ?: "—")
+                            FiscalCompactMetric(Modifier.weight(1f), "Firmware", state.module2Status.fdmSwVersion ?: "—")
+                            FiscalCompactMetric(Modifier.weight(1f), "Buffer", state.module2Status.bufferCapacityUsed?.let { "$it%" } ?: "—")
+                            FiscalCompactMetric(Modifier.weight(1f), "Errors", state.module2Status.errorCount.toString())
+                        }
+                        Text(
+                            "mTLS + Bearer + GraphQL OK${state.module2Status.latencyMs?.let { " • ${it} ms" }.orEmpty()}",
+                            color = CookitGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else if (!state.module2Message.isNullOrBlank()) {
+                        Text(state.module2Message, color = CookitMuted, fontSize = 11.sp)
                     }
                 }
 
@@ -2990,8 +3068,14 @@ private fun FiscalityScreen(
                             }
                             Text(fs.testLastEvent)
                         }
-                    } else if (!state.fdmSettings.isMock) {
+                    } else if (!state.fdmSettings.isMock && !state.fdmSettings.isModule2) {
                         OutlinedButton(onClick = vm::verifyFdmAdapterGate) { Text(fs.verifyAdapterGate) }
+                    } else if (state.fdmSettings.isModule2) {
+                        Text(
+                            "A15.0A: status handshake only. signSale remains fail-closed until the Module2 fiscal mapping is completed.",
+                            color = CookitOrange,
+                            fontSize = 11.sp
+                        )
                     }
                 }
             }

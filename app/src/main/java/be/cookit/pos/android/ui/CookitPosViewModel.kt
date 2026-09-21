@@ -108,6 +108,10 @@ data class PosUiState(
     val fdmMessage: String? = null,
     val fdmProbeBusy: Boolean = false,
     val fdmProbe: FdmConnectivityProbeResult = FdmConnectivityProbeResult(),
+    val module2TokenConfigured: Boolean = false,
+    val module2StatusBusy: Boolean = false,
+    val module2Status: Module2StatusResult = Module2StatusResult(),
+    val module2Message: String? = null,
     val mockFdmBusy: Boolean = false,
     val mockFdmMessage: String? = null,
     val embeddedMockFdmStatus: EmbeddedMockFdmStatus = EmbeddedMockFdmStatus(),
@@ -178,6 +182,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fdmGraphqlClient = FdmGraphqlClient()
     private val fdmRuntime = FiscalFdmRuntime(fdmGraphqlClient)
     private val fdmConnectivityProbe = FdmConnectivityProbe()
+    private val module2CredentialStore = Module2CredentialStore(application)
+    private val module2StatusClient = Module2StatusClient(application)
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
     private val fiscalAgentRuntimeStateStore = FiscalAgentRuntimeStateStore(application)
     private val fiscalAgentDiagnosticDao = localDatabase.fiscalAgentDiagnosticDao()
@@ -204,6 +210,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             pendingRemoteOrderId = persistedDraft.pendingOrderId,
             fdmSettings = initialFdmSettings,
             fdmReadiness = fdmRuntime.readiness(initialFdmSettings),
+            module2TokenConfigured = module2CredentialStore.configured(),
             embeddedMockFdmStatus = embeddedMockFdmServer.status(),
             fiscalAgentConfigured = fiscalAgentCredentialStore.configured(),
             fiscalAgentDeviceHint = fiscalAgentCredentialStore.deviceHint(),
@@ -331,18 +338,29 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (token != null) refresh()
     }
 
-    fun saveFdmSettings(host: String, portText: String, mockMode: Boolean = false) {
-        val mockSelected = BuildConfig.ENABLE_MOCK_FDM && mockMode
+    fun saveFdmSettings(host: String, portText: String, provider: String) {
+        val selectedProvider = when (provider) {
+            FiscalFdmSettings.PROVIDER_MODULE2 -> FiscalFdmSettings.PROVIDER_MODULE2
+            FiscalFdmSettings.PROVIDER_MOCK -> if (BuildConfig.ENABLE_MOCK_FDM) FiscalFdmSettings.PROVIDER_MOCK else FiscalFdmSettings.PROVIDER_CHECKBOX
+            else -> FiscalFdmSettings.PROVIDER_CHECKBOX
+        }
+        val mockSelected = selectedProvider == FiscalFdmSettings.PROVIDER_MOCK
+        val module2Selected = selectedProvider == FiscalFdmSettings.PROVIDER_MODULE2
         val port = if (mockSelected) {
             EmbeddedMockFdmContract.PORT
         } else {
             portText.toIntOrNull()?.coerceIn(1, 65535) ?: 443
         }
+        val normalizedHost = when {
+            mockSelected -> EmbeddedMockFdmContract.HOST
+            module2Selected && host.isBlank() -> "fdm.module2.be"
+            else -> host.trim()
+        }
         val settings = FiscalFdmSettings(
-            provider = if (mockSelected) FiscalFdmSettings.PROVIDER_MOCK else FiscalFdmSettings.PROVIDER_CHECKBOX,
-            host = if (mockSelected) EmbeddedMockFdmContract.HOST else host.trim(),
+            provider = selectedProvider,
+            host = normalizedHost,
             port = port,
-            path = EmbeddedMockFdmContract.PATH,
+            path = if (module2Selected) "/graphql/" else EmbeddedMockFdmContract.PATH,
             useTls = !mockSelected
         )
         val embeddedStatus = if (mockSelected) embeddedMockFdmServer.start() else embeddedMockFdmServer.status()
@@ -355,11 +373,76 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     !settings.configured -> null
                     settings.isMock && embeddedStatus.running -> "mock_embedded_ready"
                     settings.isMock -> "mock_embedded_failed"
+                    settings.isModule2 && !module2CredentialStore.configured() -> "module2_token_required"
+                    settings.isModule2 -> "module2_status_ready_for_test"
                     else -> "transport_configured_mapping_gated"
                 },
+                module2TokenConfigured = module2CredentialStore.configured(),
+                module2Message = null,
+                module2Status = if (module2Selected) it.module2Status else Module2StatusResult(),
                 mockFdmMessage = null,
                 embeddedMockFdmStatus = embeddedStatus
             )
+        }
+    }
+
+    fun saveModule2BearerToken(token: String) {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) return
+        runCatching { module2CredentialStore.saveBearerToken(token) }
+            .onSuccess {
+                _ui.update { it.copy(module2TokenConfigured = true, module2Message = "module2_token_saved") }
+            }
+            .onFailure { error ->
+                _ui.update { it.copy(module2Message = "module2_token_save_failed:${error.message.orEmpty()}") }
+            }
+    }
+
+    fun clearModule2BearerToken() {
+        if (!_ui.value.policy.canManageSettings) return
+        module2CredentialStore.clear()
+        _ui.update {
+            it.copy(
+                module2TokenConfigured = false,
+                module2Status = Module2StatusResult(),
+                module2Message = "module2_token_cleared"
+            )
+        }
+    }
+
+    fun testModule2Status() {
+        val settings = _ui.value.fdmSettings
+        if (!settings.isModule2 || !settings.configured) {
+            _ui.update { it.copy(module2Message = "module2_not_configured") }
+            return
+        }
+        val token = module2CredentialStore.loadBearerToken()
+        if (token.isNullOrBlank()) {
+            _ui.update { it.copy(module2TokenConfigured = false, module2Message = "module2_token_required") }
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update { it.copy(module2StatusBusy = true, fdmProbeBusy = true, module2Message = "module2_status_running") }
+            val result = module2StatusClient.status(settings, token)
+            val probe = FdmConnectivityProbeResult(
+                endpoint = result.endpoint,
+                attempted = true,
+                tlsConnected = result.connected,
+                httpStatus = result.httpStatus,
+                graphqlResponded = result.connected,
+                latencyMs = result.latencyMs,
+                message = result.message
+            )
+            _ui.update {
+                it.copy(
+                    module2StatusBusy = false,
+                    fdmProbeBusy = false,
+                    module2Status = result,
+                    fdmProbe = probe,
+                    module2Message = if (result.connected) "module2_status_ok" else "module2_status_failed:${result.message.orEmpty()}",
+                    fdmMessage = if (result.connected) "probe_reachable" else "probe_failed"
+                )
+            }
         }
     }
 

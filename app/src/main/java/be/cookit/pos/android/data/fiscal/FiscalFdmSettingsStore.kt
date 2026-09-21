@@ -11,6 +11,7 @@ data class FiscalFdmSettings(
 ) {
     val configured: Boolean get() = host.isNotBlank() && port in 1..65535
     val isMock: Boolean get() = provider == PROVIDER_MOCK
+    val isModule2: Boolean get() = provider == PROVIDER_MODULE2
 
     val endpoint: String?
         get() = if (!configured) null else buildString {
@@ -23,6 +24,7 @@ data class FiscalFdmSettings(
 
     companion object {
         const val PROVIDER_CHECKBOX = "checkbox_eutronix"
+        const val PROVIDER_MODULE2 = "module2_pracsys"
         const val PROVIDER_MOCK = "cookit_mock_fdm_a14_4"
     }
 }

@@ -9,6 +9,7 @@ class FiscalFdmRuntime(
 ) {
     private fun adapter(settings: FiscalFdmSettings): FiscalProviderAdapter = when (settings.provider) {
         FiscalFdmSettings.PROVIDER_MOCK -> MockFiscalProviderAdapter()
+        FiscalFdmSettings.PROVIDER_MODULE2 -> Module2FiscalProviderAdapter()
         else -> CheckboxFiscalProviderAdapter()
     }
 
