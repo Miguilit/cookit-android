@@ -38,17 +38,31 @@ data class PosUiState(
     val loading: Boolean = false,
     val online: Boolean = false,
     val error: String? = null,
-    val user: UserSession = DemoRepository.user,
-    val policy: NativePolicy = DemoRepository.policy,
-    val categories: List<Category> = DemoRepository.categories,
-    val products: List<Product> = DemoRepository.products,
-    val orders: List<PosOrder> = DemoRepository.orders,
+    val user: UserSession = UserSession(
+        id = 0L,
+        name = "",
+        role = be.cookit.pos.android.domain.PosRole.CASHIER,
+        restaurant = "",
+        branch = ""
+    ),
+    val policy: NativePolicy = NativePolicy(
+        profile = be.cookit.pos.android.domain.PosRole.CASHIER,
+        cashSessionRequired = true,
+        canManageSettings = false,
+        canManagePrinters = false,
+        canUsePos = false,
+        canViewKds = false,
+        canViewDelivery = false
+    ),
+    val categories: List<Category> = emptyList(),
+    val products: List<Product> = emptyList(),
+    val orders: List<PosOrder> = emptyList(),
     val tables: List<DiningTable> = emptyList(),
     val unreadInbound: Int = 0,
     val lastSyncEpochMs: Long? = null,
     val language: AppLanguage = AppLanguage.FR,
     val cashRegisters: List<CashRegister> = emptyList(),
-    val cashDenominations: List<CashDenomination> = DemoRepository.denominations,
+    val cashDenominations: List<CashDenomination> = emptyList(),
     val activeCashSession: CashSession? = null,
     val cashBusy: Boolean = false,
     val checkoutBusy: Boolean = false,
@@ -246,12 +260,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
         startFiscalAgentStateMirror()
         viewModelScope.launch { initializeFiscalRuntime() }
-        val savedToken = sessionStore.token()
-        val savedEmail = sessionStore.email()
-        if (!savedToken.isNullOrBlank() && !savedEmail.isNullOrBlank()) {
-            token = savedToken
-            viewModelScope.launch { bootstrap(savedEmail) }
-        }
+        sessionStore.clearSession()
     }
 
     fun login(email: String, password: String) {
@@ -271,44 +280,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 sessionStore.clearSession()
                 _ui.update { it.copy(authenticated = false, loading = false, online = false, error = readableError(throwable)) }
             }
-        }
-    }
-
-    fun enterDemo() {
-        pollingJob?.cancel()
-        fiscalSyncJob?.cancel()
-        _ui.update {
-            PosUiState(
-                authenticated = true,
-                demoMode = true,
-                online = true,
-                language = it.language,
-                fiscalIdentity = it.fiscalIdentity,
-                fiscalLocalDbError = it.fiscalLocalDbError,
-                fiscalOutboxHealth = it.fiscalOutboxHealth,
-                fiscalSyncMessage = it.fiscalSyncMessage,
-                fdmSettings = it.fdmSettings,
-                fdmReadiness = it.fdmReadiness,
-                fdmMessage = it.fdmMessage,
-                fdmProbe = it.fdmProbe,
-                mockFdmBusy = it.mockFdmBusy,
-                mockFdmMessage = it.mockFdmMessage,
-                embeddedMockFdmStatus = it.embeddedMockFdmStatus,
-                fiscalAgentConfigured = it.fiscalAgentConfigured,
-                fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
-                fiscalAgentMessage = it.fiscalAgentMessage,
-                fiscalAgentBusy = it.fiscalAgentBusy,
-                fiscalAgentAutoRunning = it.fiscalAgentAutoRunning,
-                fiscalAgentServiceRunning = it.fiscalAgentServiceRunning,
-                fiscalAgentProcessedJobs = it.fiscalAgentProcessedJobs,
-                fiscalAgentLastJobId = it.fiscalAgentLastJobId,
-                fiscalAgentLastReceipt = it.fiscalAgentLastReceipt,
-                printerProvider = it.printerProvider,
-                printerHost = it.printerHost,
-                printerPort = it.printerPort,
-                starIdentifier = it.starIdentifier,
-                starInterface = it.starInterface
-            )
         }
     }
 
@@ -2058,7 +2029,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             knownOrderIds.addAll(liveOrders.map { it.id })
         }
 
-        val liveProducts = catalog.products.ifEmpty { DemoRepository.products }
+        val liveProducts = catalog.products
         val savedEntries = if (_ui.value.draftCart.isNotEmpty()) {
             _ui.value.draftCart.map { DraftEntry(it.product.id, it.quantity) }
         } else {
@@ -2099,7 +2070,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 policy = platform.policy,
                 fiscalIdentity = fiscalIdentityResult.getOrNull() ?: it.fiscalIdentity,
                 fiscalLocalDbError = fiscalIdentityResult.exceptionOrNull()?.message,
-                categories = catalog.categories.ifEmpty { DemoRepository.categories },
+                categories = catalog.categories,
                 products = liveProducts,
                 orders = liveOrders,
                 kots = liveKots,
@@ -2112,7 +2083,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 resumedRemoteOrderTotal = if (clearStalePending) null else it.resumedRemoteOrderTotal,
                 openedOrderCode = if (clearStalePending) null else it.openedOrderCode,
                 cashRegisters = cashRegisters,
-                cashDenominations = denominations.ifEmpty { DemoRepository.denominations },
+                cashDenominations = denominations,
                 activeCashSession = activeCash,
                 lastSyncEpochMs = System.currentTimeMillis(),
                 error = null

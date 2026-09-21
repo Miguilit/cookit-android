@@ -33,7 +33,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import be.cookit.pos.android.BuildConfig
-import be.cookit.pos.android.data.DemoRepository
 import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmContract
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeStateStore
@@ -128,7 +127,6 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
             loading = state.loading,
             error = state.error,
             onLogin = vm::login,
-            onDemo = vm::enterDemo
         )
         return
     }
@@ -175,8 +173,7 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
 private fun LoginScreen(
     loading: Boolean,
     error: String?,
-    onLogin: (String, String) -> Unit,
-    onDemo: () -> Unit
+    onLogin: (String, String) -> Unit
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -204,7 +201,6 @@ private fun LoginScreen(
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text("Cookit POS", fontSize = 26.sp, fontWeight = FontWeight.Black)
-                        Text("Android • A8–A9 Parité CookitPad", color = CookitMuted)
                     }
                 }
                 HorizontalDivider(color = CookitLine)
@@ -249,16 +245,6 @@ private fun LoginScreen(
                     }
                     Text(if (loading) "Connexion…" else "Se connecter à Cookit", fontWeight = FontWeight.Bold)
                 }
-                OutlinedButton(
-                    onClick = onDemo,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    enabled = !loading
-                ) { Text("Continuer en mode démo") }
-                Text(
-                    "Connexion réelle via l’API Cookit. Le mode démo reste disponible pour comparer l’UI.",
-                    color = CookitMuted,
-                    fontSize = 12.sp
-                )
             }
         }
     }
@@ -2178,7 +2164,36 @@ private fun CashScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) 
 
 @Composable
 private fun DashboardScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
-    androidx.compose.runtime.LaunchedEffect(Unit) { vm.refreshDashboard() }
+    androidx.compose.runtime.LaunchedEffect(state.online, state.orders.size) {
+        if (state.online) vm.refreshDashboard()
+    }
+    state.error
+        ?.takeIf { it.startsWith("Dashboard —") }
+        ?.let { dashboardError ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        dashboardError,
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    OutlinedButton(onClick = { vm.refreshDashboard() }) {
+                        Text(t.refresh)
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+        }
+
     val dashboard = state.dashboard
     val firstName = state.user.name.substringBefore(' ')
 
