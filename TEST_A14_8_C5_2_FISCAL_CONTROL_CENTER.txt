@@ -1,0 +1,11 @@
+C5.2 validation
+
+1. Install 0.14.8 over 0.14.7.3 without clearing app data.
+2. Confirm the fiscal agent still resumes with the previous runtime/device identity.
+3. Confirm Settings contains only the compact Fiscality & FDM summary.
+4. Open Fiscality and confirm the current Health, Cloud, FDM, Agent and pending outcome values.
+5. Create one normal Mock cloud job and confirm a JOB_PHASE sequence followed by JOB_COMPLETED appears in recent activity.
+6. Disable Wi-Fi long enough to generate OFFLINE and restore Wi-Fi; confirm RECOVERED is journaled.
+7. Export diagnostics and inspect the JSON: no device token or credential secret must be present.
+8. Confirm Room migration preserves existing fiscal_agent_outcomes and fiscal_outbox records.
+9. Confirm fiscal profile remains disabled during the synthetic test campaign.

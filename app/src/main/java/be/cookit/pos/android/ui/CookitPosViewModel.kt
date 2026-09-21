@@ -1,16 +1,19 @@
 package be.cookit.pos.android.ui
 
 import android.app.Application
+import android.content.Intent
 import android.media.AudioManager
 import android.media.ToneGenerator
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.core.content.FileProvider
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.*
 import be.cookit.pos.android.data.fiscal.*
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.service.FiscalAgentServiceController
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> = try {
     Result.success(block())
@@ -105,6 +109,8 @@ data class PosUiState(
     val fiscalAgentPendingOutcomes: Int = 0,
     val fiscalAgentActiveJobId: Long? = null,
     val fiscalAgentActiveJobPhase: String? = null,
+    val fiscalAgentDiagnostics: List<FiscalAgentDiagnosticEntity> = emptyList(),
+    val fiscalDiagnosticExportMessage: String? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
     val printerHost: String = "",
     val printerPort: Int = 9100,
@@ -142,6 +148,14 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fdmConnectivityProbe = FdmConnectivityProbe()
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
     private val fiscalAgentRuntimeStateStore = FiscalAgentRuntimeStateStore(application)
+    private val fiscalAgentDiagnosticDao = localDatabase.fiscalAgentDiagnosticDao()
+    private val fiscalDiagnosticExporter = FiscalDiagnosticExporter(
+        application,
+        fiscalAgentDiagnosticDao,
+        fiscalRuntimeRepository,
+        fiscalAgentRuntimeStateStore,
+        fdmSettingsStore
+    )
     private val storedFiscalAgentRuntimeState = fiscalAgentRuntimeStateStore.load()
     private val fiscalAgentClient = FiscalAgentClient()
     private val fiscalAgentRunner = FiscalAgentRunner(fiscalAgentClient, fdmRuntime, localDatabase.fiscalAgentOutcomeDao())
@@ -621,6 +635,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         fiscalAgentStateMirrorJob = viewModelScope.launch {
             while (isActive) {
                 val persisted = fiscalAgentRuntimeStateStore.load()
+                val diagnostics = try {
+                    fiscalAgentDiagnosticDao.latest(60)
+                } catch (_: Throwable) {
+                    _ui.value.fiscalAgentDiagnostics
+                }
                 _ui.update { current ->
                     current.copy(
                         fiscalAgentAutoRunning = persisted.autoEnabled,
@@ -644,6 +663,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         fiscalAgentPendingOutcomes = persisted.pendingOutcomeCount,
                         fiscalAgentActiveJobId = persisted.activeJobId,
                         fiscalAgentActiveJobPhase = persisted.activeJobPhase,
+                        fiscalAgentDiagnostics = diagnostics,
                         fiscalAgentMessage = if (persisted.autoEnabled || persisted.serviceRunning) {
                             persisted.lastMessage ?: current.fiscalAgentMessage
                         } else {
@@ -653,6 +673,46 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 }
                 delay(1_000L)
             }
+        }
+    }
+
+    fun exportFiscalDiagnostics() {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) {
+            _ui.update { it.copy(fiscalDiagnosticExportMessage = "forbidden") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(fiscalDiagnosticExportMessage = "exporting") }
+            runCatching {
+                withContext(Dispatchers.IO) { fiscalDiagnosticExporter.export() }
+            }.onSuccess { file ->
+                val app = getApplication<Application>()
+                val uri = FileProvider.getUriForFile(
+                    app,
+                    "${BuildConfig.APPLICATION_ID}.fileprovider",
+                    file
+                )
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(intent, fiscalStrings(_ui.value.language).exportDiagnostic).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                app.startActivity(chooser)
+                _ui.update { it.copy(fiscalDiagnosticExportMessage = "export_ready") }
+            }.onFailure { error ->
+                _ui.update { it.copy(fiscalDiagnosticExportMessage = "export_failed:${error.message.orEmpty().take(160)}") }
+            }
+        }
+    }
+
+    fun clearFiscalDiagnostics() {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) return
+        viewModelScope.launch {
+            runCatching { fiscalAgentDiagnosticDao.clear() }
+            _ui.update { it.copy(fiscalAgentDiagnostics = emptyList(), fiscalDiagnosticExportMessage = "history_cleared") }
         }
     }
 

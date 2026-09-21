@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.PowerManager
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -39,6 +40,8 @@ import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeStateStore
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.ui.theme.*
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -50,6 +53,7 @@ private enum class Screen(val label: String) {
     KDS("Cuisine"),
     DELIVERY("Livraison"),
     CASH("Fond de caisse"),
+    FISCALITY("Fiscality"),
     SETTINGS("Réglages")
 }
 
@@ -60,16 +64,20 @@ private fun screenLabel(screen: Screen, t: UiStrings): String = when (screen) {
     Screen.KDS -> t.kitchen
     Screen.DELIVERY -> t.delivery
     Screen.CASH -> t.cash
+    Screen.FISCALITY -> t.fiscality
     Screen.SETTINGS -> t.settings
 }
 
-private fun allowedTabletScreens(policy: NativePolicy): List<Screen> = buildList {
+private fun allowedTabletScreens(state: PosUiState): List<Screen> = buildList {
+    val policy = state.policy
     add(Screen.DASHBOARD)
     if (policy.canUsePos) add(Screen.POS)
     add(Screen.ORDERS)
     if (policy.canViewKds) add(Screen.KDS)
     if (policy.canViewDelivery) add(Screen.DELIVERY)
     if (policy.canUsePos) add(Screen.CASH)
+    val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured || BuildConfig.ENABLE_MOCK_FDM
+    if (policy.canManageSettings && fiscalAvailable) add(Screen.FISCALITY)
     add(Screen.SETTINGS)
 }
 
@@ -248,7 +256,7 @@ private fun LoginScreen(
 
 @Composable
 private fun SideNavigation(screen: Screen, state: PosUiState, t: UiStrings, onSelect: (Screen) -> Unit) {
-    val screens = allowedTabletScreens(state.policy)
+    val screens = allowedTabletScreens(state)
     val settings = Screen.SETTINGS
     val mainScreens = screens.filterNot { it == settings }
 
@@ -335,6 +343,7 @@ private fun iconFor(screen: Screen) = when (screen) {
     Screen.KDS -> Icons.Default.SoupKitchen
     Screen.DELIVERY -> Icons.Default.DeliveryDining
     Screen.CASH -> Icons.Default.AccountBalanceWallet
+    Screen.FISCALITY -> Icons.Default.Security
     Screen.SETTINGS -> Icons.Default.Settings
 }
 
@@ -476,7 +485,15 @@ private fun ScreenContent(
         Screen.DASHBOARD -> DashboardScreen(state)
         Screen.KDS -> KdsScreen(state, t, vm::advanceKitchenTicket)
         Screen.DELIVERY -> DeliveryScreen(state.orders, t)
-        Screen.SETTINGS -> SettingsScreen(state, vm, t, onRefresh = vm::refresh, onLogout = vm::logout)
+        Screen.FISCALITY -> FiscalityScreen(state, vm)
+        Screen.SETTINGS -> SettingsScreen(
+            state,
+            vm,
+            t,
+            onRefresh = vm::refresh,
+            onLogout = vm::logout,
+            onOpenFiscality = { onNavigate(Screen.FISCALITY) }
+        )
     }
 }
 
@@ -2023,20 +2040,13 @@ private fun SettingsScreen(
     vm: CookitPosViewModel,
     t: UiStrings,
     onRefresh: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onOpenFiscality: () -> Unit
 ) {
     var printerHost by remember(state.printerHost) { mutableStateOf(state.printerHost) }
     var printerPort by remember(state.printerPort) { mutableStateOf(state.printerPort.toString()) }
     var starIdentifier by remember(state.starIdentifier) { mutableStateOf(state.starIdentifier) }
     var starInterface by remember(state.starInterface) { mutableStateOf(state.starInterface) }
-    var fdmHost by remember(state.fdmSettings.host) { mutableStateOf(state.fdmSettings.host) }
-    var fdmPort by remember(state.fdmSettings.port) { mutableStateOf(state.fdmSettings.port.toString()) }
-    var mockFdmMode by remember(state.fdmSettings.provider) {
-        mutableStateOf(BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock)
-    }
-    var mockScenario by remember { mutableStateOf("success") }
-    var fiscalAgentDeviceId by remember(state.fiscalAgentDeviceHint) { mutableStateOf(state.fiscalAgentDeviceHint) }
-    var fiscalAgentToken by remember { mutableStateOf("") }
     val context = LocalContext.current
     var pendingPrinterAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -2100,68 +2110,9 @@ private fun SettingsScreen(
         SettingsRow(Icons.Default.Person, t.account, "${state.user.name} • ${state.user.role.name.lowercase()}")
         SettingsRow(Icons.Default.Security, t.permissions, "${state.policy.profile.name.lowercase()}")
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(18.dp),
-            border = BorderStroke(1.dp, CookitLine)
-        ) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Storage, null, tint = CookitInk)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Runtime fiscal local", fontWeight = FontWeight.Bold)
-                        Text(
-                            if (state.fiscalLocalDbError == null) "Room / SQLite durable • A14.2A" else "SQLite indisponible",
-                            color = if (state.fiscalLocalDbError == null) CookitGreen else MaterialTheme.colorScheme.error,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-
-                val fiscalIdentity = state.fiscalIdentity
-                if (fiscalIdentity != null) {
-                    Text("runtime_id  ${fiscalIdentity.runtimeId}", fontSize = 11.sp, color = CookitMuted)
-                    Text("terminal_id ${fiscalIdentity.terminalId}", fontSize = 11.sp, color = CookitMuted)
-                    val scope = listOfNotNull(
-                        fiscalIdentity.restaurantId?.let { "restaurant=$it" },
-                        fiscalIdentity.branchId?.let { "branch=$it" }
-                    ).joinToString(" • ")
-                    if (scope.isNotBlank()) Text(scope, fontSize = 11.sp, color = CookitMuted)
-                } else if (state.fiscalLocalDbError == null) {
-                    Text("Initialisation de l’identité fiscale locale…", fontSize = 11.sp, color = CookitMuted)
-                }
-
-                state.fiscalLocalDbError?.let {
-                    Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                }
-                val health = state.fiscalOutboxHealth
-                Text(
-                    "Outbox locale • préparés ${health.prepared} • à synchroniser ${health.pending} • cloud ${health.cloudQueued} • fiscalisés ${health.fiscalized}",
-                    fontSize = 11.sp,
-                    color = CookitMuted
-                )
-                health.latestError?.let { lastError ->
-                    Text(
-                        "Dernier état sync: ${lastError.take(180)}",
-                        fontSize = 11.sp,
-                        color = CookitMuted
-                    )
-                }
-                Text(
-                    when (state.fiscalSyncMessage) {
-                        "profile_off" -> "Profil fiscal cloud OFF : l’outbox reste durable et réessaiera sans activer le profil."
-                        "cloud_queued" -> "Événements locaux remis à CookitFiscal."
-                        "retry" -> "Synchronisation fiscale en attente de reconnexion / retry."
-                        else -> "A14.2 : identité + outbox durable + reprise après crash."
-                    },
-                    fontSize = 11.sp,
-                    color = CookitMuted
-                )
-            }
-        }
-
-        Card(
+        val fiscalUi = fiscalStrings(state.language)
+        val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured || BuildConfig.ENABLE_MOCK_FDM
+        if (fiscalAvailable) Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(18.dp),
             border = BorderStroke(1.dp, CookitLine)
@@ -2171,354 +2122,38 @@ private fun SettingsScreen(
                     Icon(Icons.Default.Security, null, tint = CookitInk)
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (state.fdmSettings.isMock) "Mock FDM A14.4.1" else "Checkbox / Eutronix FDM", fontWeight = FontWeight.Bold)
+                        Text(fiscalUi.summaryTitle, fontWeight = FontWeight.Bold)
                         Text(
-                            when {
-                                !state.fdmSettings.configured -> "Transport local non configuré"
-                                state.fdmSettings.isMock -> "Harness GraphQL embarqué sur la tablette"
-                                else -> "Transport HTTPS /graphql configuré"
-                            },
-                            color = if (state.fdmSettings.configured) CookitGreen else CookitMuted,
+                            state.fiscalAgentHealth,
+                            color = fiscalHealthColor(state.fiscalAgentHealth),
                             fontSize = 12.sp
                         )
                     }
-                    if (!state.policy.canManageSettings) Icon(Icons.Default.Lock, null, tint = CookitMuted)
                 }
-
-                if (BuildConfig.ENABLE_MOCK_FDM && (state.policy.canManageSettings || state.demoMode)) {
-                    FilterChip(
-                        selected = mockFdmMode,
-                        onClick = {
-                            mockFdmMode = !mockFdmMode
-                            if (mockFdmMode) {
-                                fdmHost = EmbeddedMockFdmContract.HOST
-                                fdmPort = EmbeddedMockFdmContract.PORT.toString()
-                            } else {
-                                if (fdmHost == EmbeddedMockFdmContract.HOST) fdmHost = ""
-                                if (fdmPort == EmbeddedMockFdmContract.PORT.toString()) fdmPort = "443"
-                            }
-                        },
-                        label = { Text("Mode Mock A14.4.1 embarqué (debug uniquement)") },
-                        leadingIcon = { Icon(Icons.Default.BugReport, null, Modifier.size(16.dp)) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    FiscalCompactMetric(
+                        modifier = Modifier.weight(1f),
+                        label = fiscalUi.agent,
+                        value = if (state.fiscalAgentServiceRunning) fiscalUi.running else fiscalUi.stopped
+                    )
+                    FiscalCompactMetric(
+                        modifier = Modifier.weight(1f),
+                        label = fiscalUi.lastHeartbeat,
+                        value = fiscalAgentAgeLabel(state.fiscalAgentLastHeartbeatEpochMs)
+                    )
+                    FiscalCompactMetric(
+                        modifier = Modifier.weight(1f),
+                        label = fiscalUi.pendingOutcomes,
+                        value = state.fiscalAgentPendingOutcomes.toString()
                     )
                 }
-
-                if (state.policy.canManageSettings || state.demoMode) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = fdmHost,
-                            onValueChange = { fdmHost = it.trim() },
-                            label = { Text(if (mockFdmMode) "Loopback Android" else "FDM host / IP") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                            enabled = !mockFdmMode
-                        )
-                        OutlinedTextField(
-                            value = fdmPort,
-                            onValueChange = { fdmPort = it.filter(Char::isDigit).take(5) },
-                            label = { Text(if (mockFdmMode) "Port local" else "Port TLS") },
-                            modifier = Modifier.width(120.dp),
-                            singleLine = true,
-                            enabled = !mockFdmMode
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort, mockFdmMode) }) {
-                            Text(if (mockFdmMode) "Activer Mock embarqué" else "Enregistrer FDM")
-                        }
-                        OutlinedButton(onClick = { vm.probeFdmConnectivity() }, enabled = !state.fdmProbeBusy) {
-                            if (state.fdmProbeBusy) {
-                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text("Tester GraphQL")
-                        }
-                    }
-                    if (BuildConfig.ENABLE_MOCK_FDM && mockFdmMode) {
-                        val embedded = state.embeddedMockFdmStatus
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                if (embedded.running) {
-                                    "Mock embarqué actif • ${embedded.host}:${embedded.port}"
-                                } else {
-                                    "Mock embarqué arrêté${embedded.lastError?.let { " • ${it.take(100)}" } ?: ""}"
-                                },
-                                fontSize = 11.sp,
-                                color = if (embedded.running) CookitGreen else MaterialTheme.colorScheme.error,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (!embedded.running) {
-                                OutlinedButton(onClick = { vm.restartEmbeddedMockFdm() }) { Text("Redémarrer") }
-                            }
-                        }
-                    }
-                    if (!state.fdmSettings.isMock) {
-                        OutlinedButton(onClick = { vm.verifyFdmAdapterGate() }) {
-                            Text("Vérifier le verrou signSale")
-                        }
+                if (state.policy.canManageSettings) {
+                    OutlinedButton(onClick = onOpenFiscality) {
+                        Icon(Icons.Default.OpenInNew, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text(fiscalUi.openCenter)
                     }
                 }
-
-                Text(
-                    if (state.fdmSettings.isMock) {
-                        "Mutation de test : ${state.fdmReadiness.mutationName}. Mapping Mock : ${if (state.fdmReadiness.mappingInstalled) "actif" else "indisponible"}. Aucune valeur de ce harness n’est une preuve fiscale."
-                    } else {
-                        "Mutation attendue pour une vente normale : ${state.fdmReadiness.mutationName}. Mapping certifié : ${if (state.fdmReadiness.mappingInstalled) "installé" else "verrouillé"}."
-                    },
-                    fontSize = 11.sp,
-                    color = if (state.fdmReadiness.mappingInstalled) CookitGreen else CookitMuted
-                )
-                if (state.fdmProbe.attempted) {
-                    val probe = state.fdmProbe
-                    Text(
-                        buildString {
-                            when {
-                                probe.tlsConnected -> append("TLS OK")
-                                probe.mockCleartextConnected -> append("Mock local HTTP OK")
-                                else -> append("Transport échec")
-                            }
-                            probe.httpStatus?.let { append(" • HTTP $it") }
-                            if (probe.graphqlResponded) append(" • GraphQL détecté")
-                            probe.latencyMs?.let { append(" • ${it} ms") }
-                        },
-                        fontSize = 11.sp,
-                        color = if (probe.transportReady) CookitGreen else MaterialTheme.colorScheme.error
-                    )
-                    probe.certificateSha256?.let { fingerprint ->
-                        Text("Certificat SHA-256 ${fingerprint.take(16)}…${fingerprint.takeLast(12)}", fontSize = 10.sp, color = CookitMuted)
-                    }
-                    probe.message?.let { Text(it, fontSize = 10.sp, color = CookitMuted) }
-                }
-
-                if (BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock) {
-                    HorizontalDivider(color = CookitLine)
-                    Text("Campagne Runtime PASS", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Text(
-                        "Le bouton utilise le dernier événement réel de l’outbox locale, vérifie son SHA-256 puis l’envoie au Mock sans changer son statut fiscal.",
-                        fontSize = 10.sp,
-                        color = CookitMuted
-                    )
-                    val scenarios = listOf(
-                        "success" to "Succès",
-                        "lost_response" to "Réponse perdue",
-                        "graphql_error" to "Erreur GraphQL",
-                        "http_500" to "HTTP 500",
-                        "malformed" to "JSON invalide",
-                        "auth_required" to "401",
-                        "slow" to "Lent 3 s",
-                        "timeout" to "Timeout"
-                    )
-                    scenarios.chunked(2).forEach { row ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { (key, label) ->
-                                FilterChip(
-                                    selected = mockScenario == key,
-                                    onClick = { mockScenario = key },
-                                    label = { Text(label, fontSize = 10.sp) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            if (row.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                    }
-                    Button(
-                        onClick = { vm.runMockFdmTest(mockScenario) },
-                        enabled = !state.mockFdmBusy && state.fdmSettings.configured && !state.demoMode
-                    ) {
-                        if (state.mockFdmBusy) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        Text("Tester le dernier événement fiscal")
-                    }
-                    val mockStatus = when {
-                        state.mockFdmMessage == null -> "Effectue d’abord une commande payée de test pour alimenter l’outbox."
-                        state.mockFdmMessage == "mock_no_event" -> "Aucun événement fiscal local disponible : effectue une commande payée de test."
-                        state.mockFdmMessage == "mock_not_configured" -> "Active le Mock embarqué 127.0.0.1:8787."
-                        state.mockFdmMessage == "mock_identity_missing" -> "Runtime fiscal non lié à un restaurant/une branche."
-                        state.mockFdmMessage == "mock_forbidden" -> "Test Mock réservé à un compte autorisé hors mode démo."
-                        state.mockFdmMessage == "mock_disabled" -> "Mock FDM désactivé dans ce build."
-                        state.mockFdmMessage.startsWith("mock_embedded_unavailable:") -> "Mock embarqué indisponible : ${state.mockFdmMessage.substringAfter(':').take(160)}"
-                        state.mockFdmMessage.startsWith("mock_running:") -> "Scénario ${state.mockFdmMessage.substringAfter(':')} en cours…"
-                        state.mockFdmMessage.startsWith("mock_local_hash_mismatch:") -> "STOP : SHA-256 local invalide pour ${state.mockFdmMessage.substringAfter(':')}."
-                        state.mockFdmMessage.startsWith("mock_ok:") -> {
-                            val parts = state.mockFdmMessage.split(':')
-                            "PASS Mock • event ${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()}"
-                        }
-                        state.mockFdmMessage.startsWith("mock_failed:") -> "Résultat attendu/erreur Mock : ${state.mockFdmMessage.substringAfter(':').take(220)}"
-                        else -> state.mockFdmMessage
-                    }
-                    Text(mockStatus, fontSize = 10.sp, color = if (state.mockFdmMessage?.startsWith("mock_ok:") == true) CookitGreen else CookitMuted)
-                }
-
-                Text(
-                    if (state.fdmSettings.isMock) {
-                        "Le Mock A14.4.1 est embarqué uniquement dans le build debug et écoute sur 127.0.0.1. Les builds release n’exécutent aucun serveur Mock. Le vrai adapter Checkbox/Eutronix reste verrouillé."
-                    } else {
-                        "Le test réseau est non fiscalisant : il ne lance aucune mutation signSale/signOrder. Cookit ne fiscalise rien tant que le mapping certifié n’est pas installé."
-                    },
-                    fontSize = 11.sp,
-                    color = CookitMuted
-                )
-            }
-        }
-
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            shape = RoundedCornerShape(18.dp),
-            border = BorderStroke(1.dp, CookitLine)
-        ) {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.VpnKey, null, tint = CookitInk)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Cookit Fiscal Agent", fontWeight = FontWeight.Bold)
-                        Text(
-                            if (state.fiscalAgentConfigured) "Identifiants appareil chiffrés dans Android Keystore" else "Appareil fiscal non provisionné",
-                            color = if (state.fiscalAgentConfigured) CookitGreen else CookitMuted,
-                            fontSize = 12.sp
-                        )
-                    }
-                    if (!state.policy.canManageSettings) Icon(Icons.Default.Lock, null, tint = CookitMuted)
-                }
-
-                if (state.fiscalAgentConfigured) {
-                    Text("device ${state.fiscalAgentDeviceHint}", fontSize = 11.sp, color = CookitMuted)
-                }
-
-                if (state.policy.canManageSettings && !state.demoMode) {
-                    OutlinedTextField(
-                        value = fiscalAgentDeviceId,
-                        onValueChange = { fiscalAgentDeviceId = it.trim() },
-                        label = { Text("Fiscal Agent device ID") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = fiscalAgentToken,
-                        onValueChange = { fiscalAgentToken = it },
-                        label = { Text("Device token") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = {
-                            vm.saveFiscalAgentCredentials(fiscalAgentDeviceId, fiscalAgentToken)
-                            fiscalAgentToken = ""
-                        }) { Text("Enregistrer sécurisé") }
-                        OutlinedButton(onClick = { vm.handshakeFiscalAgent() }, enabled = state.fiscalAgentConfigured) {
-                            Text("Handshake")
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { vm.heartbeatFiscalAgent() }, enabled = state.fiscalAgentConfigured) {
-                            Text("Heartbeat")
-                        }
-                        OutlinedButton(
-                            onClick = { vm.processNextFiscalAgentJob() },
-                            enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy && !state.fiscalAgentAutoRunning
-                        ) {
-                            Text("Traiter 1 job")
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (state.fiscalAgentAutoRunning) {
-                            Button(onClick = { vm.stopFiscalAgentAuto() }) {
-                                Text("Arrêter auto")
-                            }
-                        } else {
-                            Button(
-                                onClick = { vm.startFiscalAgentAuto() },
-                                enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy
-                            ) {
-                                Text("Démarrer auto")
-                            }
-                        }
-                        TextButton(onClick = { vm.clearFiscalAgentCredentials() }, enabled = state.fiscalAgentConfigured) {
-                            Text("Effacer les credentials")
-                        }
-                    }
-                    if (state.fiscalAgentConfigured) {
-                        Text(
-                            "C5.1 • auto=${if (state.fiscalAgentAutoRunning) "ON" else "OFF"} • service=${if (state.fiscalAgentServiceRunning) "RUNNING" else "STOPPED"} • traités=${state.fiscalAgentProcessedJobs}" +
-                                (state.fiscalAgentLastJobId?.let { " • dernier job #$it" } ?: "") +
-                                (state.fiscalAgentLastReceipt?.let { " • reçu $it" } ?: ""),
-                            fontSize = 10.sp,
-                            color = if (state.fiscalAgentAutoRunning) CookitGreen else CookitMuted
-                        )
-
-                        val healthColor = when (state.fiscalAgentHealth) {
-                            FiscalAgentRuntimeState.HEALTH_CONNECTED -> CookitGreen
-                            FiscalAgentRuntimeState.HEALTH_DEGRADED -> CookitOrange
-                            FiscalAgentRuntimeState.HEALTH_OFFLINE,
-                            FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
-                            FiscalAgentRuntimeState.HEALTH_CONFIG_ERROR -> MaterialTheme.colorScheme.error
-                            else -> CookitMuted
-                        }
-                        Text(
-                            "Health ${state.fiscalAgentHealth} • loop ${fiscalAgentAgeLabel(state.fiscalAgentLastLoopTickEpochMs)} • heartbeat ${fiscalAgentAgeLabel(state.fiscalAgentLastHeartbeatEpochMs)} • poll ${fiscalAgentAgeLabel(state.fiscalAgentLastPollEpochMs)} • pending=${state.fiscalAgentPendingOutcomes} • watchdog=${state.fiscalAgentWatchdogRestarts} • wake=${if (state.fiscalAgentWakeLockHeld) "ON" else "OFF"}",
-                            fontSize = 10.sp,
-                            color = healthColor
-                        )
-                        if (state.fiscalAgentActiveJobId != null) {
-                            Text(
-                                "Job actif #${state.fiscalAgentActiveJobId} • phase ${state.fiscalAgentActiveJobPhase ?: "?"}",
-                                fontSize = 10.sp,
-                                color = if (state.fiscalAgentActiveJobPhase == FiscalAgentRuntimeStateStore.PHASE_ERROR) MaterialTheme.colorScheme.error else CookitOrange
-                            )
-                        }
-                        state.fiscalAgentLastError?.let { error ->
-                            Text(
-                                "Dernière erreur (${fiscalAgentAgeLabel(state.fiscalAgentLastErrorEpochMs)}) : ${error.take(220)}",
-                                fontSize = 10.sp,
-                                color = CookitMuted
-                            )
-                        }
-                    }
-                }
-
-                val agentStatus = when {
-                    state.fiscalAgentMessage == null -> "C5.1 prêt : service autonome + health ledger + watchdog persistant."
-                    state.fiscalAgentMessage == "credentials_saved" -> "Identifiants Fiscal Agent enregistrés dans Android Keystore."
-                    state.fiscalAgentMessage == "credentials_cleared" -> "Identifiants Fiscal Agent supprimés."
-                    state.fiscalAgentMessage == "handshake_running" -> "Handshake Fiscal Agent en cours…"
-                    state.fiscalAgentMessage == "handshake_ok" -> "Handshake Fiscal Agent réussi."
-                    state.fiscalAgentMessage == "heartbeat_running" -> "Heartbeat Fiscal Agent en cours…"
-                    state.fiscalAgentMessage == "heartbeat_ok" -> "Heartbeat Fiscal Agent réussi."
-                    state.fiscalAgentMessage == "service_starting" -> "C5.1 : démarrage du service Fiscal Agent…"
-                    state.fiscalAgentMessage == "service_running" -> "C5.1 : service Fiscal Agent actif en arrière-plan."
-                    state.fiscalAgentMessage == "service_restarting" -> "C5.1 : Android redémarre le service Fiscal Agent…"
-                    state.fiscalAgentMessage == "job_polling" -> "C5.1 : récupération manuelle du prochain job fiscal cloud…"
-                    state.fiscalAgentMessage == "job_idle" -> "C5.1 : service actif, aucun job fiscal en attente."
-                    state.fiscalAgentMessage == "auto_started" -> "C5.1 : service Fiscal Agent démarré."
-                    state.fiscalAgentMessage == "auto_resumed" -> "C5.1 : service Fiscal Agent restauré après redémarrage."
-                    state.fiscalAgentMessage == "auto_polling" -> "C5.1 : service Fiscal Agent actif, polling cloud…"
-                    state.fiscalAgentMessage == "auto_stopped" -> "C5.1 : service Fiscal Agent arrêté."
-                    state.fiscalAgentMessage == "watchdog_restart" -> "C5.1 : watchdog — boucle fiscale relancée après détection d’un stall."
-                    state.fiscalAgentMessage == "watchdog_busy_stall" -> "C5.1 : watchdog — opération en vol potentiellement bloquée ; aucun retry parallèle n’est lancé pour éviter un doublon FDM."
-                    state.fiscalAgentMessage == "screen_off_wakelock_acquired" -> "C5.1 : écran éteint — wake lock fiscal actif."
-                    state.fiscalAgentMessage == "credentials_incomplete" -> "Device ID et token sont requis."
-                    state.fiscalAgentMessage == "credentials_or_identity_missing" -> "Identité runtime ou credentials Fiscal Agent manquants."
-                    state.fiscalAgentMessage == "forbidden" -> "Action réservée à un compte autorisé hors mode démo."
-                    state.fiscalAgentMessage.startsWith("job_ok:") -> {
-                        val parts = state.fiscalAgentMessage.split(':')
-                        "C5.1 PASS • job #${parts.getOrNull(1).orEmpty()} • reçu ${parts.getOrNull(2).orEmpty()} • duplicate=${parts.getOrNull(3).orEmpty()} • replayLocal=${parts.getOrNull(4).orEmpty()}"
-                    }
-                    state.fiscalAgentMessage.startsWith("job_failed:") -> "C5.1 job/retry : ${state.fiscalAgentMessage.substringAfter(':').take(220)}"
-                    state.fiscalAgentMessage.startsWith("agent_provider_gated:") -> "Adapter FDM verrouillé : ${state.fiscalAgentMessage.substringAfter(':').take(200)}"
-                    state.fiscalAgentMessage.startsWith("agent_mock_unavailable:") -> "Mock FDM embarqué indisponible : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
-                    state.fiscalAgentMessage.startsWith("handshake_failed:") -> "Handshake échoué : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
-                    state.fiscalAgentMessage.startsWith("heartbeat_failed:") -> "Heartbeat échoué : ${state.fiscalAgentMessage.substringAfter(':').take(160)}"
-                    else -> state.fiscalAgentMessage
-                }
-                Text(agentStatus, fontSize = 11.sp, color = CookitMuted)
-                Text(
-                    "C5.1 ajoute santé persistante, compteur d’échecs, pending outcomes et watchdog de boucle au runtime C4. Le Mock reste debug-only ; l’adapter Checkbox/Eutronix reste fail-closed jusqu’au mapping certifié.",
-                    fontSize = 10.sp,
-                    color = CookitMuted
-                )
             }
         }
 
@@ -2717,6 +2352,503 @@ private fun SettingsScreen(
             Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
         }
     }
+}
+
+@Composable
+private fun FiscalityScreen(
+    state: PosUiState,
+    vm: CookitPosViewModel
+) {
+    val fs = fiscalStrings(state.language)
+    val context = LocalContext.current
+    var fdmHost by remember(state.fdmSettings.host) { mutableStateOf(state.fdmSettings.host) }
+    var fdmPort by remember(state.fdmSettings.port) { mutableStateOf(state.fdmSettings.port.toString()) }
+    var mockFdmMode by remember(state.fdmSettings.provider) {
+        mutableStateOf(BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock)
+    }
+    var mockScenario by remember { mutableStateOf("success") }
+    var fiscalAgentDeviceId by remember(state.fiscalAgentDeviceHint) { mutableStateOf(state.fiscalAgentDeviceHint) }
+    var fiscalAgentToken by remember { mutableStateOf("") }
+
+    val cloudConnected = state.online && state.fiscalAgentHealth != FiscalAgentRuntimeState.HEALTH_OFFLINE
+    val fdmConnected = state.fdmSettings.configured &&
+        state.fdmReadiness.readyForFiscalization &&
+        state.fiscalAgentHealth != FiscalAgentRuntimeState.HEALTH_FDM_ERROR
+    val operational = state.fiscalAgentServiceRunning &&
+        state.fiscalAgentHealth == FiscalAgentRuntimeState.HEALTH_CONNECTED
+    val powerManager = remember(context) { context.getSystemService(PowerManager::class.java) }
+    val batteryExempt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    } else true
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text(fs.centerTitle, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Text("${state.user.branch} • ${fs.centerSubtitle}", color = CookitMuted)
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (operational) CookitSoftGreen else Color(0xFFFFF7E8)
+                    ) {
+                        Icon(
+                            if (operational) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = if (operational) CookitGreen else CookitOrange,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            if (operational) fs.systemOperational else fs.systemAttention,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 18.sp
+                        )
+                        Text(state.fiscalAgentHealth, color = fiscalHealthColor(state.fiscalAgentHealth), fontSize = 12.sp)
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FiscalStatusTile(
+                        modifier = Modifier.weight(1f),
+                        label = fs.cloud,
+                        value = if (cloudConnected) fs.connected else fs.offline,
+                        good = cloudConnected
+                    )
+                    FiscalStatusTile(
+                        modifier = Modifier.weight(1f),
+                        label = fs.fdm,
+                        value = if (fdmConnected) fs.connected else state.fiscalAgentHealth,
+                        good = fdmConnected
+                    )
+                    FiscalStatusTile(
+                        modifier = Modifier.weight(1f),
+                        label = fs.agent,
+                        value = if (state.fiscalAgentServiceRunning) fs.running else fs.stopped,
+                        good = state.fiscalAgentServiceRunning
+                    )
+                    FiscalStatusTile(
+                        modifier = Modifier.weight(1f),
+                        label = fs.jobs,
+                        value = state.fiscalAgentPendingOutcomes.toString(),
+                        good = state.fiscalAgentPendingOutcomes == 0
+                    )
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(fs.fiscalAgent, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text(
+                            if (state.fiscalAgentConfigured) fs.deviceProvisioned else fs.deviceNotProvisioned,
+                            color = if (state.fiscalAgentConfigured) CookitGreen else CookitMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = fiscalHealthColor(state.fiscalAgentHealth).copy(alpha = 0.10f)
+                    ) {
+                        Text(
+                            state.fiscalAgentHealth,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            color = fiscalHealthColor(state.fiscalAgentHealth),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FiscalCompactMetric(Modifier.weight(1f), fs.lastHeartbeat, fiscalAgentAgeLabel(state.fiscalAgentLastHeartbeatEpochMs))
+                    FiscalCompactMetric(Modifier.weight(1f), fs.lastPoll, fiscalAgentAgeLabel(state.fiscalAgentLastPollEpochMs))
+                    FiscalCompactMetric(Modifier.weight(1f), fs.failures, state.fiscalAgentConsecutiveFailures.toString())
+                    FiscalCompactMetric(Modifier.weight(1f), fs.watchdog, state.fiscalAgentWatchdogRestarts.toString())
+                }
+
+                if (state.fiscalAgentActiveJobId != null) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFFFFF7E8)) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.ReceiptLong, null, tint = CookitOrange)
+                            Spacer(Modifier.width(8.dp))
+                            Text("${fs.activeJob} #${state.fiscalAgentActiveJobId}", fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.weight(1f))
+                            Text("${fs.phase}: ${state.fiscalAgentActiveJobPhase ?: "—"}", color = CookitMuted)
+                        }
+                    }
+                }
+
+                if (state.policy.canManageSettings && !state.demoMode) {
+                    OutlinedTextField(
+                        value = fiscalAgentDeviceId,
+                        onValueChange = { fiscalAgentDeviceId = it.trim() },
+                        label = { Text(fs.deviceId) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = fiscalAgentToken,
+                        onValueChange = { fiscalAgentToken = it },
+                        label = { Text(fs.deviceToken) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            vm.saveFiscalAgentCredentials(fiscalAgentDeviceId, fiscalAgentToken)
+                            fiscalAgentToken = ""
+                        }) { Text(fs.saveSecurely) }
+                        OutlinedButton(onClick = vm::handshakeFiscalAgent, enabled = state.fiscalAgentConfigured) { Text(fs.handshake) }
+                        OutlinedButton(onClick = vm::heartbeatFiscalAgent, enabled = state.fiscalAgentConfigured) { Text(fs.heartbeat) }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = vm::processNextFiscalAgentJob,
+                            enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy && !state.fiscalAgentAutoRunning
+                        ) { Text(fs.processOneJob) }
+                        if (state.fiscalAgentAutoRunning) {
+                            Button(onClick = vm::stopFiscalAgentAuto) { Text(fs.stopAuto) }
+                        } else {
+                            Button(
+                                onClick = vm::startFiscalAgentAuto,
+                                enabled = state.fiscalAgentConfigured && !state.fiscalAgentBusy
+                            ) { Text(fs.startAuto) }
+                        }
+                        TextButton(onClick = vm::clearFiscalAgentCredentials, enabled = state.fiscalAgentConfigured) {
+                            Text(fs.clearCredentials)
+                        }
+                    }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Storage, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(fs.fdm, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text(
+                            if (state.fdmSettings.configured) fs.configured else fs.notConfigured,
+                            color = if (state.fdmSettings.configured) CookitGreen else CookitMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+                    Text(
+                        if (state.fdmSettings.isMock) fs.testMode else fs.productionMode,
+                        color = if (state.fdmSettings.isMock) CookitOrange else CookitGreen,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FiscalCompactMetric(Modifier.weight(1f), fs.provider, state.fdmSettings.provider)
+                    FiscalCompactMetric(Modifier.weight(1f), fs.connection, if (fdmConnected) fs.connected else state.fiscalAgentHealth)
+                    FiscalCompactMetric(Modifier.weight(1f), fs.pendingOutcomes, state.fiscalAgentPendingOutcomes.toString())
+                    FiscalCompactMetric(Modifier.weight(1f), fs.lastReceipt, state.fiscalAgentLastReceipt ?: "—")
+                }
+
+                if (BuildConfig.ENABLE_MOCK_FDM && state.policy.canManageSettings) {
+                    FilterChip(
+                        selected = mockFdmMode,
+                        onClick = {
+                            mockFdmMode = !mockFdmMode
+                            if (mockFdmMode) {
+                                fdmHost = EmbeddedMockFdmContract.HOST
+                                fdmPort = EmbeddedMockFdmContract.PORT.toString()
+                            } else {
+                                if (fdmHost == EmbeddedMockFdmContract.HOST) fdmHost = ""
+                                if (fdmPort == EmbeddedMockFdmContract.PORT.toString()) fdmPort = "443"
+                            }
+                        },
+                        label = { Text(fs.mockMode) },
+                        leadingIcon = { Icon(Icons.Default.BugReport, null, Modifier.size(16.dp)) }
+                    )
+                }
+
+                if (state.policy.canManageSettings) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = fdmHost,
+                            onValueChange = { fdmHost = it.trim() },
+                            label = { Text(fs.host) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            enabled = !mockFdmMode
+                        )
+                        OutlinedTextField(
+                            value = fdmPort,
+                            onValueChange = { fdmPort = it.filter(Char::isDigit).take(5) },
+                            label = { Text(fs.port) },
+                            modifier = Modifier.width(120.dp),
+                            singleLine = true,
+                            enabled = !mockFdmMode
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { vm.saveFdmSettings(fdmHost, fdmPort, mockFdmMode) }) { Text(fs.save) }
+                        OutlinedButton(onClick = vm::probeFdmConnectivity, enabled = !state.fdmProbeBusy) {
+                            if (state.fdmProbeBusy) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(fs.testConnection)
+                        }
+                        if (BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock && !state.embeddedMockFdmStatus.running) {
+                            OutlinedButton(onClick = vm::restartEmbeddedMockFdm) { Text(fs.restart) }
+                        }
+                    }
+                }
+
+                if (state.fdmProbe.attempted) {
+                    Text(
+                        buildString {
+                            append(if (state.fdmProbe.transportReady) fs.connected else fs.offline)
+                            state.fdmProbe.httpStatus?.let { append(" • HTTP $it") }
+                            if (state.fdmProbe.graphqlResponded) append(" • GraphQL")
+                            state.fdmProbe.latencyMs?.let { append(" • ${it} ms") }
+                        },
+                        color = if (state.fdmProbe.transportReady) CookitGreen else MaterialTheme.colorScheme.error,
+                        fontSize = 11.sp
+                    )
+                }
+
+                if (state.policy.canManageSettings && !state.demoMode) {
+                    if (BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock) {
+                        HorizontalDivider(color = CookitLine)
+                        Text(fs.testTools, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        val scenarios = listOf(
+                            "success",
+                            "lost_response",
+                            "graphql_error",
+                            "http_500",
+                            "malformed",
+                            "auth_required",
+                            "slow",
+                            "timeout"
+                        )
+                        scenarios.chunked(4).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                row.forEach { scenario ->
+                                    FilterChip(
+                                        selected = mockScenario == scenario,
+                                        onClick = { mockScenario = scenario },
+                                        label = { Text(scenario, fontSize = 9.sp) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = { vm.runMockFdmTest(mockScenario) },
+                            enabled = !state.mockFdmBusy && state.fdmSettings.configured
+                        ) {
+                            if (state.mockFdmBusy) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(fs.testLastEvent)
+                        }
+                    } else if (!state.fdmSettings.isMock) {
+                        OutlinedButton(onClick = vm::verifyFdmAdapterGate) { Text(fs.verifyAdapterGate) }
+                    }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.MonitorHeart, null, tint = CookitInk)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(fs.diagnostics, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text(fs.recentActivity, color = CookitMuted, fontSize = 12.sp)
+                    }
+                    if (state.policy.canManageSettings && !state.demoMode) {
+                        OutlinedButton(onClick = vm::exportFiscalDiagnostics) {
+                            Icon(Icons.Default.Share, null, Modifier.size(17.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(fs.exportDiagnostic)
+                        }
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FiscalCompactMetric(Modifier.weight(1f), fs.health, state.fiscalAgentHealth)
+                    FiscalCompactMetric(Modifier.weight(1f), fs.lastHeartbeat, fiscalAgentAgeLabel(state.fiscalAgentLastHeartbeatEpochMs))
+                    FiscalCompactMetric(Modifier.weight(1f), fs.pendingOutcomes, state.fiscalAgentPendingOutcomes.toString())
+                    FiscalCompactMetric(Modifier.weight(1f), fs.watchdog, state.fiscalAgentWatchdogRestarts.toString())
+                }
+
+                val exportMessage = when {
+                    state.fiscalDiagnosticExportMessage == "exporting" -> fs.exporting
+                    state.fiscalDiagnosticExportMessage == "export_ready" -> fs.exportReady
+                    state.fiscalDiagnosticExportMessage == "history_cleared" -> fs.historyCleared
+                    state.fiscalDiagnosticExportMessage?.startsWith("export_failed:") == true ->
+                        "${fs.exportFailed}: ${state.fiscalDiagnosticExportMessage.substringAfter(':').take(120)}"
+                    else -> null
+                }
+                exportMessage?.let { Text(it, color = CookitMuted, fontSize = 11.sp) }
+
+                if (state.fiscalAgentDiagnostics.isEmpty()) {
+                    Text(fs.noActivity, color = CookitMuted, fontSize = 12.sp)
+                } else {
+                    state.fiscalAgentDiagnostics.take(12).forEach { event ->
+                        FiscalDiagnosticRow(event)
+                    }
+                }
+
+                if (state.policy.canManageSettings && state.fiscalAgentDiagnostics.isNotEmpty()) {
+                    TextButton(onClick = vm::clearFiscalDiagnostics) { Text(fs.clearHistory) }
+                }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(fs.deviceResilience, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                FiscalResilienceRow(fs.autoStart, state.fiscalAgentAutoRunning, fs)
+                FiscalResilienceRow(fs.backgroundExecution, state.fiscalAgentServiceRunning, fs)
+                FiscalResilienceRow(fs.screenOffProtection, batteryExempt, fs)
+                FiscalResilienceRow(fs.rebootRecovery, state.fiscalAgentAutoRunning, fs)
+                FiscalResilienceRow(fs.durableJournal, state.fiscalLocalDbError == null, fs)
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(fs.advanced, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                state.fiscalIdentity?.let { identity ->
+                    FiscalAdvancedRow(fs.runtimeId, identity.runtimeId)
+                    FiscalAdvancedRow(fs.terminalId, identity.terminalId)
+                }
+                if (state.fiscalAgentConfigured) FiscalAdvancedRow(fs.deviceId, state.fiscalAgentDeviceHint)
+                FiscalAdvancedRow(fs.provider, state.fdmSettings.provider)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FiscalStatusTile(modifier: Modifier = Modifier, label: String, value: String, good: Boolean) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = if (good) CookitSoftGreen else Color(0xFFFFF7E8),
+        border = BorderStroke(1.dp, if (good) Color(0xFFD8EFE1) else Color(0xFFFFD9A0))
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, color = CookitMuted, fontSize = 11.sp)
+            Text(value, color = if (good) CookitGreen else CookitOrange, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun FiscalCompactMetric(modifier: Modifier = Modifier, label: String, value: String) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, color = CookitMuted, fontSize = 10.sp)
+        Text(value, color = CookitInk, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun FiscalDiagnosticRow(event: be.cookit.pos.android.data.fiscal.FiscalAgentDiagnosticEntity) {
+    val time = remember(event.createdAtEpochMs) {
+        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(event.createdAtEpochMs))
+    }
+    val color = fiscalHealthColor(event.health)
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
+        Text(time, color = CookitMuted, fontSize = 10.sp, modifier = Modifier.width(62.dp))
+        Surface(shape = RoundedCornerShape(9.dp), color = color.copy(alpha = 0.10f)) {
+            Text(event.health, color = color, fontSize = 9.sp, modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                buildString {
+                    append(event.eventType)
+                    event.jobId?.let { append(" • #$it") }
+                    event.jobPhase?.let { append(" • $it") }
+                },
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp
+            )
+            event.message?.takeIf { it.isNotBlank() }?.let {
+                Text(it.take(200), color = CookitMuted, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FiscalResilienceRow(label: String, ok: Boolean, fs: FiscalUiStrings) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            if (ok) Icons.Default.CheckCircle else Icons.Default.Cancel,
+            contentDescription = null,
+            tint = if (ok) CookitGreen else CookitMuted,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(label, modifier = Modifier.weight(1f), fontSize = 12.sp)
+        Text(if (ok) fs.enabled else fs.disabled, color = if (ok) CookitGreen else CookitMuted, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun FiscalAdvancedRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = CookitMuted, fontSize = 11.sp, modifier = Modifier.width(120.dp))
+        Text(value, color = CookitInk, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+private fun fiscalHealthColor(health: String): Color = when (health) {
+    FiscalAgentRuntimeState.HEALTH_CONNECTED -> CookitGreen
+    FiscalAgentRuntimeState.HEALTH_DEGRADED -> CookitOrange
+    FiscalAgentRuntimeState.HEALTH_OFFLINE,
+    FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
+    FiscalAgentRuntimeState.HEALTH_CONFIG_ERROR -> Color(0xFFB42318)
+    else -> CookitMuted
 }
 
 @Composable

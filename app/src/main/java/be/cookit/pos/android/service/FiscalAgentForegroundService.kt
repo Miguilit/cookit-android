@@ -27,6 +27,7 @@ import be.cookit.pos.android.data.fiscal.FdmGraphqlException
 import be.cookit.pos.android.data.fiscal.FdmConnectivityProbe
 import be.cookit.pos.android.data.fiscal.FiscalAgentClient
 import be.cookit.pos.android.data.fiscal.FiscalAgentCredentialStore
+import be.cookit.pos.android.data.fiscal.FiscalAgentDiagnosticLogger
 import be.cookit.pos.android.data.fiscal.FiscalAgentException
 import be.cookit.pos.android.data.fiscal.FiscalAgentIntegrityException
 import be.cookit.pos.android.data.fiscal.FiscalAgentOutcomeDao
@@ -70,6 +71,7 @@ class FiscalAgentForegroundService : Service() {
 
     private lateinit var stateStore: FiscalAgentRuntimeStateStore
     private lateinit var credentialStore: FiscalAgentCredentialStore
+    private lateinit var diagnosticLogger: FiscalAgentDiagnosticLogger
     private lateinit var settingsStore: FiscalFdmSettingsStore
     private lateinit var runtimeRepository: FiscalRuntimeRepository
     private lateinit var client: FiscalAgentClient
@@ -97,6 +99,7 @@ class FiscalAgentForegroundService : Service() {
         val database = CookitLocalDatabase.get(this)
         stateStore = FiscalAgentRuntimeStateStore(this)
         credentialStore = FiscalAgentCredentialStore(this)
+        diagnosticLogger = FiscalAgentDiagnosticLogger(database.fiscalAgentDiagnosticDao(), stateStore)
         settingsStore = FiscalFdmSettingsStore(this)
         runtimeRepository = FiscalRuntimeRepository(database.fiscalRuntimeDao())
         client = FiscalAgentClient()
@@ -131,6 +134,13 @@ class FiscalAgentForegroundService : Service() {
             busy = false,
             message = "service_starting"
         )
+        scope.launch {
+            diagnosticLogger.record(
+                eventType = FiscalAgentDiagnosticLogger.EVENT_SERVICE_STARTED,
+                health = FiscalAgentRuntimeState.HEALTH_STARTING,
+                message = "service_starting"
+            )
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -199,12 +209,25 @@ class FiscalAgentForegroundService : Service() {
                             now
                         )
                         stateStore.setServiceStatus(true, true, "watchdog_busy_stall")
+                        diagnosticLogger.record(
+                            eventType = FiscalAgentDiagnosticLogger.EVENT_WATCHDOG,
+                            health = FiscalAgentRuntimeState.HEALTH_DEGRADED,
+                            jobId = runtimeState.activeJobId,
+                            jobPhase = runtimeState.activeJobPhase,
+                            message = "watchdog_busy_stall_no_parallel_restart"
+                        )
                         updateNotification("DEGRADED • opération en cours, aucun retry parallèle")
                         markLoopProgress() // rate-limit the alert while the bounded network call unwinds.
                         continue
                     }
 
                     stateStore.recordWatchdogRestart(now)
+                    diagnosticLogger.record(
+                        eventType = FiscalAgentDiagnosticLogger.EVENT_WATCHDOG,
+                        health = FiscalAgentRuntimeState.HEALTH_DEGRADED,
+                        message = "watchdog_restart",
+                        now = now
+                    )
                     updateNotification("DEGRADED • watchdog relance la boucle fiscale idle")
                     loopJob?.cancel()
                     loopJob = null
@@ -264,6 +287,12 @@ class FiscalAgentForegroundService : Service() {
                     FiscalAgentRuntimeState.HEALTH_CONFIG_ERROR,
                     "credentials_or_identity_missing"
                 )
+                diagnosticLogger.record(
+                    eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
+                    health = FiscalAgentRuntimeState.HEALTH_CONFIG_ERROR,
+                    runtimeId = identity?.runtimeId,
+                    message = "credentials_or_identity_missing"
+                )
                 publishIdle("credentials_or_identity_missing", "CONFIG ERROR • identité/credentials manquants")
                 delay(RETRY_NOT_READY_MS)
                 continue
@@ -274,6 +303,13 @@ class FiscalAgentForegroundService : Service() {
                 if (!status.running) {
                     val error = status.lastError.orEmpty().ifBlank { "mock_fdm_unavailable" }
                     stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_FDM_ERROR, error)
+                    diagnosticLogger.record(
+                        eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
+                        health = FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
+                        provider = settings.provider,
+                        runtimeId = identity.runtimeId,
+                        message = error
+                    )
                     publishIdle(
                         "agent_mock_unavailable:$error",
                         "FDM ERROR • Mock indisponible"
@@ -287,6 +323,13 @@ class FiscalAgentForegroundService : Service() {
             if (!readiness.readyForFiscalization) {
                 val error = readiness.reason.orEmpty().ifBlank { "provider_not_ready" }
                 stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_FDM_ERROR, error)
+                diagnosticLogger.record(
+                    eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
+                    health = FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
+                    provider = settings.provider,
+                    runtimeId = identity.runtimeId,
+                    message = error
+                )
                 publishIdle(
                     "agent_provider_gated:$error",
                     "FDM ERROR • adapter verrouillé"
@@ -308,6 +351,13 @@ class FiscalAgentForegroundService : Service() {
                 if (!probe.transportReady || !probe.graphqlResponded) {
                     val error = "mock_preflight:${probe.message.orEmpty()}"
                     stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_FDM_ERROR, error)
+                    diagnosticLogger.record(
+                        eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
+                        health = FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
+                        provider = settings.provider,
+                        runtimeId = identity.runtimeId,
+                        message = error
+                    )
                     publishIdle(error, "FDM ERROR • Mock local non joignable")
                     delay(RETRY_NOT_READY_MS)
                     continue
@@ -337,6 +387,14 @@ class FiscalAgentForegroundService : Service() {
                         busy = false,
                         message = "heartbeat_failed:${error.message.orEmpty().take(180)}"
                     )
+                    diagnosticLogger.record(
+                        eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
+                        health = FiscalAgentRuntimeState.HEALTH_OFFLINE,
+                        provider = settings.provider,
+                        runtimeId = identity.runtimeId,
+                        message = error.message.orEmpty(),
+                        errorClass = error::class.java.simpleName
+                    )
                     updateNotification("OFFLINE • heartbeat Cloud en échec")
                     markLoopProgress()
                 }
@@ -351,6 +409,17 @@ class FiscalAgentForegroundService : Service() {
                 runner.processNext(credentials, identity, settings) { jobId, phase ->
                     stateStore.setActiveJob(jobId, phase)
                     stateStore.setServiceStatus(true, true, "job_phase:$jobId:$phase")
+                    scope.launch {
+                        diagnosticLogger.record(
+                            eventType = FiscalAgentDiagnosticLogger.EVENT_JOB_PHASE,
+                            health = stateStore.load().health,
+                            jobId = jobId,
+                            jobPhase = phase,
+                            provider = settings.provider,
+                            runtimeId = identity.runtimeId,
+                            message = phase
+                        )
+                    }
                     updateNotification("${stateStore.load().health} • Job #$jobId • $phase")
                     markLoopProgress()
                 }
@@ -369,6 +438,16 @@ class FiscalAgentForegroundService : Service() {
                     busy = false,
                     message = "job_failed:${error.message.orEmpty().take(220)}"
                 )
+                diagnosticLogger.record(
+                    eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
+                    health = health,
+                    jobId = runtimeState.activeJobId,
+                    jobPhase = FiscalAgentRuntimeStateStore.PHASE_ERROR,
+                    provider = settings.provider,
+                    runtimeId = identity.runtimeId,
+                    message = error.message.orEmpty(),
+                    errorClass = error::class.java.simpleName
+                )
                 refreshPendingOutcomeCount()
                 updateNotification("$health • retry fiscal automatique")
                 markLoopProgress()
@@ -382,7 +461,21 @@ class FiscalAgentForegroundService : Service() {
             markLoopProgress()
 
             if (!result.processed) {
+                val beforeHealthy = stateStore.load()
                 stateStore.recordHealthy(completedAt, clearError = false)
+                val afterHealthy = stateStore.load()
+                if (beforeHealthy.health != FiscalAgentRuntimeState.HEALTH_CONNECTED &&
+                    afterHealthy.health == FiscalAgentRuntimeState.HEALTH_CONNECTED
+                ) {
+                    diagnosticLogger.record(
+                        eventType = FiscalAgentDiagnosticLogger.EVENT_RECOVERED,
+                        health = FiscalAgentRuntimeState.HEALTH_CONNECTED,
+                        provider = settings.provider,
+                        runtimeId = identity.runtimeId,
+                        message = beforeHealthy.health,
+                        now = completedAt
+                    )
+                }
                 stateStore.setServiceStatus(true, false, "job_idle")
                 updateNotification("CONNECTED • aucun job en attente")
                 delay(IDLE_POLL_MS)
@@ -398,6 +491,16 @@ class FiscalAgentForegroundService : Service() {
                 running = true,
                 busy = false,
                 message = "job_ok:${result.jobId}:${result.receiptNumber.orEmpty()}:${result.duplicate}:${result.replayedFromLocalJournal}"
+            )
+            diagnosticLogger.record(
+                eventType = FiscalAgentDiagnosticLogger.EVENT_JOB_COMPLETED,
+                health = FiscalAgentRuntimeState.HEALTH_CONNECTED,
+                jobId = result.jobId,
+                jobPhase = "FISCALIZED",
+                provider = settings.provider,
+                runtimeId = identity.runtimeId,
+                message = result.receiptNumber,
+                now = completedAt
             )
             updateNotification(
                 buildString {

@@ -1,0 +1,16 @@
+Cookit Android A14.8 / C5.2
+
+Base required: 0.14.7.3 (versionCode 28)
+Target: 0.14.8 (versionCode 29)
+
+Apply the ZIP at the Android repository root, then run:
+
+git diff --check
+grep -nE 'versionCode|versionName' app/build.gradle.kts
+
+Expected:
+versionCode = 29
+versionName = "0.14.8"
+
+The Room migration 3 -> 4 is additive and must preserve fiscal runtime, fiscal outbox and durable provider outcomes.
+Do not uninstall the existing app before installing the generated APK.

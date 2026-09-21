@@ -11,15 +11,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         FiscalRuntimeIdentityEntity::class,
         FiscalOutboxEntity::class,
-        FiscalAgentOutcomeEntity::class
+        FiscalAgentOutcomeEntity::class,
+        FiscalAgentDiagnosticEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class CookitLocalDatabase : RoomDatabase() {
     abstract fun fiscalRuntimeDao(): FiscalRuntimeDao
     abstract fun fiscalOutboxDao(): FiscalOutboxDao
     abstract fun fiscalAgentOutcomeDao(): FiscalAgentOutcomeDao
+    abstract fun fiscalAgentDiagnosticDao(): FiscalAgentDiagnosticDao
 
     companion object {
         const val DATABASE_NAME = "cookit_local_runtime.db"
@@ -95,6 +97,35 @@ abstract class CookitLocalDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `fiscal_agent_diagnostics` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `created_at_epoch_ms` INTEGER NOT NULL,
+                        `health` TEXT NOT NULL,
+                        `event_type` TEXT NOT NULL,
+                        `job_id` INTEGER,
+                        `job_phase` TEXT,
+                        `provider` TEXT,
+                        `runtime_id` TEXT,
+                        `connectivity` TEXT NOT NULL,
+                        `message` TEXT,
+                        `error_class` TEXT,
+                        `retry_count` INTEGER NOT NULL DEFAULT 0,
+                        `pending_outcomes` INTEGER NOT NULL DEFAULT 0,
+                        `watchdog_count` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_fiscal_agent_diagnostics_created_at_epoch_ms` ON `fiscal_agent_diagnostics` (`created_at_epoch_ms`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_fiscal_agent_diagnostics_health_created_at_epoch_ms` ON `fiscal_agent_diagnostics` (`health`, `created_at_epoch_ms`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_fiscal_agent_diagnostics_event_type_created_at_epoch_ms` ON `fiscal_agent_diagnostics` (`event_type`, `created_at_epoch_ms`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_fiscal_agent_diagnostics_job_id_created_at_epoch_ms` ON `fiscal_agent_diagnostics` (`job_id`, `created_at_epoch_ms`)")
+            }
+        }
+
         @Volatile
         private var instance: CookitLocalDatabase? = null
 
@@ -104,7 +135,7 @@ abstract class CookitLocalDatabase : RoomDatabase() {
                 CookitLocalDatabase::class.java,
                 DATABASE_NAME
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { instance = it }
         }
