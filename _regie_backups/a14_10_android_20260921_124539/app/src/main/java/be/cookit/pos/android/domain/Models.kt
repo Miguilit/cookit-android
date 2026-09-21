@@ -78,67 +78,6 @@ data class PosOrder(
     val unread: Boolean = false,
     val remoteStatus: String = "placed",
     val settlementStatus: String = "unknown",
-    val createdAtEpochMs: Long? = null,
-    val deliveryAddress: String? = null,
-    val deliveryFee: Double = 0.0,
-    val deliveryExecutiveId: Long? = null
-)
-
-data class DashboardSalesPoint(
-    val date: String,
-    val total: Double
-)
-
-data class DashboardOrderSummary(
-    val id: Long,
-    val code: String,
-    val status: String,
-    val settlementStatus: String,
-    val type: OrderType,
-    val customer: String,
-    val table: String? = null,
-    val total: Double,
-    val createdAtEpochMs: Long? = null
-)
-
-data class DashboardSnapshot(
-    val todayOrders: Int,
-    val todayOrdersChange: Double,
-    val todayRevenue: Double,
-    val todayRevenueChange: Double,
-    val todayCustomers: Int,
-    val todayCustomersChange: Double,
-    val averageDailyRevenue: Double,
-    val averageDailyRevenueChange: Double,
-    val monthlyRevenue: Double,
-    val monthlyRevenueChange: Double,
-    val salesData: List<DashboardSalesPoint>,
-    val todayOrdersList: List<DashboardOrderSummary>
-)
-
-data class DeliveryExecutive(
-    val id: Long,
-    val name: String,
-    val status: String
-)
-
-data class DeliverySettings(
-    val enabled: Boolean,
-    val feeType: String,
-    val fixedFee: Double,
-    val maxRadius: Double? = null,
-    val unit: String = "km"
-)
-
-data class DeliveryOrderSummary(
-    val id: Long,
-    val code: String,
-    val status: String,
-    val total: Double,
-    val deliveryFee: Double,
-    val deliveryAddress: String?,
-    val deliveryExecutiveId: Long?,
-    val customer: String,
     val createdAtEpochMs: Long? = null
 )
 

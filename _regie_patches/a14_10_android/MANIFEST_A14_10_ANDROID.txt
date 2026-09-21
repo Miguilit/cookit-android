@@ -1,0 +1,11 @@
+Cookit Android 0.14.10 / versionCode 32
+
+Scope:
+- Cloud-like dashboard fed by a dedicated backend endpoint.
+- FR/NL/EN/DE operational localization cleanup.
+- Removal/replacement of visible developer-oriented helper text on Dashboard/Kitchen/Delivery/Orders.
+- Native delivery order detail workflow: customer, phone, address, fee, driver.
+- Dedicated delivery list fed by backend delivery endpoint.
+- Payment and KOT become independent actions.
+- Retroactive KOT action on Orders screen, including paid orders.
+- C5.3 Fiscal Agent code deliberately untouched.

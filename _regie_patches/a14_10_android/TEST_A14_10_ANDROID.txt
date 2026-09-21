@@ -1,0 +1,32 @@
+A14.10 Android acceptance tests
+
+DASHBOARD
+- FR/NL/EN/DE labels follow selected language.
+- Metrics match Cloud for the branch/business day.
+- Four top cards: orders, revenue, customers, average daily revenue.
+- Monthly sales panel and today's-order list render correctly.
+
+LOCALIZATION/POLISH
+- No visible developer copy such as "flux API", "commandes delivery", or "Flux KOT réel Cookit".
+- Orders/Kitchen/Delivery labels and relative ages change with FR/NL/EN/DE.
+
+DELIVERY
+- Selecting Delivery opens delivery details.
+- Address is mandatory.
+- One driver => automatically selected; multiple drivers => explicit choice.
+- Default fixed delivery fee is prefilled when configured and remains editable.
+- Created order persists delivery address, fee and delivery_executive_id.
+- Delivery screen shows address/driver/fee from the dedicated delivery flow.
+
+KOT / PAYMENT INDEPENDENCE
+- Paying a new order does NOT implicitly create a KOT.
+- Orders screen exposes Create KOT for an order without KOT, including paid orders.
+- Create KOT on paid order succeeds and Kitchen receives it.
+- Repeating Create KOT does not create a duplicate.
+- Cancelled orders cannot receive a KOT.
+
+REGRESSION
+- Dine-in still requires a table.
+- Takeaway checkout still works.
+- Cash opening/payment works.
+- Fiscal C5.3 Mock baseline remains unchanged.

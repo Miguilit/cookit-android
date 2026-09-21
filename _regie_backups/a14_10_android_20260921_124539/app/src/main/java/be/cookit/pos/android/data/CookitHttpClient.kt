@@ -268,117 +268,6 @@ class CookitHttpClient {
         )
     }
 
-    suspend fun dashboard(token: String): be.cookit.pos.android.domain.DashboardSnapshot = withContext(Dispatchers.IO) {
-        val json = request("pos/dashboard", token = token)
-        val data = json.optJSONObject("data") ?: json
-
-        val salesJson = data.optJSONArray("sales_data") ?: JSONArray()
-        val sales = buildList {
-            for (i in 0 until salesJson.length()) {
-                val point = salesJson.optJSONObject(i) ?: continue
-                add(
-                    be.cookit.pos.android.domain.DashboardSalesPoint(
-                        date = point.optText("date") ?: "",
-                        total = point.optDouble("total", 0.0)
-                    )
-                )
-            }
-        }
-
-        val ordersJson = data.optJSONArray("today_orders_list") ?: JSONArray()
-        val orders = buildList {
-            for (i in 0 until ordersJson.length()) {
-                val order = ordersJson.optJSONObject(i) ?: continue
-                val id = order.longAny("id", "order_id") ?: continue
-                add(
-                    be.cookit.pos.android.domain.DashboardOrderSummary(
-                        id = id,
-                        code = (order.optText("code") ?: "").ifBlank { "#$id" },
-                        status = (order.optText("status") ?: "").ifBlank { "placed" },
-                        settlementStatus = (order.optText("settlement_status") ?: "").ifBlank { "unknown" },
-                        type = mapOrderType((order.optText("order_type") ?: "").ifBlank { "dine_in" }),
-                        customer = (order.optText("customer") ?: "").ifBlank { "Client" },
-                        table = order.optText("table")?.takeIf { it.isNotBlank() },
-                        total = order.optDouble("total", 0.0),
-                        createdAtEpochMs = parseServerEpochMs(order.optText("created_at"))
-                    )
-                )
-            }
-        }
-
-        be.cookit.pos.android.domain.DashboardSnapshot(
-            todayOrders = data.optInt("today_orders", 0),
-            todayOrdersChange = data.optDouble("today_orders_change", 0.0),
-            todayRevenue = data.optDouble("today_revenue", 0.0),
-            todayRevenueChange = data.optDouble("today_revenue_change", 0.0),
-            todayCustomers = data.optInt("today_customers", 0),
-            todayCustomersChange = data.optDouble("today_customers_change", 0.0),
-            averageDailyRevenue = data.optDouble("average_daily_revenue", 0.0),
-            averageDailyRevenueChange = data.optDouble("average_daily_revenue_change", 0.0),
-            monthlyRevenue = data.optDouble("monthly_revenue", 0.0),
-            monthlyRevenueChange = data.optDouble("monthly_revenue_change", 0.0),
-            salesData = sales,
-            todayOrdersList = orders
-        )
-    }
-
-    suspend fun deliveryBootstrap(token: String): Pair<List<be.cookit.pos.android.domain.DeliveryExecutive>, be.cookit.pos.android.domain.DeliverySettings?> = withContext(Dispatchers.IO) {
-        val json = request("pos/delivery-bootstrap", token = token)
-        val data = json.optJSONObject("data") ?: json
-        val executivesJson = data.optJSONArray("executives") ?: JSONArray()
-        val executives = buildList {
-            for (i in 0 until executivesJson.length()) {
-                val obj = executivesJson.optJSONObject(i) ?: continue
-                val id = obj.longAny("id", "delivery_executive_id") ?: continue
-                add(
-                    be.cookit.pos.android.domain.DeliveryExecutive(
-                        id = id,
-                        name = (obj.optText("name") ?: "").ifBlank { "#$id" },
-                        status = (obj.optText("status") ?: "").ifBlank { "available" }
-                    )
-                )
-            }
-        }
-        val settingsJson = data.optJSONObject("settings")
-        val settings = settingsJson?.let {
-            be.cookit.pos.android.domain.DeliverySettings(
-                enabled = it.optBoolean("is_enabled", false),
-                feeType = it.optString("fee_type", "fixed"),
-                fixedFee = it.optDouble("fixed_fee", 0.0),
-                maxRadius = if (it.has("max_radius") && !it.isNull("max_radius")) it.optDouble("max_radius") else null,
-                unit = it.optString("unit", "km")
-            )
-        }
-        executives to settings
-    }
-
-    suspend fun deliveryOrders(token: String): List<be.cookit.pos.android.domain.DeliveryOrderSummary> = withContext(Dispatchers.IO) {
-        val json = request("pos/delivery-orders?limit=100", token = token)
-        val array = findArrayDeep(json, setOf("data", "orders")) ?: JSONArray()
-        buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i) ?: continue
-                val id = obj.longAny("id", "order_id") ?: continue
-                val customerObj = obj.optJSONObject("customer")
-                add(
-                    be.cookit.pos.android.domain.DeliveryOrderSummary(
-                        id = id,
-                        code = (obj.optText("formatted_order_number", "order_number") ?: "").let { raw ->
-                            if (raw.isBlank()) "#$id" else raw
-                        },
-                        status = (obj.optText("status") ?: "").ifBlank { "placed" },
-                        total = obj.optDouble("total", 0.0),
-                        deliveryFee = obj.optDouble("delivery_fee", 0.0),
-                        deliveryAddress = obj.optText("delivery_address")?.takeIf { it.isNotBlank() },
-                        deliveryExecutiveId = obj.longAny("delivery_executive_id"),
-                        customer = customerObj?.optText("name")?.takeIf { it.isNotBlank() } ?: "Client",
-                        createdAtEpochMs = parseServerEpochMs(obj.optText("created_at"))
-                    )
-                )
-            }
-        }
-    }
-
     suspend fun kots(token: String): List<KotTicket> = withContext(Dispatchers.IO) {
         val json = request("pos/kots?limit=100", token = token)
         val array = findArrayDeep(json, setOf("data", "kots")) ?: JSONArray()
@@ -455,12 +344,7 @@ class CookitHttpClient {
         token: String,
         type: OrderType,
         lines: List<CartLine>,
-        tableId: Long? = null,
-        customerName: String? = null,
-        customerPhone: String? = null,
-        deliveryAddress: String? = null,
-        deliveryFee: Double = 0.0,
-        deliveryExecutiveId: Long? = null
+        tableId: Long? = null
     ): Long = withContext(Dispatchers.IO) {
         if (lines.isEmpty()) throw CookitApiException(422, "Panier vide")
         val items = JSONArray()
@@ -483,15 +367,6 @@ class CookitHttpClient {
             .put("placed_via", "pos")
             .put("items", items)
         if (type == OrderType.DINE_IN && tableId != null) body.put("table_id", tableId)
-        if (type == OrderType.DELIVERY) {
-            val customer = JSONObject()
-            customerName?.trim()?.takeIf { it.isNotEmpty() }?.let { customer.put("name", it) }
-            customerPhone?.trim()?.takeIf { it.isNotEmpty() }?.let { customer.put("phone", it) }
-            if (customer.length() > 0) body.put("customer", customer)
-            deliveryAddress?.trim()?.takeIf { it.isNotEmpty() }?.let { body.put("delivery_address", it) }
-            body.put("delivery_fee", deliveryFee.coerceAtLeast(0.0))
-            deliveryExecutiveId?.let { body.put("delivery_executive_id", it) }
-        }
 
         val json = request("pos/orders", method = "POST", token = token, body = body)
         val orderObj = findObjectDeep(json, setOf("order"))

@@ -66,18 +66,6 @@ data class PosUiState(
     val orderLoadBusy: Boolean = false,
     val orderLoadError: String? = null,
     val kots: List<KotTicket> = emptyList(),
-    val dashboard: be.cookit.pos.android.domain.DashboardSnapshot? = null,
-    val deliveryExecutives: List<be.cookit.pos.android.domain.DeliveryExecutive> = emptyList(),
-    val deliveryOrders: List<be.cookit.pos.android.domain.DeliveryOrderSummary> = emptyList(),
-    val deliveryDetailsOpen: Boolean = false,
-    val deliveryCustomerName: String = "",
-    val deliveryCustomerPhone: String = "",
-    val deliveryAddress: String = "",
-    val deliveryExecutiveId: Long? = null,
-    val deliveryFeeText: String = "0.00",
-    val deliveryConfigBusy: Boolean = false,
-    val deliveryConfigError: String? = null,
-    val orderKotBusyIds: Set<Long> = emptySet(),
     val kdsBusyKotIds: Set<Long> = emptySet(),
     val kdsError: String? = null,
     val billingSheetOpen: Boolean = false,
@@ -1013,128 +1001,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         return false
     }
 
-    fun refreshDashboard() {
-        val currentToken = token ?: return
-        viewModelScope.launch {
-            runCatching { api.dashboard(currentToken) }
-                .onSuccess { dashboard -> _ui.update { it.copy(dashboard = dashboard) } }
-        }
-    }
-
-    fun refreshDeliveryOrders() {
-        val currentToken = token ?: return
-        viewModelScope.launch {
-            runCatching {
-                val orders = api.deliveryOrders(currentToken)
-                val (executives, _) = api.deliveryBootstrap(currentToken)
-                orders to executives
-            }.onSuccess { (orders, executives) ->
-                _ui.update { it.copy(deliveryOrders = orders, deliveryExecutives = executives) }
-            }
-        }
-    }
-
-    fun openDeliveryDetails() {
-        _ui.update { it.copy(deliveryDetailsOpen = true, deliveryConfigBusy = true, deliveryConfigError = null) }
-        val currentToken = token ?: run {
-            _ui.update { it.copy(deliveryConfigBusy = false, deliveryConfigError = "load_failed") }
-            return
-        }
-        viewModelScope.launch {
-            runCatching {
-                api.deliveryBootstrap(currentToken)
-            }.onSuccess { (executives, settings) ->
-                _ui.update { state ->
-                    val currentFee = state.deliveryFeeText.replace(',', '.').toDoubleOrNull() ?: 0.0
-                    val defaultFee = settings?.fixedFee ?: 0.0
-                    state.copy(
-                        deliveryExecutives = executives,
-                        deliveryExecutiveId = state.deliveryExecutiveId ?: executives.singleOrNull()?.id,
-                        deliveryFeeText = if (currentFee > 0.0) state.deliveryFeeText else java.lang.String.format(java.util.Locale.US, "%.2f", defaultFee),
-                        deliveryConfigBusy = false,
-                        deliveryConfigError = null
-                    )
-                }
-            }.onFailure {
-                _ui.update { it.copy(deliveryConfigBusy = false, deliveryConfigError = "load_failed") }
-            }
-        }
-    }
-
-    fun dismissDeliveryDetails() {
-        _ui.update { it.copy(deliveryDetailsOpen = false, deliveryConfigError = null) }
-    }
-
-    fun updateDeliveryCustomerName(value: String) = _ui.update { it.copy(deliveryCustomerName = value) }
-    fun updateDeliveryCustomerPhone(value: String) = _ui.update { it.copy(deliveryCustomerPhone = value) }
-    fun updateDeliveryAddress(value: String) = _ui.update { it.copy(deliveryAddress = value) }
-    fun updateDeliveryFee(value: String) = _ui.update { it.copy(deliveryFeeText = value) }
-    fun selectDeliveryExecutive(id: Long) = _ui.update { it.copy(deliveryExecutiveId = id, deliveryConfigError = null) }
-
-    fun confirmDeliveryDetails() {
-        val state = _ui.value
-        if (state.deliveryAddress.isBlank() || state.deliveryExecutiveId == null) {
-            _ui.update { it.copy(deliveryConfigError = "required") }
-            return
-        }
-        _ui.update { it.copy(deliveryDetailsOpen = false, deliveryConfigError = null) }
-    }
-
-    fun createKotForOrder(order: PosOrder) {
-        if (order.id in _ui.value.orderKotBusyIds) return
-        val currentToken = token ?: return
-        viewModelScope.launch {
-            _ui.update { it.copy(orderKotBusyIds = it.orderKotBusyIds + order.id, orderLoadError = null) }
-            runCatching {
-                api.ensureKot(currentToken, order.id)
-                val freshKots = api.kots(currentToken)
-                val freshOrders = api.orders(currentToken)
-                freshOrders to freshKots
-            }.onSuccess { (orders, kots) ->
-                knownOrderIds.addAll(orders.map { it.id })
-                _ui.update {
-                    it.copy(
-                        orders = orders,
-                        kots = kots,
-                        orderKotBusyIds = it.orderKotBusyIds - order.id,
-                        orderLoadError = null
-                    )
-                }
-            }.onFailure {
-                _ui.update {
-                    it.copy(
-                        orderKotBusyIds = it.orderKotBusyIds - order.id,
-                        orderLoadError = "kot_create_failed"
-                    )
-                }
-            }
-        }
-    }
-
-    private fun clearDeliveryDraft() {
-        _ui.update {
-            it.copy(
-                deliveryCustomerName = "",
-                deliveryCustomerPhone = "",
-                deliveryAddress = "",
-                deliveryExecutiveId = null,
-                deliveryFeeText = "0.00",
-                deliveryDetailsOpen = false,
-                deliveryConfigError = null
-            )
-        }
-    }
-
     fun requestCheckout() {
         val state = _ui.value
         val resumed = state.resumedRemoteOrderId != null
         if (state.draftCart.isEmpty() && (!resumed || (state.resumedRemoteOrderTotal ?: 0.0) <= 0.0)) return
         if (!resumed && state.draftOrderType == OrderType.DINE_IN && state.draftTableId == null) {
             _ui.update { it.copy(checkoutMessage = "table_required", checkoutError = null) }
-            return
-        }
-        if (!resumed && state.draftOrderType == OrderType.DELIVERY && (state.deliveryAddress.isBlank() || state.deliveryExecutiveId == null)) {
-            openDeliveryDetails()
             return
         }
         _ui.update {
@@ -1216,12 +1088,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                             currentToken,
                             _ui.value.draftOrderType,
                             _ui.value.draftCart,
-                            _ui.value.draftTableId,
-                            customerName = _ui.value.deliveryCustomerName.takeIf { it.isNotBlank() },
-                            customerPhone = _ui.value.deliveryCustomerPhone.takeIf { it.isNotBlank() },
-                            deliveryAddress = _ui.value.deliveryAddress.takeIf { it.isNotBlank() },
-                            deliveryFee = _ui.value.deliveryFeeText.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                            deliveryExecutiveId = _ui.value.deliveryExecutiveId
+                            _ui.value.draftTableId
                         )
                     } catch (e: Throwable) {
                         throw IllegalStateException("Création de la commande — ${readableError(e)}", e)
@@ -1230,8 +1097,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
 
-                // KOT is deliberately independent from settlement, matching Cookit Cloud.
-                // A paid order can receive its KOT later from the Orders screen.
+                try {
+                    api.ensureKot(currentToken, orderId)
+                } catch (e: Throwable) {
+                    throw IllegalStateException("Envoi en cuisine — ${readableError(e)}", e)
+                }
 
                 // Two-phase fiscal guard: durable local evidence MUST exist before the
                 // irreversible payment request. The cloud fiscal profile can remain OFF; this
@@ -1262,7 +1132,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     ((tenderedAmount ?: amountDue) - amountDue).coerceAtLeast(0.0)
                 } else null
                 finishSuccessfulCheckout(fresh, freshKots, change)
-                clearDeliveryDraft()
             }.onFailure { e ->
                 _ui.update {
                     it.copy(
@@ -1281,10 +1150,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (state.draftCart.isEmpty()) return
         if (state.draftOrderType == OrderType.DINE_IN && state.draftTableId == null) {
             _ui.update { it.copy(checkoutMessage = "table_required", checkoutError = null) }
-            return
-        }
-        if (state.draftOrderType == OrderType.DELIVERY && (state.deliveryAddress.isBlank() || state.deliveryExecutiveId == null)) {
-            openDeliveryDetails()
             return
         }
         if (state.demoMode) {
@@ -1311,12 +1176,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     currentToken,
                     _ui.value.draftOrderType,
                     _ui.value.draftCart,
-                    _ui.value.draftTableId,
-                    customerName = _ui.value.deliveryCustomerName.takeIf { it.isNotBlank() },
-                    customerPhone = _ui.value.deliveryCustomerPhone.takeIf { it.isNotBlank() },
-                    deliveryAddress = _ui.value.deliveryAddress.takeIf { it.isNotBlank() },
-                    deliveryFee = _ui.value.deliveryFeeText.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                    deliveryExecutiveId = _ui.value.deliveryExecutiveId
+                    _ui.value.draftTableId
                 ).also { createdId -> updateDraft(pendingOrderId = createdId) }
 
                 api.ensureKot(currentToken, orderId)

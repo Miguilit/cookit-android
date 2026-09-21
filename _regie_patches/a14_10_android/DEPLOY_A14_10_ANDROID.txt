@@ -1,0 +1,22 @@
+Cookit Android A14.10 — Cloud parity + UI/Workflow polish
+
+ROOT=/home/u683350338/domains/allmart.be/public_html/_private_source/cookit-android
+
+1) Deploy backend A14.10 first.
+2) Upload CookitAndroid_A14_10_CLOUD_PARITY_UI_20260921.zip to $ROOT
+3) Run:
+
+cd "$ROOT"
+git status --short
+unzip -o CookitAndroid_A14_10_CLOUD_PARITY_UI_20260921.zip -d .
+python3 _regie_patches/a14_10_android/apply_a14_10_android.py
+
+git diff --check
+grep -nE 'versionCode|versionName' app/build.gradle.kts
+
+Expected:
+versionCode = 32
+versionName = "0.14.10"
+
+Then commit/push and build with the existing GitHub Actions workflow.
+Fiscal Agent C5.3 source is intentionally untouched.
