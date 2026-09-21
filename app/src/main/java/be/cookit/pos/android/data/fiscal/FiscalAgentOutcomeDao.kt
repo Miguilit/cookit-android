@@ -23,6 +23,9 @@ interface FiscalAgentOutcomeDao {
     )
     suspend fun updateState(transactionId: Long, state: String, updatedAtEpochMs: Long)
 
+    @Query("SELECT * FROM fiscal_agent_outcomes WHERE state != 'cloud_acked' ORDER BY updated_at_epoch_ms ASC LIMIT 1")
+    suspend fun oldestPending(): FiscalAgentOutcomeEntity?
+
     @Query("SELECT COUNT(*) FROM fiscal_agent_outcomes WHERE state != 'cloud_acked'")
     suspend fun pendingCount(): Int
 }

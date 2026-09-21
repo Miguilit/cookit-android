@@ -41,6 +41,12 @@ class FiscalDiagnosticExporter(
             .put("last_error", state.lastError?.let(::redact))
             .put("active_job_id", state.activeJobId)
             .put("active_job_phase", state.activeJobPhase)
+            .put("retry_disposition", state.retryDisposition)
+            .put("retry_at_epoch_ms", state.retryAtEpochMs)
+            .put("retry_attempt", state.retryAttempt)
+            .put("terminal_failures", state.terminalFailures)
+            .put("last_terminal_job_id", state.lastTerminalJobId)
+            .put("manual_hold", state.manualHold)
 
         val eventArray = JSONArray()
         events.forEach { event ->

@@ -3,6 +3,7 @@ package be.cookit.pos.android.data.fiscal
 import be.cookit.pos.android.domain.FiscalRuntimeIdentity
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.time.OffsetDateTime
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -25,6 +26,7 @@ data class FiscalAgentJob(
     val snapshot: JSONObject,
     val snapshotHash: String,
     val attempts: Int,
+    val claimExpiresAtEpochMs: Long?,
     val metadata: JSONObject?
 ) {
     fun validateScope(identity: FiscalRuntimeIdentity) {
@@ -100,6 +102,7 @@ data class FiscalAgentJob(
             snapshotHash = json.optString("snapshot_hash").takeIf { it.length == 64 }
                 ?: throw FiscalAgentIntegrityException("Fiscal Agent job snapshot_hash missing"),
             attempts = json.optInt("attempts", 0),
+            claimExpiresAtEpochMs = json.optNullableString("claim_expires_at")?.toEpochMsOrNull(),
             metadata = json.optJSONObject("metadata")
         )
     }
@@ -116,6 +119,10 @@ data class FiscalAgentRunResult(
 
 private fun JSONObject.optNullableString(key: String): String? =
     if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+
+private fun String.toEpochMsOrNull(): Long? = runCatching {
+    OffsetDateTime.parse(this).toInstant().toEpochMilli()
+}.getOrNull()
 
 private fun String.toMinorUnits(): Long = runCatching {
     BigDecimal(this)

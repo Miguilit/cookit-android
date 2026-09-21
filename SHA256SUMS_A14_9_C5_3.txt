@@ -1,0 +1,16 @@
+695353c9a914f68444786175b511ca06bf84835b2ce62a6ba14057ceb6eae801  ./DEPLOY_A14_9_C5_3_RETRY_POLICY.txt
+f19caf494b905a8e46da9368bbffde5fea9c43d2e4e9f329c7aeb514115e4087  ./TEST_A14_9_C5_3_RETRY_POLICY.txt
+93cbfa15a35b2412301a980dd34b7a5fb86bfd27826684f8331f885fe78a1db7  ./app/build.gradle.kts
+0b7ea4330c4f32a060390bb3624e02e1812a195d82196126530be4a8049ce320  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentClient.kt
+c5931f22a9ac5c1b336888eaef028869214b98d2994a42aa5490975dfa9dbba8  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentDiagnosticLogger.kt
+31161e09dcfc0bda2e00f266d2334353e8c25da1e3c3b2e59f44023690dde4b4  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentJob.kt
+175201465e1dde7b309f7d6eedf9a4ffec313b6397886f4eed90a2663d17aa1a  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentOutcomeDao.kt
+710a524ad811c374be68054ed07d5b0d185d5ccacf503dd4042df8f5c015b94d  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentRetryPolicy.kt
+37da54470ba54c35907af5a36522d616b2b0d0f34e17af06703cb0fa03dfcb11  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentRunner.kt
+1f0c876efe8a1198450a92f5b27db43718485ff9ac985fd6b8aa065283d04ba3  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalAgentRuntimeStateStore.kt
+806fa96be15ad22bbdb3cf90b27189795aa92c85158b40177a84f4f99db644c5  ./app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalDiagnosticExporter.kt
+ee51b48adc2c29edf4ce8996f585adaab52dadcf645c14111580006730264328  ./app/src/main/java/be/cookit/pos/android/service/FiscalAgentForegroundService.kt
+12d61c9958d92b376e9c7851cb92395d211db120c0217142772e4a2ba6409bdb  ./app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+c14dbe14379a36716e75471df250f27bb8e0f67c762ae14d9aabf71c1d661155  ./app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+24540c0f3a3aa0c5677b4ea11d1c188de25be9fc6da7df180fdbcf37bbff29aa  ./app/src/main/java/be/cookit/pos/android/ui/Localization.kt
+8192f64109e52754d63af962f844a40faed47d5daa8fd39ff930427b6bb6d7c7  ./docs/A14_9_C5_3_RETRY_POLICY.md

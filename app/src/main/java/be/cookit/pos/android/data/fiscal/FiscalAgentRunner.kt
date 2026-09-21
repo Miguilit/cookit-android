@@ -1,21 +1,81 @@
 package be.cookit.pos.android.data.fiscal
 
 import be.cookit.pos.android.domain.FiscalRuntimeIdentity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
-/**
- * Cloud -> Android -> local FDM -> Cloud runner.
- *
- * A14.5.3 adds a durable provider-outcome journal. A valid FDM receipt is committed locally before
- * any cloud /submitted or /acknowledge call. A later lease retry can therefore replay the cloud
- * acknowledgement without asking the FDM to fiscalize the same event again.
- */
 class FiscalAgentRunner(
     private val client: FiscalAgentClient,
     private val fdmRuntime: FiscalFdmRuntime,
     private val outcomeDao: FiscalAgentOutcomeDao
 ) {
+    suspend fun flushPendingOutcome(
+        credentials: FiscalAgentCredentials,
+        identity: FiscalRuntimeIdentity,
+        onProgress: (Long, String) -> Unit = { _, _ -> }
+    ): FiscalAgentRunResult {
+        val outcome = outcomeDao.oldestPending() ?: return FiscalAgentRunResult(processed = false)
+        var phase = FiscalAgentRuntimeStateStore.PHASE_REPLAY_LOCAL
+
+        fun progress(nextPhase: String) {
+            phase = nextPhase
+            onProgress(outcome.transactionId, nextPhase)
+        }
+
+        progress(FiscalAgentRuntimeStateStore.PHASE_REPLAY_LOCAL)
+        try {
+            if (outcome.state == FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED) {
+                progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_SUBMIT)
+                client.submitted(credentials, outcome.transactionId, identity)
+                outcomeDao.updateState(
+                    outcome.transactionId,
+                    FiscalAgentOutcomeEntity.STATE_CLOUD_SUBMITTED,
+                    System.currentTimeMillis()
+                )
+            }
+
+            val fresh = outcomeDao.byTransactionId(outcome.transactionId) ?: outcome
+            if (fresh.state != FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED) {
+                progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_ACK)
+                client.acknowledge(
+                    credentials = credentials,
+                    transactionId = fresh.transactionId,
+                    identity = identity,
+                    success = true,
+                    receipt = fresh.toCloudReceipt(replayedFromJournal = true)
+                )
+                outcomeDao.updateState(
+                    fresh.transactionId,
+                    FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED,
+                    System.currentTimeMillis()
+                )
+            }
+
+            return FiscalAgentRunResult(
+                processed = true,
+                jobId = fresh.transactionId,
+                publicId = fresh.publicId,
+                receiptNumber = fresh.receiptNumber,
+                duplicate = fresh.providerDuplicate,
+                replayedFromLocalJournal = true
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            throw FiscalAgentJobExecutionException(
+                jobId = outcome.transactionId,
+                publicId = outcome.publicId,
+                attempts = 0,
+                phase = phase,
+                claimExpiresAtEpochMs = null,
+                providerOutcomePersisted = true,
+                providerResponseReceived = true,
+                cause = error
+            )
+        }
+    }
+
     suspend fun processNext(
         credentials: FiscalAgentCredentials,
         identity: FiscalRuntimeIdentity,
@@ -28,109 +88,131 @@ class FiscalAgentRunner(
         }
 
         val job = client.nextJob(credentials, identity) ?: return FiscalAgentRunResult(processed = false)
-        onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_CLAIMED)
-        val event = job.asProviderEvent(identity)
+        var phase = FiscalAgentRuntimeStateStore.PHASE_CLAIMED
+        var providerResponseReceived = false
 
-        val existing = outcomeDao.byTransactionId(job.id)
-        val replayedFromJournal = existing != null
-        val outcome = existing?.also { validateStoredOutcome(it, job) } ?: run {
-            val metadata = job.metadata
-            val mockScenario = if (settings.isMock && metadata?.optBoolean("test_only", false) == true) {
-                metadata.optString("scenario")
-                    .trim()
-                    .lowercase()
-                    .takeIf { it in ALLOWED_MOCK_SCENARIOS }
-            } else {
-                null
+        fun progress(nextPhase: String) {
+            phase = nextPhase
+            onProgress(job.id, nextPhase)
+        }
+
+        progress(FiscalAgentRuntimeStateStore.PHASE_CLAIMED)
+
+        try {
+            val event = job.asProviderEvent(identity)
+            val existing = outcomeDao.byTransactionId(job.id)
+            val replayedFromJournal = existing != null
+            val outcome = existing?.also { validateStoredOutcome(it, job) } ?: run {
+                val metadata = job.metadata
+                val mockScenario = if (settings.isMock && metadata?.optBoolean("test_only", false) == true) {
+                    metadata.optString("scenario")
+                        .trim()
+                        .lowercase()
+                        .takeIf { it in ALLOWED_MOCK_SCENARIOS }
+                } else {
+                    null
+                }
+                val mockHeaders = mockScenario?.let { mapOf("X-Cookit-Mock-Scenario" to it) }.orEmpty()
+
+                progress(FiscalAgentRuntimeStateStore.PHASE_FDM_CALL)
+                val envelope = fdmRuntime.submitSale(settings, event, headers = mockHeaders)
+                val sale = envelope.optJSONObject("data")?.optJSONObject("signSale")
+                    ?: throw FdmGraphqlException("FDM response does not contain data.signSale", envelope.toString())
+                providerResponseReceived = true
+                if (!sale.optBoolean("success", false)) {
+                    throw FdmGraphqlException("FDM signSale did not succeed", envelope.toString())
+                }
+
+                val receiptNumber = sale.optString("receiptNumber").takeIf { it.isNotBlank() }
+                    ?: throw FdmGraphqlException("FDM receipt number missing", envelope.toString())
+                val now = System.currentTimeMillis()
+                val created = FiscalAgentOutcomeEntity(
+                    transactionId = job.id,
+                    publicId = job.publicId,
+                    idempotencyKey = event.idempotencyKey,
+                    snapshotHash = event.snapshotHash,
+                    provider = settings.provider,
+                    receiptNumber = receiptNumber,
+                    signature = sale.optString("signature").takeIf { it.isNotBlank() },
+                    verificationCode = sale.optString("verificationCode").takeIf { it.isNotBlank() },
+                    providerReference = sale.optString("providerReference").takeIf { it.isNotBlank() },
+                    rawResponseJson = envelope.toString(),
+                    providerDuplicate = sale.optBoolean("duplicate", false),
+                    state = FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED,
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now
+                )
+
+                val inserted = outcomeDao.insert(created)
+                if (inserted == -1L) {
+                    outcomeDao.byTransactionId(job.id)?.also { validateStoredOutcome(it, job) }
+                        ?: throw FiscalAgentIntegrityException("Unable to persist/reload provider outcome for transaction ${job.id}")
+                } else {
+                    created
+                }
             }
-            val mockHeaders = mockScenario?.let { mapOf("X-Cookit-Mock-Scenario" to it) }.orEmpty()
 
-            onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_FDM_CALL)
-            val envelope = fdmRuntime.submitSale(settings, event, headers = mockHeaders)
-            val sale = envelope.optJSONObject("data")?.optJSONObject("signSale")
-                ?: throw FdmGraphqlException("FDM response does not contain data.signSale", envelope.toString())
-            if (!sale.optBoolean("success", false)) {
-                throw FdmGraphqlException("FDM signSale did not succeed", envelope.toString())
+            progress(
+                if (replayedFromJournal) FiscalAgentRuntimeStateStore.PHASE_REPLAY_LOCAL
+                else FiscalAgentRuntimeStateStore.PHASE_PROVIDER_ACCEPTED
+            )
+
+            if (!replayedFromJournal && settings.isMock && job.metadata?.optBoolean("test_only", false) == true) {
+                val requestedDelay = job.metadata.optLong("cloud_submit_delay_ms", 0L)
+                val delayMs = requestedDelay.coerceIn(0L, MAX_TEST_CLOUD_SUBMIT_DELAY_MS)
+                if (delayMs > 0L) delay(delayMs)
             }
 
-            val receiptNumber = sale.optString("receiptNumber").takeIf { it.isNotBlank() }
-                ?: throw FdmGraphqlException("FDM receipt number missing", envelope.toString())
-            val now = System.currentTimeMillis()
-            val created = FiscalAgentOutcomeEntity(
-                transactionId = job.id,
+            if (outcome.state == FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED) {
+                progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_SUBMIT)
+                client.submitted(credentials, job.id, identity)
+                outcomeDao.updateState(
+                    job.id,
+                    FiscalAgentOutcomeEntity.STATE_CLOUD_SUBMITTED,
+                    System.currentTimeMillis()
+                )
+            }
+
+            val freshOutcome = outcomeDao.byTransactionId(job.id) ?: outcome
+            if (freshOutcome.state != FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED) {
+                progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_ACK)
+                client.acknowledge(
+                    credentials = credentials,
+                    transactionId = job.id,
+                    identity = identity,
+                    success = true,
+                    receipt = freshOutcome.toCloudReceipt(replayedFromJournal)
+                )
+                outcomeDao.updateState(
+                    job.id,
+                    FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED,
+                    System.currentTimeMillis()
+                )
+            }
+
+            return FiscalAgentRunResult(
+                processed = true,
+                jobId = job.id,
                 publicId = job.publicId,
-                idempotencyKey = event.idempotencyKey,
-                snapshotHash = event.snapshotHash,
-                provider = settings.provider,
-                receiptNumber = receiptNumber,
-                signature = sale.optString("signature").takeIf { it.isNotBlank() },
-                verificationCode = sale.optString("verificationCode").takeIf { it.isNotBlank() },
-                providerReference = sale.optString("providerReference").takeIf { it.isNotBlank() },
-                rawResponseJson = envelope.toString(),
-                providerDuplicate = sale.optBoolean("duplicate", false),
-                state = FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED,
-                createdAtEpochMs = now,
-                updatedAtEpochMs = now
+                receiptNumber = freshOutcome.receiptNumber,
+                duplicate = freshOutcome.providerDuplicate,
+                replayedFromLocalJournal = replayedFromJournal
             )
-
-            val inserted = outcomeDao.insert(created)
-            if (inserted == -1L) {
-                outcomeDao.byTransactionId(job.id)?.also { validateStoredOutcome(it, job) }
-                    ?: throw FiscalAgentIntegrityException("Unable to persist/reload provider outcome for transaction ${job.id}")
-            } else {
-                created
-            }
-        }
-
-        onProgress(
-            job.id,
-            if (replayedFromJournal) FiscalAgentRuntimeStateStore.PHASE_REPLAY_LOCAL
-            else FiscalAgentRuntimeStateStore.PHASE_PROVIDER_ACCEPTED
-        )
-
-        // Test-only deterministic window: the provider result is already durable locally, but the
-        // cloud transition is intentionally delayed so Wi-Fi can be disabled after FDM acceptance.
-        if (!replayedFromJournal && settings.isMock && job.metadata?.optBoolean("test_only", false) == true) {
-            val requestedDelay = job.metadata.optLong("cloud_submit_delay_ms", 0L)
-            val delayMs = requestedDelay.coerceIn(0L, MAX_TEST_CLOUD_SUBMIT_DELAY_MS)
-            if (delayMs > 0L) delay(delayMs)
-        }
-
-        if (outcome.state == FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED) {
-            onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_CLOUD_SUBMIT)
-            client.submitted(credentials, job.id, identity)
-            outcomeDao.updateState(
-                job.id,
-                FiscalAgentOutcomeEntity.STATE_CLOUD_SUBMITTED,
-                System.currentTimeMillis()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            val providerOutcomePersisted = runCatching { outcomeDao.byTransactionId(job.id) != null }.getOrDefault(false)
+            throw FiscalAgentJobExecutionException(
+                jobId = job.id,
+                publicId = job.publicId,
+                attempts = job.attempts,
+                phase = phase,
+                claimExpiresAtEpochMs = job.claimExpiresAtEpochMs,
+                providerOutcomePersisted = providerOutcomePersisted,
+                providerResponseReceived = providerResponseReceived,
+                cause = error
             )
         }
-
-        val freshOutcome = outcomeDao.byTransactionId(job.id) ?: outcome
-        if (freshOutcome.state != FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED) {
-            onProgress(job.id, FiscalAgentRuntimeStateStore.PHASE_CLOUD_ACK)
-            client.acknowledge(
-                credentials = credentials,
-                transactionId = job.id,
-                identity = identity,
-                success = true,
-                receipt = freshOutcome.toCloudReceipt(replayedFromJournal)
-            )
-            outcomeDao.updateState(
-                job.id,
-                FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED,
-                System.currentTimeMillis()
-            )
-        }
-
-        return FiscalAgentRunResult(
-            processed = true,
-            jobId = job.id,
-            publicId = job.publicId,
-            receiptNumber = freshOutcome.receiptNumber,
-            duplicate = freshOutcome.providerDuplicate,
-            replayedFromLocalJournal = replayedFromJournal
-        )
     }
 
     private fun validateStoredOutcome(outcome: FiscalAgentOutcomeEntity, job: FiscalAgentJob) {
@@ -167,7 +249,7 @@ class FiscalAgentRunner(
     }
 
     companion object {
-        private const val MAX_TEST_CLOUD_SUBMIT_DELAY_MS = 15_000L
+        private const val MAX_TEST_CLOUD_SUBMIT_DELAY_MS = 60_000L
 
         private val ALLOWED_MOCK_SCENARIOS = setOf(
             "success",

@@ -232,7 +232,16 @@ data class FiscalUiStrings(
     val localRuntime: String,
     val profileDisabled: String,
     val testMode: String,
-    val productionMode: String
+    val productionMode: String,
+    val retryPolicy: String,
+    val retryDisposition: String,
+    val retryAttempt: String,
+    val nextRetry: String,
+    val terminalFailures: String,
+    val lastTerminalJob: String,
+    val manualHoldTitle: String,
+    val manualHoldMessage: String,
+    val resumeProcessing: String
 )
 
 fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
@@ -255,7 +264,7 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         backgroundExecution="Exécution en arrière-plan", screenOffProtection="Protection écran éteint",
         rebootRecovery="Reprise après redémarrage", durableJournal="Journal FDM durable", enabled="Actif", disabled="Inactif",
         advanced="Informations avancées", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Runtime fiscal local",
-        profileDisabled="Profil fiscal cloud désactivé", testMode="Mode test", productionMode="Mode production"
+        profileDisabled="Profil fiscal cloud désactivé", testMode="Mode test", productionMode="Mode production", retryPolicy="Politique de reprise", retryDisposition="Décision", retryAttempt="Tentative", nextRetry="Prochaine reprise", terminalFailures="Échecs terminaux", lastTerminalJob="Dernier job terminal", manualHoldTitle="Traitement fiscal suspendu", manualHoldMessage="Une intervention administrateur est requise avant de reprendre les jobs fiscaux.", resumeProcessing="Reprendre le traitement"
     )
     AppLanguage.NL -> FiscalUiStrings(
         centerTitle="Fiscaliteit", centerSubtitle="Fiscaal centrum van de vestiging", summaryTitle="Fiscaliteit & FDM",
@@ -276,7 +285,7 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         backgroundExecution="Achtergronduitvoering", screenOffProtection="Bescherming bij uitgeschakeld scherm",
         rebootRecovery="Herstel na herstart", durableJournal="Duurzaam FDM-logboek", enabled="Actief", disabled="Inactief",
         advanced="Geavanceerde informatie", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Lokale fiscale runtime",
-        profileDisabled="Cloud fiscaal profiel uitgeschakeld", testMode="Testmodus", productionMode="Productiemodus"
+        profileDisabled="Cloud fiscaal profiel uitgeschakeld", testMode="Testmodus", productionMode="Productiemodus", retryPolicy="Herstelbeleid", retryDisposition="Beslissing", retryAttempt="Poging", nextRetry="Volgende poging", terminalFailures="Definitieve fouten", lastTerminalJob="Laatste definitieve job", manualHoldTitle="Fiscale verwerking gepauzeerd", manualHoldMessage="Een beheerder moet ingrijpen voordat fiscale jobs worden hervat.", resumeProcessing="Verwerking hervatten"
     )
     AppLanguage.EN -> FiscalUiStrings(
         centerTitle="Fiscality", centerSubtitle="Branch fiscal control center", summaryTitle="Fiscality & FDM",
@@ -297,7 +306,7 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         backgroundExecution="Background execution", screenOffProtection="Screen-off protection",
         rebootRecovery="Reboot recovery", durableJournal="Durable FDM journal", enabled="Enabled", disabled="Disabled",
         advanced="Advanced information", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Local fiscal runtime",
-        profileDisabled="Cloud fiscal profile disabled", testMode="Test mode", productionMode="Production mode"
+        profileDisabled="Cloud fiscal profile disabled", testMode="Test mode", productionMode="Production mode", retryPolicy="Retry policy", retryDisposition="Decision", retryAttempt="Attempt", nextRetry="Next retry", terminalFailures="Terminal failures", lastTerminalJob="Last terminal job", manualHoldTitle="Fiscal processing paused", manualHoldMessage="Administrator action is required before fiscal jobs can resume.", resumeProcessing="Resume processing"
     )
     AppLanguage.DE -> FiscalUiStrings(
         centerTitle="Fiskalität", centerSubtitle="Fiskalzentrum der Filiale", summaryTitle="Fiskalität & FDM",
@@ -318,6 +327,6 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         backgroundExecution="Hintergrundausführung", screenOffProtection="Schutz bei ausgeschaltetem Bildschirm",
         rebootRecovery="Wiederherstellung nach Neustart", durableJournal="Dauerhaftes FDM-Journal", enabled="Aktiv", disabled="Inaktiv",
         advanced="Erweiterte Informationen", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Lokale Fiskal-Runtime",
-        profileDisabled="Cloud-Fiskalprofil deaktiviert", testMode="Testmodus", productionMode="Produktionsmodus"
+        profileDisabled="Cloud-Fiskalprofil deaktiviert", testMode="Testmodus", productionMode="Produktionsmodus", retryPolicy="Wiederholungsrichtlinie", retryDisposition="Entscheidung", retryAttempt="Versuch", nextRetry="Nächster Versuch", terminalFailures="Endgültige Fehler", lastTerminalJob="Letzter endgültiger Job", manualHoldTitle="Fiskalverarbeitung pausiert", manualHoldMessage="Vor der Fortsetzung fiskaler Jobs ist eine Administratoraktion erforderlich.", resumeProcessing="Verarbeitung fortsetzen"
     )
 }

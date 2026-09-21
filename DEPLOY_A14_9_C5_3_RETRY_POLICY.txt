@@ -1,0 +1,28 @@
+Cookit Android 0.14.9 / C5.3
+Retry policy and terminal failure handling
+
+Target
+- versionCode 30
+- versionName 0.14.9
+- install over 0.14.8; do not uninstall
+
+Behavior
+- provider outcomes already persisted locally are synchronized to Cookit Cloud without another FDM call
+- explicit provider rejection is terminalized when the Cloud ledger accepts a failed acknowledgement
+- ambiguous provider failures use bounded retries with the original idempotency key
+- provider retry limit: 3 claims
+- exhausted/unsafe states enter persistent MANUAL_HOLD
+- MANUAL_HOLD requires an administrator resume action from Fiscality
+- Cloud heartbeat remains active while processing is held
+
+Safety
+- the certified provider adapter remains fail-closed
+- Mock scenarios remain debug/test only
+- no fiscal profile activation is performed by this patch
+- no Room migration is required
+
+Validation
+1. Build through the existing signed GitHub Actions workflow.
+2. Install over 0.14.8 without clearing app data.
+3. Verify Auto, runtime identity, diagnostic history and fiscal provider settings are preserved.
+4. Start with C5.3-A permanent rejection test.

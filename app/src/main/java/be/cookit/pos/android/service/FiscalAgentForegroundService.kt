@@ -30,6 +30,9 @@ import be.cookit.pos.android.data.fiscal.FiscalAgentCredentialStore
 import be.cookit.pos.android.data.fiscal.FiscalAgentDiagnosticLogger
 import be.cookit.pos.android.data.fiscal.FiscalAgentException
 import be.cookit.pos.android.data.fiscal.FiscalAgentIntegrityException
+import be.cookit.pos.android.data.fiscal.FiscalAgentJobExecutionException
+import be.cookit.pos.android.data.fiscal.FiscalAgentRetryPolicy
+import be.cookit.pos.android.data.fiscal.FiscalRetryDisposition
 import be.cookit.pos.android.data.fiscal.FiscalAgentOutcomeDao
 import be.cookit.pos.android.data.fiscal.FiscalAgentRunner
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
@@ -76,6 +79,7 @@ class FiscalAgentForegroundService : Service() {
     private lateinit var runtimeRepository: FiscalRuntimeRepository
     private lateinit var client: FiscalAgentClient
     private lateinit var runner: FiscalAgentRunner
+    private val retryPolicy = FiscalAgentRetryPolicy()
     private lateinit var outcomeDao: FiscalAgentOutcomeDao
     private lateinit var fdmRuntime: FiscalFdmRuntime
     private lateinit var fdmProbe: FdmConnectivityProbe
@@ -400,32 +404,181 @@ class FiscalAgentForegroundService : Service() {
                 }
             }
 
+            val retryState = stateStore.load()
+            if (retryState.manualHold) {
+                stateStore.setServiceStatus(true, false, "manual_hold")
+                updateNotification("DEGRADED • MANUAL_HOLD • Job #${retryState.activeJobId ?: "?"}")
+                markLoopProgress()
+                delay(MANUAL_HOLD_POLL_MS)
+                continue
+            }
+
+            val retryAt = retryState.retryAtEpochMs
+            if (retryAt != null && System.currentTimeMillis() < retryAt) {
+                val waitMs = (retryAt - System.currentTimeMillis()).coerceAtLeast(0L)
+                stateStore.setServiceStatus(true, false, "retry_wait:${retryState.retryDisposition.orEmpty()}:$retryAt")
+                updateNotification("${retryState.health} • ${retryState.activeJobPhase ?: "RETRY_WAIT"} • ${waitMs / 1000L}s")
+                markLoopProgress()
+                delay(waitMs.coerceAtMost(RETRY_WAIT_TICK_MS).coerceAtLeast(250L))
+                continue
+            }
+
             stateStore.setServiceStatus(true, true, "auto_polling")
             stateStore.recordPollAttempt(System.currentTimeMillis())
             updateNotification("${stateStore.load().health} • recherche d’un job")
             markLoopProgress()
 
-            val result = try {
-                runner.processNext(credentials, identity, settings) { jobId, phase ->
-                    stateStore.setActiveJob(jobId, phase)
-                    stateStore.setServiceStatus(true, true, "job_phase:$jobId:$phase")
-                    scope.launch {
-                        diagnosticLogger.record(
-                            eventType = FiscalAgentDiagnosticLogger.EVENT_JOB_PHASE,
-                            health = stateStore.load().health,
-                            jobId = jobId,
-                            jobPhase = phase,
-                            provider = settings.provider,
-                            runtimeId = identity.runtimeId,
-                            message = phase
-                        )
-                    }
-                    updateNotification("${stateStore.load().health} • Job #$jobId • $phase")
-                    markLoopProgress()
+            val progress: (Long, String) -> Unit = { jobId, phase ->
+                stateStore.setActiveJob(jobId, phase)
+                stateStore.setServiceStatus(true, true, "job_phase:$jobId:$phase")
+                scope.launch {
+                    diagnosticLogger.record(
+                        eventType = FiscalAgentDiagnosticLogger.EVENT_JOB_PHASE,
+                        health = stateStore.load().health,
+                        jobId = jobId,
+                        jobPhase = phase,
+                        provider = settings.provider,
+                        runtimeId = identity.runtimeId,
+                        message = phase
+                    )
                 }
+                updateNotification("${stateStore.load().health} • Job #$jobId • $phase")
+                markLoopProgress()
+            }
+
+            val result = try {
+                val pending = runner.flushPendingOutcome(credentials, identity, progress)
+                if (pending.processed) pending else runner.processNext(credentials, identity, settings, progress)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
+                val failure = error as? FiscalAgentJobExecutionException
+                if (failure != null) {
+                    val rootError = failure.cause ?: failure
+                    val health = classifyFailure(rootError)
+                    val decision = retryPolicy.decide(failure)
+                    when (decision.disposition) {
+                        FiscalRetryDisposition.TERMINAL_FAILURE -> {
+                            stateStore.setActiveJob(failure.jobId, FiscalAgentRuntimeStateStore.PHASE_TERMINALIZING)
+                            stateStore.setServiceStatus(true, true, "terminalizing:${failure.jobId}")
+                            diagnosticLogger.record(
+                                eventType = FiscalAgentDiagnosticLogger.EVENT_RETRY_DECISION,
+                                health = health,
+                                jobId = failure.jobId,
+                                jobPhase = FiscalAgentRuntimeStateStore.PHASE_TERMINALIZING,
+                                provider = settings.provider,
+                                runtimeId = identity.runtimeId,
+                                message = decision.reasonCode,
+                                errorClass = rootError::class.java.simpleName
+                            )
+                            try {
+                                client.acknowledge(
+                                    credentials = credentials,
+                                    transactionId = failure.jobId,
+                                    identity = identity,
+                                    success = false,
+                                    error = decision.errorForCloud
+                                )
+                                stateStore.recordTerminalFailure(failure.jobId, decision.errorForCloud)
+                                stateStore.setServiceStatus(true, false, "terminal_failed:${failure.jobId}")
+                                diagnosticLogger.record(
+                                    eventType = FiscalAgentDiagnosticLogger.EVENT_JOB_TERMINAL_FAILED,
+                                    health = FiscalAgentRuntimeState.HEALTH_DEGRADED,
+                                    jobId = failure.jobId,
+                                    jobPhase = "FAILED",
+                                    provider = settings.provider,
+                                    runtimeId = identity.runtimeId,
+                                    message = decision.errorForCloud,
+                                    errorClass = rootError::class.java.simpleName
+                                )
+                                refreshPendingOutcomeCount()
+                                updateNotification("DEGRADED • Job #${failure.jobId} • FAILED")
+                                markLoopProgress()
+                                delay(PROCESSED_POLL_MS)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (terminalizeError: Throwable) {
+                                val holdError = "terminalization_failed:${terminalizeError.message.orEmpty()}"
+                                stateStore.setManualHold(
+                                    jobId = failure.jobId,
+                                    disposition = FiscalRetryDisposition.MANUAL_HOLD.name,
+                                    attempt = failure.attempts,
+                                    error = holdError
+                                )
+                                stateStore.setServiceStatus(true, false, "manual_hold:${failure.jobId}")
+                                diagnosticLogger.record(
+                                    eventType = FiscalAgentDiagnosticLogger.EVENT_MANUAL_HOLD,
+                                    health = FiscalAgentRuntimeState.HEALTH_DEGRADED,
+                                    jobId = failure.jobId,
+                                    jobPhase = FiscalAgentRuntimeStateStore.PHASE_MANUAL_HOLD,
+                                    provider = settings.provider,
+                                    runtimeId = identity.runtimeId,
+                                    message = holdError,
+                                    errorClass = terminalizeError::class.java.simpleName
+                                )
+                                updateNotification("DEGRADED • MANUAL_HOLD • Job #${failure.jobId}")
+                                markLoopProgress()
+                            }
+                        }
+
+                        FiscalRetryDisposition.RETRY_PROVIDER,
+                        FiscalRetryDisposition.RETRY_CLOUD_SYNC -> {
+                            val phase = if (decision.disposition == FiscalRetryDisposition.RETRY_PROVIDER) {
+                                FiscalAgentRuntimeStateStore.PHASE_RETRY_WAIT
+                            } else {
+                                FiscalAgentRuntimeStateStore.PHASE_SYNC_RETRY
+                            }
+                            stateStore.recordRetryDecision(
+                                jobId = failure.jobId,
+                                phase = phase,
+                                disposition = decision.disposition.name,
+                                attempt = failure.attempts,
+                                retryAtEpochMs = decision.retryAtEpochMs,
+                                health = health,
+                                error = decision.errorForCloud
+                            )
+                            stateStore.setServiceStatus(true, false, "retry_scheduled:${failure.jobId}:${decision.disposition.name}")
+                            diagnosticLogger.record(
+                                eventType = FiscalAgentDiagnosticLogger.EVENT_RETRY_SCHEDULED,
+                                health = health,
+                                jobId = failure.jobId,
+                                jobPhase = phase,
+                                provider = settings.provider,
+                                runtimeId = identity.runtimeId,
+                                message = decision.reasonCode,
+                                errorClass = rootError::class.java.simpleName
+                            )
+                            refreshPendingOutcomeCount()
+                            updateNotification("$health • Job #${failure.jobId} • $phase")
+                            markLoopProgress()
+                        }
+
+                        FiscalRetryDisposition.MANUAL_HOLD -> {
+                            stateStore.setManualHold(
+                                jobId = failure.jobId,
+                                disposition = decision.disposition.name,
+                                attempt = failure.attempts,
+                                error = decision.errorForCloud
+                            )
+                            stateStore.setServiceStatus(true, false, "manual_hold:${failure.jobId}")
+                            diagnosticLogger.record(
+                                eventType = FiscalAgentDiagnosticLogger.EVENT_MANUAL_HOLD,
+                                health = FiscalAgentRuntimeState.HEALTH_DEGRADED,
+                                jobId = failure.jobId,
+                                jobPhase = FiscalAgentRuntimeStateStore.PHASE_MANUAL_HOLD,
+                                provider = settings.provider,
+                                runtimeId = identity.runtimeId,
+                                message = decision.reasonCode,
+                                errorClass = rootError::class.java.simpleName
+                            )
+                            refreshPendingOutcomeCount()
+                            updateNotification("DEGRADED • MANUAL_HOLD • Job #${failure.jobId}")
+                            markLoopProgress()
+                        }
+                    }
+                    continue
+                }
+
                 val health = classifyFailure(error)
                 val runtimeState = stateStore.load()
                 if (runtimeState.activeJobId != null) {
@@ -449,7 +602,7 @@ class FiscalAgentForegroundService : Service() {
                     errorClass = error::class.java.simpleName
                 )
                 refreshPendingOutcomeCount()
-                updateNotification("$health • retry fiscal automatique")
+                updateNotification("$health • fiscal processing error")
                 markLoopProgress()
                 delay(ERROR_RETRY_MS)
                 continue
@@ -636,5 +789,7 @@ class FiscalAgentForegroundService : Service() {
         private const val WATCHDOG_STALL_MS = 90_000L
         private const val WATCHDOG_RESTART_GRACE_MS = 500L
         private const val MOCK_RESTART_GRACE_MS = 150L
+        private const val RETRY_WAIT_TICK_MS = 5_000L
+        private const val MANUAL_HOLD_POLL_MS = 15_000L
     }
 }

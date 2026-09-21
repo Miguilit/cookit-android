@@ -1,0 +1,23 @@
+C5.3 validation matrix
+
+C5.3-A / permanent rejection
+- Mock scenario: graphql_error
+- expected: one claim only
+- preferred terminal path: Cloud transaction -> failed, receipt_count=0
+- if the current Cloud ledger rejects failure acknowledgement directly from claimed: Android must enter MANUAL_HOLD and must not keep reclaiming indefinitely
+
+C5.3-B / ambiguous provider failure
+- Mock scenario: http_500 or timeout
+- expected dispositions: RETRY_PROVIDER then MANUAL_HOLD after claim attempt 3
+- same idempotency key must be reused
+- attempts must stop increasing while MANUAL_HOLD is active
+
+C5.3-C / provider accepted, Cloud unavailable
+- provider result must remain in fiscal_agent_outcomes
+- expected disposition: RETRY_CLOUD_SYNC / SYNC_RETRY
+- retry must flush the local provider outcome without another FDM call
+- final Cloud state: fiscalized, one receipt
+
+Operator recovery
+- Resume processing is admin-only
+- resuming clears the hold state; it does not fabricate a provider result or alter the Cloud fiscal profile

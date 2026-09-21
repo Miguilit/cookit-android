@@ -31,7 +31,13 @@ data class FiscalAgentRuntimeState(
     val wakeLockHeld: Boolean = false,
     val pendingOutcomeCount: Int = 0,
     val activeJobId: Long? = null,
-    val activeJobPhase: String? = null
+    val activeJobPhase: String? = null,
+    val retryDisposition: String? = null,
+    val retryAtEpochMs: Long? = null,
+    val retryAttempt: Int = 0,
+    val terminalFailures: Int = 0,
+    val lastTerminalJobId: Long? = null,
+    val manualHold: Boolean = false
 ) {
     companion object {
         const val HEALTH_STOPPED = "STOPPED"
@@ -71,7 +77,13 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         wakeLockHeld = prefs.getBoolean(KEY_WAKE_LOCK_HELD, false),
         pendingOutcomeCount = prefs.getInt(KEY_PENDING_OUTCOMES, 0).coerceAtLeast(0),
         activeJobId = prefs.getLong(KEY_ACTIVE_JOB_ID, NO_JOB_ID).takeIf { it != NO_JOB_ID },
-        activeJobPhase = prefs.getString(KEY_ACTIVE_JOB_PHASE, null)?.takeIf { it.isNotBlank() }
+        activeJobPhase = prefs.getString(KEY_ACTIVE_JOB_PHASE, null)?.takeIf { it.isNotBlank() },
+        retryDisposition = prefs.getString(KEY_RETRY_DISPOSITION, null)?.takeIf { it.isNotBlank() },
+        retryAtEpochMs = prefs.getLong(KEY_RETRY_AT, NO_EPOCH).takeIf { it != NO_EPOCH },
+        retryAttempt = prefs.getInt(KEY_RETRY_ATTEMPT, 0).coerceAtLeast(0),
+        terminalFailures = prefs.getInt(KEY_TERMINAL_FAILURES, 0).coerceAtLeast(0),
+        lastTerminalJobId = prefs.getLong(KEY_LAST_TERMINAL_JOB_ID, NO_JOB_ID).takeIf { it != NO_JOB_ID },
+        manualHold = prefs.getBoolean(KEY_MANUAL_HOLD, false)
     )
 
     fun setAutoEnabled(enabled: Boolean): FiscalAgentRuntimeState {
@@ -127,7 +139,7 @@ class FiscalAgentRuntimeStateStore(context: Context) {
 
     fun recordHealthy(epochMs: Long, message: String? = null, clearError: Boolean = false): FiscalAgentRuntimeState {
         val current = load()
-        val unresolvedJobFailure = current.activeJobId != null && current.activeJobPhase == PHASE_ERROR
+        val unresolvedJobFailure = current.activeJobId != null || current.manualHold
         val editor = prefs.edit().putLong(KEY_LAST_SUCCESS, epochMs)
 
         if (!unresolvedJobFailure) {
@@ -146,10 +158,13 @@ class FiscalAgentRuntimeStateStore(context: Context) {
     }
 
     fun setActiveJob(jobId: Long, phase: String): FiscalAgentRuntimeState {
-        prefs.edit()
+        val editor = prefs.edit()
             .putLong(KEY_ACTIVE_JOB_ID, jobId)
             .putString(KEY_ACTIVE_JOB_PHASE, phase)
-            .apply()
+        if (phase != PHASE_RETRY_WAIT && phase != PHASE_SYNC_RETRY && phase != PHASE_MANUAL_HOLD) {
+            editor.remove(KEY_RETRY_DISPOSITION).remove(KEY_RETRY_AT)
+        }
+        editor.apply()
         return load()
     }
 
@@ -169,11 +184,98 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         prefs.edit()
             .remove(KEY_ACTIVE_JOB_ID)
             .remove(KEY_ACTIVE_JOB_PHASE)
+            .remove(KEY_RETRY_DISPOSITION)
+            .remove(KEY_RETRY_AT)
+            .putInt(KEY_RETRY_ATTEMPT, 0)
+            .putBoolean(KEY_MANUAL_HOLD, false)
             .putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_CONNECTED)
             .putLong(KEY_LAST_SUCCESS, epochMs)
             .putInt(KEY_CONSECUTIVE_FAILURES, 0)
             .remove(KEY_LAST_ERROR)
             .remove(KEY_LAST_ERROR_AT)
+            .apply()
+        return load()
+    }
+
+
+    fun recordRetryDecision(
+        jobId: Long,
+        phase: String,
+        disposition: String,
+        attempt: Int,
+        retryAtEpochMs: Long?,
+        health: String,
+        error: String,
+        epochMs: Long = System.currentTimeMillis()
+    ): FiscalAgentRuntimeState {
+        val current = load()
+        val editor = prefs.edit()
+            .putLong(KEY_ACTIVE_JOB_ID, jobId)
+            .putString(KEY_ACTIVE_JOB_PHASE, phase)
+            .putString(KEY_RETRY_DISPOSITION, disposition)
+            .putInt(KEY_RETRY_ATTEMPT, attempt.coerceAtLeast(0))
+            .putString(KEY_HEALTH, health)
+            .putLong(KEY_LAST_ERROR_AT, epochMs)
+            .putString(KEY_LAST_ERROR, error.take(320))
+            .putInt(KEY_CONSECUTIVE_FAILURES, current.consecutiveFailures + 1)
+        if (retryAtEpochMs == null) editor.remove(KEY_RETRY_AT) else editor.putLong(KEY_RETRY_AT, retryAtEpochMs)
+        editor.apply()
+        return load()
+    }
+
+    fun recordTerminalFailure(
+        jobId: Long,
+        error: String,
+        epochMs: Long = System.currentTimeMillis()
+    ): FiscalAgentRuntimeState {
+        val current = load()
+        prefs.edit()
+            .remove(KEY_ACTIVE_JOB_ID)
+            .remove(KEY_ACTIVE_JOB_PHASE)
+            .remove(KEY_RETRY_DISPOSITION)
+            .remove(KEY_RETRY_AT)
+            .putInt(KEY_RETRY_ATTEMPT, 0)
+            .putBoolean(KEY_MANUAL_HOLD, false)
+            .putInt(KEY_TERMINAL_FAILURES, current.terminalFailures + 1)
+            .putLong(KEY_LAST_TERMINAL_JOB_ID, jobId)
+            .putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_DEGRADED)
+            .putLong(KEY_LAST_ERROR_AT, epochMs)
+            .putString(KEY_LAST_ERROR, error.take(320))
+            .putInt(KEY_CONSECUTIVE_FAILURES, 0)
+            .apply()
+        return load()
+    }
+
+    fun setManualHold(
+        jobId: Long,
+        disposition: String,
+        attempt: Int,
+        error: String,
+        epochMs: Long = System.currentTimeMillis()
+    ): FiscalAgentRuntimeState {
+        prefs.edit()
+            .putLong(KEY_ACTIVE_JOB_ID, jobId)
+            .putString(KEY_ACTIVE_JOB_PHASE, PHASE_MANUAL_HOLD)
+            .putString(KEY_RETRY_DISPOSITION, disposition)
+            .remove(KEY_RETRY_AT)
+            .putInt(KEY_RETRY_ATTEMPT, attempt.coerceAtLeast(0))
+            .putBoolean(KEY_MANUAL_HOLD, true)
+            .putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_DEGRADED)
+            .putLong(KEY_LAST_ERROR_AT, epochMs)
+            .putString(KEY_LAST_ERROR, error.take(320))
+            .apply()
+        return load()
+    }
+
+    fun clearManualHold(): FiscalAgentRuntimeState {
+        prefs.edit()
+            .putBoolean(KEY_MANUAL_HOLD, false)
+            .remove(KEY_ACTIVE_JOB_ID)
+            .remove(KEY_ACTIVE_JOB_PHASE)
+            .remove(KEY_RETRY_DISPOSITION)
+            .remove(KEY_RETRY_AT)
+            .putInt(KEY_RETRY_ATTEMPT, 0)
+            .putString(KEY_HEALTH, FiscalAgentRuntimeState.HEALTH_STARTING)
             .apply()
         return load()
     }
@@ -255,6 +357,12 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         private const val KEY_PENDING_OUTCOMES = "pending_outcome_count"
         private const val KEY_ACTIVE_JOB_ID = "active_job_id"
         private const val KEY_ACTIVE_JOB_PHASE = "active_job_phase"
+        private const val KEY_RETRY_DISPOSITION = "retry_disposition"
+        private const val KEY_RETRY_AT = "retry_at_epoch_ms"
+        private const val KEY_RETRY_ATTEMPT = "retry_attempt"
+        private const val KEY_TERMINAL_FAILURES = "terminal_failures"
+        private const val KEY_LAST_TERMINAL_JOB_ID = "last_terminal_job_id"
+        private const val KEY_MANUAL_HOLD = "manual_hold"
 
         const val PHASE_CLAIMED = "CLAIMED"
         const val PHASE_FDM_CALL = "FDM_CALL"
@@ -263,6 +371,10 @@ class FiscalAgentRuntimeStateStore(context: Context) {
         const val PHASE_CLOUD_SUBMIT = "CLOUD_SUBMIT"
         const val PHASE_CLOUD_ACK = "CLOUD_ACK"
         const val PHASE_ERROR = "ERROR"
+        const val PHASE_RETRY_WAIT = "RETRY_WAIT"
+        const val PHASE_SYNC_RETRY = "SYNC_RETRY"
+        const val PHASE_TERMINALIZING = "TERMINALIZING"
+        const val PHASE_MANUAL_HOLD = "MANUAL_HOLD"
 
         private const val NO_JOB_ID = Long.MIN_VALUE
         private const val NO_EPOCH = Long.MIN_VALUE

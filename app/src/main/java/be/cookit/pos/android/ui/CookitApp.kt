@@ -108,6 +108,16 @@ private fun fiscalAgentAgeLabel(epochMs: Long?): String {
     }
 }
 
+private fun fiscalRetryLabel(epochMs: Long?): String {
+    if (epochMs == null) return "—"
+    val remainingSeconds = ((epochMs - System.currentTimeMillis()).coerceAtLeast(0L) / 1_000L)
+    return when {
+        remainingSeconds <= 1L -> "0s"
+        remainingSeconds < 60L -> "${remainingSeconds}s"
+        else -> "${remainingSeconds / 60L}m ${remainingSeconds % 60L}s"
+    }
+}
+
 @Composable
 fun CookitApp(vm: CookitPosViewModel = viewModel()) {
     val state by vm.ui.collectAsState()
@@ -2492,6 +2502,35 @@ private fun FiscalityScreen(
                             Text("${fs.activeJob} #${state.fiscalAgentActiveJobId}", fontWeight = FontWeight.Bold)
                             Spacer(Modifier.weight(1f))
                             Text("${fs.phase}: ${state.fiscalAgentActiveJobPhase ?: "—"}", color = CookitMuted)
+                        }
+                    }
+                }
+
+                if (state.fiscalAgentRetryDisposition != null || state.fiscalAgentTerminalFailures > 0 || state.fiscalAgentManualHold) {
+                    Text(fs.retryPolicy, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FiscalCompactMetric(Modifier.weight(1f), fs.retryDisposition, state.fiscalAgentRetryDisposition ?: "—")
+                        FiscalCompactMetric(Modifier.weight(1f), fs.retryAttempt, state.fiscalAgentRetryAttempt.toString())
+                        FiscalCompactMetric(Modifier.weight(1f), fs.nextRetry, fiscalRetryLabel(state.fiscalAgentRetryAtEpochMs))
+                        FiscalCompactMetric(Modifier.weight(1f), fs.terminalFailures, state.fiscalAgentTerminalFailures.toString())
+                    }
+                    if (state.fiscalAgentLastTerminalJobId != null) {
+                        Text("${fs.lastTerminalJob}: #${state.fiscalAgentLastTerminalJobId}", color = CookitMuted, fontSize = 11.sp)
+                    }
+                }
+
+                if (state.fiscalAgentManualHold) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFFFFF1F0)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error)
+                                Spacer(Modifier.width(8.dp))
+                                Text(fs.manualHoldTitle, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                            }
+                            Text(fs.manualHoldMessage, color = CookitMuted, fontSize = 12.sp)
+                            if (state.policy.canManageSettings && !state.demoMode) {
+                                Button(onClick = vm::resumeFiscalAgentProcessing) { Text(fs.resumeProcessing) }
+                            }
                         }
                     }
                 }

@@ -56,6 +56,11 @@ class FiscalAgentDiagnosticLogger(
         const val EVENT_WATCHDOG = "WATCHDOG"
         const val EVENT_JOB_PHASE = "JOB_PHASE"
         const val EVENT_JOB_COMPLETED = "JOB_COMPLETED"
+        const val EVENT_RETRY_DECISION = "RETRY_DECISION"
+        const val EVENT_RETRY_SCHEDULED = "RETRY_SCHEDULED"
+        const val EVENT_JOB_TERMINAL_FAILED = "JOB_TERMINAL_FAILED"
+        const val EVENT_MANUAL_HOLD = "MANUAL_HOLD"
+        const val EVENT_MANUAL_RESUME = "MANUAL_RESUME"
 
         const val CONNECTIVITY_ONLINE = "ONLINE"
         const val CONNECTIVITY_OFFLINE = "OFFLINE"

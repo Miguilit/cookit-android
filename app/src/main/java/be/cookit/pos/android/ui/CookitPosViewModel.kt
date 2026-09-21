@@ -109,6 +109,12 @@ data class PosUiState(
     val fiscalAgentPendingOutcomes: Int = 0,
     val fiscalAgentActiveJobId: Long? = null,
     val fiscalAgentActiveJobPhase: String? = null,
+    val fiscalAgentRetryDisposition: String? = null,
+    val fiscalAgentRetryAtEpochMs: Long? = null,
+    val fiscalAgentRetryAttempt: Int = 0,
+    val fiscalAgentTerminalFailures: Int = 0,
+    val fiscalAgentLastTerminalJobId: Long? = null,
+    val fiscalAgentManualHold: Boolean = false,
     val fiscalAgentDiagnostics: List<FiscalAgentDiagnosticEntity> = emptyList(),
     val fiscalDiagnosticExportMessage: String? = null,
     val printerProvider: PrinterProviderType = PrinterProviderType.ESC_POS,
@@ -197,6 +203,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             fiscalAgentPendingOutcomes = storedFiscalAgentRuntimeState.pendingOutcomeCount,
             fiscalAgentActiveJobId = storedFiscalAgentRuntimeState.activeJobId,
             fiscalAgentActiveJobPhase = storedFiscalAgentRuntimeState.activeJobPhase,
+            fiscalAgentRetryDisposition = storedFiscalAgentRuntimeState.retryDisposition,
+            fiscalAgentRetryAtEpochMs = storedFiscalAgentRuntimeState.retryAtEpochMs,
+            fiscalAgentRetryAttempt = storedFiscalAgentRuntimeState.retryAttempt,
+            fiscalAgentTerminalFailures = storedFiscalAgentRuntimeState.terminalFailures,
+            fiscalAgentLastTerminalJobId = storedFiscalAgentRuntimeState.lastTerminalJobId,
+            fiscalAgentManualHold = storedFiscalAgentRuntimeState.manualHold,
             printerProvider = printerStore.provider(),
             printerHost = printerStore.host(),
             printerPort = printerStore.port(),
@@ -531,7 +543,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fiscalAgentWakeLockHeld = false,
                 fiscalAgentPendingOutcomes = 0,
                 fiscalAgentActiveJobId = null,
-                fiscalAgentActiveJobPhase = null
+                fiscalAgentActiveJobPhase = null,
+                fiscalAgentRetryDisposition = null,
+                fiscalAgentRetryAtEpochMs = null,
+                fiscalAgentRetryAttempt = 0,
+                fiscalAgentTerminalFailures = 0,
+                fiscalAgentLastTerminalJobId = null,
+                fiscalAgentManualHold = false
             )
         }
     }
@@ -617,6 +635,30 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun resumeFiscalAgentProcessing() {
+        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) return
+        val before = fiscalAgentRuntimeStateStore.load()
+        if (!before.manualHold) return
+        fiscalAgentRuntimeStateStore.clearManualHold()
+        viewModelScope.launch {
+            runCatching {
+                FiscalAgentDiagnosticLogger(fiscalAgentDiagnosticDao, fiscalAgentRuntimeStateStore).record(
+                    eventType = FiscalAgentDiagnosticLogger.EVENT_MANUAL_RESUME,
+                    health = FiscalAgentRuntimeState.HEALTH_STARTING,
+                    jobId = before.activeJobId,
+                    jobPhase = FiscalAgentRuntimeStateStore.PHASE_MANUAL_HOLD,
+                    provider = _ui.value.fdmSettings.provider,
+                    runtimeId = _ui.value.fiscalIdentity?.runtimeId,
+                    message = "manual_resume"
+                )
+            }
+        }
+        if (fiscalAgentRuntimeStateStore.load().autoEnabled) {
+            FiscalAgentServiceController.resumeIfEnabled(getApplication())
+        }
+        _ui.update { it.copy(fiscalAgentMessage = "manual_resume") }
+    }
+
     private fun maybeResumeFiscalAgentAuto() {
         if (!fiscalAgentRuntimeStateStore.load().autoEnabled) return
         if (!_ui.value.authenticated || _ui.value.demoMode) return
@@ -663,6 +705,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         fiscalAgentPendingOutcomes = persisted.pendingOutcomeCount,
                         fiscalAgentActiveJobId = persisted.activeJobId,
                         fiscalAgentActiveJobPhase = persisted.activeJobPhase,
+                        fiscalAgentRetryDisposition = persisted.retryDisposition,
+                        fiscalAgentRetryAtEpochMs = persisted.retryAtEpochMs,
+                        fiscalAgentRetryAttempt = persisted.retryAttempt,
+                        fiscalAgentTerminalFailures = persisted.terminalFailures,
+                        fiscalAgentLastTerminalJobId = persisted.lastTerminalJobId,
+                        fiscalAgentManualHold = persisted.manualHold,
                         fiscalAgentDiagnostics = diagnostics,
                         fiscalAgentMessage = if (persisted.autoEnabled || persisted.serviceRunning) {
                             persisted.lastMessage ?: current.fiscalAgentMessage
