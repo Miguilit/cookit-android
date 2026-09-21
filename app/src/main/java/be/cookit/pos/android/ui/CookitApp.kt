@@ -2880,7 +2880,7 @@ private fun FiscalityScreen(
                     Text(
                         when {
                             state.fdmSettings.isMock -> fs.testMode
-                            state.fdmSettings.isModule2 -> "Module2 A15.0B3"
+                            state.fdmSettings.isModule2 -> "Module2 A15.0C"
                             else -> fs.productionMode
                         },
                         color = if (state.fdmSettings.isMock || state.fdmSettings.isModule2) CookitOrange else CookitGreen,
@@ -3094,11 +3094,65 @@ private fun FiscalityScreen(
                     } else if (!state.fdmSettings.isMock && !state.fdmSettings.isModule2) {
                         OutlinedButton(onClick = vm::verifyFdmAdapterGate) { Text(fs.verifyAdapterGate) }
                     } else if (state.fdmSettings.isModule2) {
+                        HorizontalDivider(color = CookitLine)
+                        Text("Module2 TRAINING signSale", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text(
-                            "A15.0B3: Module2 status is read-only. Automatic fiscal processing remains stopped until signSale mapping is enabled.",
+                            "Manual simulator test only. Cookit sends the Module2 sample sale with isTraining=true; automatic fiscal processing remains stopped.",
                             color = CookitOrange,
                             fontSize = 11.sp
                         )
+                        OutlinedButton(
+                            onClick = vm::runModule2TrainingSale,
+                            enabled = !state.module2TrainingSaleBusy &&
+                                state.module2TokenConfigured &&
+                                state.fdmProviderStatus.transportConnected
+                        ) {
+                            if (state.module2TrainingSaleBusy) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(if (state.module2TrainingSaleBusy) "Sending TRAINING sale…" else "Send TRAINING signSale")
+                        }
+
+                        val training = state.module2TrainingSale
+                        if (training.attempted) {
+                            if (training.success) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    FiscalCompactMetric(Modifier.weight(1f), "Ticket", training.posFiscalTicketNo?.toString() ?: "—")
+                                    FiscalCompactMetric(Modifier.weight(1f), "Event", training.eventLabel ?: "—")
+                                    FiscalCompactMetric(Modifier.weight(1f), "Event counter", training.eventCounter?.toString() ?: "—")
+                                    FiscalCompactMetric(Modifier.weight(1f), "Total counter", training.totalCounter?.toString() ?: "—")
+                                }
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    FiscalCompactMetric(Modifier.weight(1f), "FDM", training.fdmId ?: "—")
+                                    FiscalCompactMetric(Modifier.weight(1f), "Operation", training.eventOperation ?: "—")
+                                    FiscalCompactMetric(Modifier.weight(1f), "Short signature", training.shortSignature ?: "—")
+                                    FiscalCompactMetric(Modifier.weight(1f), "Latency", training.latencyMs?.let { "${it} ms" } ?: "—")
+                                }
+                                Text("TRAINING signSale accepted", color = CookitGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                training.vatCalc.takeIf { it.isNotEmpty() }?.let {
+                                    Text("VAT: ${it.joinToString(" | ")}", color = CookitMuted, fontSize = 10.sp)
+                                }
+                                training.warnings.takeIf { it.isNotEmpty() }?.let {
+                                    Text("Warnings: ${it.joinToString(" | ")}", color = CookitOrange, fontSize = 10.sp)
+                                }
+                                training.informations.takeIf { it.isNotEmpty() }?.let {
+                                    Text("Info: ${it.joinToString(" | ")}", color = CookitMuted, fontSize = 10.sp)
+                                }
+                            } else {
+                                Text(
+                                    "TRAINING signSale rejected${training.httpStatus?.let { " • HTTP $it" }.orEmpty()}",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                val detail = training.graphqlErrors.takeIf { it.isNotEmpty() }?.joinToString(" | ")
+                                    ?: training.message.orEmpty()
+                                if (detail.isNotBlank()) {
+                                    Text(detail, color = MaterialTheme.colorScheme.error, fontSize = 10.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }

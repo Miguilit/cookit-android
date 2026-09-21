@@ -111,6 +111,8 @@ data class PosUiState(
     val module2TokenConfigured: Boolean = false,
     val module2StatusBusy: Boolean = false,
     val module2Status: Module2StatusResult = Module2StatusResult(),
+    val module2TrainingSaleBusy: Boolean = false,
+    val module2TrainingSale: Module2TrainingSaleResult = Module2TrainingSaleResult(),
     val fdmProviderStatus: FiscalProviderStatus = FiscalProviderStatus(),
     val module2Message: String? = null,
     val mockFdmBusy: Boolean = false,
@@ -392,6 +394,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 module2TokenConfigured = module2CredentialStore.configured(),
                 module2Message = null,
                 module2Status = if (module2Selected) it.module2Status else Module2StatusResult(),
+                module2TrainingSale = if (module2Selected) it.module2TrainingSale else Module2TrainingSaleResult(),
                 fdmProviderStatus = if (module2Selected) it.fdmProviderStatus else FiscalProviderStatus(),
                 mockFdmMessage = null,
                 embeddedMockFdmStatus = embeddedStatus,
@@ -421,6 +424,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             it.copy(
                 module2TokenConfigured = false,
                 module2Status = Module2StatusResult(),
+                module2TrainingSaleBusy = false,
+                module2TrainingSale = Module2TrainingSaleResult(),
                 fdmProviderStatus = FiscalProviderStatus(),
                 module2Message = "module2_token_cleared"
             )
@@ -487,6 +492,69 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         ),
                         module2Message = "module2_status_failed:$message",
                         fdmMessage = "probe_failed"
+                    )
+                }
+            }
+        }
+    }
+
+    fun runModule2TrainingSale() {
+        val settings = _ui.value.fdmSettings
+        if (!settings.isModule2 || !settings.configured) {
+            _ui.update { it.copy(module2Message = "module2_not_configured") }
+            return
+        }
+        val token = module2CredentialStore.loadBearerToken()
+        if (token.isNullOrBlank()) {
+            _ui.update { it.copy(module2TokenConfigured = false, module2Message = "module2_token_required") }
+            return
+        }
+        if (!_ui.value.fdmProviderStatus.transportConnected) {
+            _ui.update { it.copy(module2Message = "module2_training_requires_status_test") }
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    module2TrainingSaleBusy = true,
+                    module2TrainingSale = Module2TrainingSaleResult(),
+                    module2Message = "module2_training_signsale_running"
+                )
+            }
+            try {
+                val result = module2StatusClient.trainingSale(settings, token)
+                val refreshedStatus = if (result.success) {
+                    runCatchingPreservingCancellation { module2StatusClient.status(settings, token) }.getOrNull()
+                } else {
+                    null
+                }
+                _ui.update { current ->
+                    current.copy(
+                        module2TrainingSaleBusy = false,
+                        module2TrainingSale = result,
+                        module2Status = refreshedStatus ?: current.module2Status,
+                        fdmProviderStatus = refreshedStatus?.normalized() ?: current.fdmProviderStatus,
+                        module2Message = if (result.success) {
+                            "module2_training_signsale_ok"
+                        } else {
+                            "module2_training_signsale_failed:${result.message.orEmpty()}"
+                        }
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }
+                _ui.update {
+                    it.copy(
+                        module2TrainingSaleBusy = false,
+                        module2TrainingSale = Module2TrainingSaleResult(
+                            attempted = true,
+                            success = false,
+                            message = message
+                        ),
+                        module2Message = "module2_training_signsale_failed:$message"
                     )
                 }
             }

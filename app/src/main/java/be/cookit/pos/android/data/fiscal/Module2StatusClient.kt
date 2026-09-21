@@ -1,6 +1,7 @@
 package be.cookit.pos.android.data.fiscal
 
 import android.content.Context
+import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.R
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -11,6 +12,9 @@ import java.security.SecureRandom
 import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.cert.CertificateFactory
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.KeyManagerFactory
@@ -57,6 +61,32 @@ data class Module2StatusResult(
         message = message
     )
 }
+
+
+
+data class Module2TrainingSaleResult(
+    val attempted: Boolean = false,
+    val success: Boolean = false,
+    val httpStatus: Int? = null,
+    val latencyMs: Long? = null,
+    val posFiscalTicketNo: Int? = null,
+    val eventOperation: String? = null,
+    val fdmId: String? = null,
+    val fdmDateTime: String? = null,
+    val eventLabel: String? = null,
+    val eventCounter: Int? = null,
+    val totalCounter: Int? = null,
+    val digitalSignature: String? = null,
+    val shortSignature: String? = null,
+    val verificationUrl: String? = null,
+    val bufferCapacityUsed: Double? = null,
+    val vatCalc: List<String> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    val informations: List<String> = emptyList(),
+    val footer: List<String> = emptyList(),
+    val graphqlErrors: List<String> = emptyList(),
+    val message: String? = null
+)
 
 private data class Module2HttpResponse(
     val status: Int,
@@ -178,6 +208,242 @@ class Module2StatusClient(private val context: Context) {
         }
     }
 
+    /**
+     * A15.0C manual TRAINING mutation.
+     *
+     * This deliberately uses the sample identifiers published in the Module2 developer manual and
+     * sets isTraining=true. It is never called by the automatic fiscal agent. The purpose is to
+     * validate the complete signSale GraphQL path against the Module2 simulator before Cookit maps
+     * real restaurant/order data into SaleInput.
+     */
+    suspend fun trainingSale(
+        settings: FiscalFdmSettings,
+        bearerToken: String
+    ): Module2TrainingSaleResult = withContext(Dispatchers.IO) {
+        require(settings.isModule2) { "Module2 provider is not selected" }
+        require(settings.useTls) { "Module2 requires HTTPS/mTLS" }
+        require(settings.configured) { "Module2 endpoint is not configured" }
+        val token = bearerToken.trim().removePrefix("Bearer ").trim()
+        require(token.isNotBlank()) { "Module2 Bearer token is not configured" }
+
+        val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
+        val ticketNo = nextTrainingTicketNo()
+        val now = OffsetDateTime.now().withNano(0)
+        val deviceId = trainingDeviceId()
+        val bookingPeriodId = trainingBookingPeriodId(now.toLocalDate().toString())
+
+        val data = JSONObject()
+            .put("language", "EN")
+            .put("vatNo", "BE0000000097")
+            .put("estNo", "2000000042")
+            .put("posId", "CPOS0031234567")
+            .put("posFiscalTicketNo", ticketNo)
+            .put("posDateTime", now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
+            .put("posSwVersion", BuildConfig.VERSION_NAME)
+            .put("deviceId", deviceId)
+            .put("terminalId", "COOKIT-ANDROID-TRAINING")
+            .put("bookingPeriodId", bookingPeriodId)
+            .put("bookingDate", now.toLocalDate().toString())
+            .put("ticketMedium", "PAPER")
+            .put("employeeId", "84022899837")
+            .put(
+                "transaction",
+                JSONObject()
+                    .put(
+                        "transactionLines",
+                        JSONArray()
+                            .put(
+                                JSONObject()
+                                    .put("lineType", "SINGLE_PRODUCT")
+                                    .put(
+                                        "mainProduct",
+                                        JSONObject()
+                                            .put("productId", "10006")
+                                            .put("productName", "Dry Martini")
+                                            .put("departmentId", "10")
+                                            .put("departmentName", "Aperitifs")
+                                            .put("quantity", 2)
+                                            .put("quantityType", "PIECE")
+                                            .put("unitPrice", 12.0)
+                                            .put(
+                                                "vats",
+                                                JSONArray().put(
+                                                    JSONObject()
+                                                        .put("label", "A")
+                                                        .put("price", 24.0)
+                                                )
+                                            )
+                                    )
+                                    .put("lineTotal", 24.0)
+                            )
+                            .put(
+                                JSONObject()
+                                    .put("lineType", "SINGLE_PRODUCT")
+                                    .put(
+                                        "mainProduct",
+                                        JSONObject()
+                                            .put("productId", "22001")
+                                            .put("productName", "Burger of the Chef")
+                                            .put("departmentId", "22")
+                                            .put("departmentName", "Main Dishes")
+                                            .put("quantity", 1)
+                                            .put("quantityType", "PIECE")
+                                            .put("unitPrice", 28.0)
+                                            .put(
+                                                "vats",
+                                                JSONArray().put(
+                                                    JSONObject()
+                                                        .put("label", "B")
+                                                        .put("price", 28.0)
+                                                )
+                                            )
+                                    )
+                                    .put("lineTotal", 28.0)
+                            )
+                    )
+                    .put("transactionTotal", 52.0)
+            )
+            .put(
+                "financials",
+                JSONArray().put(
+                    JSONObject()
+                        .put("id", "1")
+                        .put("name", "CASH")
+                        .put("type", "CASH")
+                        .put("inputMethod", "MANUAL")
+                        .put("amount", 52.0)
+                        .put("amountType", "PAYMENT")
+                        .put("drawer", JSONObject().put("id", "1").put("name", "Drawer 1"))
+                )
+            )
+
+        val query = """
+            mutation CookitModule2TrainingSale(${'$'}data: SaleInput!, ${'$'}training: Boolean! = true) {
+              signSale(data: ${'$'}data, isTraining: ${'$'}training) {
+                posId
+                posFiscalTicketNo
+                posDateTime
+                terminalId
+                deviceId
+                eventOperation
+                fdmSwVersion
+                digitalSignature
+                shortSignature
+                verificationUrl
+                bufferCapacityUsed
+                fdmRef {
+                  fdmId
+                  fdmDateTime
+                  eventLabel
+                  eventCounter
+                  totalCounter
+                }
+                vatCalc {
+                  label
+                  rate
+                  taxableAmount
+                  vatAmount
+                  totalAmount
+                  outOfScope
+                }
+                warnings { message }
+                informations { message }
+                footer
+              }
+            }
+        """.trimIndent()
+
+        try {
+            val sslContext = createModule2SslContext()
+            val response = post(
+                endpoint = endpoint,
+                bearerToken = token,
+                sslContext = sslContext,
+                operationName = "CookitModule2TrainingSale",
+                query = query,
+                variables = JSONObject().put("data", data).put("training", true)
+            )
+            val envelope = runCatching { JSONObject(response.body) }.getOrNull()
+            val graphqlErrors = envelope?.graphqlErrors().orEmpty()
+            val sale = envelope?.optJSONObject("data")?.optJSONObject("signSale")
+
+            if (response.status !in 200..299 || sale == null || graphqlErrors.isNotEmpty()) {
+                return@withContext Module2TrainingSaleResult(
+                    attempted = true,
+                    success = false,
+                    httpStatus = response.status,
+                    latencyMs = response.latencyMs,
+                    posFiscalTicketNo = ticketNo,
+                    graphqlErrors = graphqlErrors,
+                    message = graphqlErrors.firstOrNull()
+                        ?: if (response.status !in 200..299) "Module2 HTTP ${response.status}" else "data.signSale missing"
+                )
+            }
+
+            val fdmRef = sale.optJSONObject("fdmRef")
+            Module2TrainingSaleResult(
+                attempted = true,
+                success = true,
+                httpStatus = response.status,
+                latencyMs = response.latencyMs,
+                posFiscalTicketNo = sale.optInt("posFiscalTicketNo").takeIf { sale.has("posFiscalTicketNo") },
+                eventOperation = sale.optNonBlank("eventOperation"),
+                fdmId = fdmRef?.optNonBlank("fdmId"),
+                fdmDateTime = fdmRef?.optNonBlank("fdmDateTime"),
+                eventLabel = fdmRef?.optNonBlank("eventLabel"),
+                eventCounter = fdmRef?.optNullableInt("eventCounter"),
+                totalCounter = fdmRef?.optNullableInt("totalCounter"),
+                digitalSignature = sale.optNonBlank("digitalSignature"),
+                shortSignature = sale.optNonBlank("shortSignature"),
+                verificationUrl = sale.optNonBlank("verificationUrl"),
+                bufferCapacityUsed = sale.optNullableDouble("bufferCapacityUsed"),
+                vatCalc = sale.vatCalcList(),
+                warnings = sale.messageList("warnings"),
+                informations = sale.messageList("informations"),
+                footer = sale.stringList("footer"),
+                message = "Module2 TRAINING signSale OK"
+            )
+        } catch (error: Throwable) {
+            Module2TrainingSaleResult(
+                attempted = true,
+                success = false,
+                posFiscalTicketNo = ticketNo,
+                message = error.message ?: error::class.java.simpleName
+            )
+        }
+    }
+
+    private fun trainingPreferences() =
+        context.getSharedPreferences("cookit_module2_training", Context.MODE_PRIVATE)
+
+    private fun nextTrainingTicketNo(): Int {
+        val prefs = trainingPreferences()
+        val current = prefs.getInt("next_ticket_no", 1000).coerceIn(1, 999_999_999)
+        val next = if (current >= 999_999_999) 1 else current + 1
+        prefs.edit().putInt("next_ticket_no", next).apply()
+        return current
+    }
+
+    private fun trainingDeviceId(): String {
+        val prefs = trainingPreferences()
+        val existing = prefs.getString("device_id", null)?.takeIf { it.isNotBlank() }
+        if (existing != null) return existing
+        return UUID.randomUUID().toString().also { prefs.edit().putString("device_id", it).apply() }
+    }
+
+    private fun trainingBookingPeriodId(bookingDate: String): String {
+        val prefs = trainingPreferences()
+        val dateKey = prefs.getString("booking_date", null)
+        val existing = prefs.getString("booking_period_id", null)?.takeIf { it.isNotBlank() }
+        if (dateKey == bookingDate && existing != null) return existing
+        val created = UUID.randomUUID().toString()
+        prefs.edit()
+            .putString("booking_date", bookingDate)
+            .putString("booking_period_id", created)
+            .apply()
+        return created
+    }
+
     private fun statusCandidates(): List<Module2StatusQueryCandidate> = listOf(
         // First mirror the Module2 developer manual exactly: status without arguments.
         Module2StatusQueryCandidate(
@@ -264,7 +530,8 @@ class Module2StatusClient(private val context: Context) {
         bearerToken: String,
         sslContext: SSLContext,
         operationName: String,
-        query: String
+        query: String,
+        variables: JSONObject = JSONObject()
     ): Module2HttpResponse {
         val started = System.nanoTime()
         var connection: HttpsURLConnection? = null
@@ -279,14 +546,14 @@ class Module2StatusClient(private val context: Context) {
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Authorization", "Bearer $bearerToken")
-                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0B3")
+                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0C")
             }
             connection = conn
 
             val body = JSONObject()
                 .put("operationName", operationName)
                 .put("query", query)
-                .put("variables", JSONObject())
+                .put("variables", variables)
 
             conn.outputStream.bufferedWriter(StandardCharsets.UTF_8).use { writer -> writer.write(body.toString()) }
             val status = conn.responseCode
@@ -332,8 +599,55 @@ class Module2StatusClient(private val context: Context) {
             ?: errors.optString(0).takeIf { it.isNotBlank() }
     }
 
+    private fun JSONObject.graphqlErrors(): List<String> {
+        val array = optJSONArray("errors") ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index)
+                val message = item?.optString("message")?.takeIf { it.isNotBlank() }
+                    ?: array.optString(index).takeIf { it.isNotBlank() }
+                if (message != null) add(message)
+            }
+        }
+    }
+
+    private fun JSONObject.vatCalcList(): List<String> {
+        val array = optJSONArray("vatCalc") ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val label = item.optString("label").ifBlank { "?" }
+                val rate = item.optDouble("rate", Double.NaN)
+                val total = item.optDouble("totalAmount", Double.NaN)
+                val vat = item.optDouble("vatAmount", Double.NaN)
+                add(
+                    buildString {
+                        append(label)
+                        if (rate.isFinite()) append(" ${rate}%")
+                        if (total.isFinite()) append(" total=${total}")
+                        if (vat.isFinite()) append(" vat=${vat}")
+                    }
+                )
+            }
+        }
+    }
+
+    private fun JSONObject.stringList(name: String): List<String> {
+        val array = optJSONArray(name) ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                array.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+    }
+
     private fun JSONObject.optNonBlank(name: String): String? =
         optString(name).takeIf { has(name) && !isNull(name) && it.isNotBlank() }
+
+    private fun JSONObject.optNullableInt(name: String): Int? {
+        if (!has(name) || isNull(name)) return null
+        return runCatching { getInt(name) }.getOrNull()
+    }
 
     private fun JSONObject.optNullableDouble(name: String): Double? {
         if (!has(name) || isNull(name)) return null
