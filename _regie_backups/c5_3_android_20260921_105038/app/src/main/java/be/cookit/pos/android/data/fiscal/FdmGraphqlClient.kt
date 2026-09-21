@@ -15,7 +15,7 @@ data class FdmGraphqlOperation(
     val variables: JSONObject = JSONObject()
 )
 
-class FdmGraphqlException(message: String, val responseBody: String = "", val httpStatus: Int? = null) : Exception(message)
+class FdmGraphqlException(message: String, val responseBody: String = "") : Exception(message)
 
 /**
  * Network-only POS -> FDM GraphQL transport.
@@ -63,7 +63,7 @@ class FdmGraphqlClient {
             }.orEmpty()
 
             if (code !in 200..299) {
-                throw FdmGraphqlException("FDM GraphQL HTTP $code", text, httpStatus = code)
+                throw FdmGraphqlException("FDM GraphQL HTTP $code", text)
             }
 
             val json = try {

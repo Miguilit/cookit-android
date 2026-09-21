@@ -1,0 +1,17 @@
+Cookit Android 0.14.9.1 C5.3 consolidation
+Date: 2026-09-21
+Expected base: update/cookit-0.14.9-c5-3-retry-policy @ fe3ed3c
+
+Changes:
+- explicit FiscalFailureClass: TRANSIENT/PERMANENT/CONFIGURATION/AUTH/PROVIDER_REJECTED/NETWORK/UNKNOWN
+- typed Cloud HTTP status classification
+- typed FDM GraphQL HTTP status classification
+- provider outcome persisted => Cloud-only retry invariant
+- RETRY_EXHAUSTED diagnostic event
+- actual job attempt stored in retry diagnostic rows
+- terminal provider rejection reports classification to Cloud
+- versionName 0.14.9.1 / versionCode 31
+
+Mock remains DEBUG-only.
+Checkbox/Eutronix remains fail-closed.
+No new hardcoded French UI copy.

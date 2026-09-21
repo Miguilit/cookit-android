@@ -468,9 +468,8 @@ class FiscalAgentForegroundService : Service() {
                                 jobPhase = FiscalAgentRuntimeStateStore.PHASE_TERMINALIZING,
                                 provider = settings.provider,
                                 runtimeId = identity.runtimeId,
-                                message = "${decision.failureClass.name}:${decision.reasonCode}",
-                                errorClass = rootError::class.java.simpleName,
-                                retryCount = failure.attempts
+                                message = decision.reasonCode,
+                                errorClass = rootError::class.java.simpleName
                             )
                             try {
                                 client.acknowledge(
@@ -478,9 +477,7 @@ class FiscalAgentForegroundService : Service() {
                                     transactionId = failure.jobId,
                                     identity = identity,
                                     success = false,
-                                    error = decision.errorForCloud,
-                                    failureClass = decision.failureClass.name,
-                                    retryDisposition = decision.disposition.name
+                                    error = decision.errorForCloud
                                 )
                                 stateStore.recordTerminalFailure(failure.jobId, decision.errorForCloud)
                                 stateStore.setServiceStatus(true, false, "terminal_failed:${failure.jobId}")
@@ -491,9 +488,8 @@ class FiscalAgentForegroundService : Service() {
                                     jobPhase = "FAILED",
                                     provider = settings.provider,
                                     runtimeId = identity.runtimeId,
-                                    message = "${decision.failureClass.name}:${decision.reasonCode}",
-                                    errorClass = rootError::class.java.simpleName,
-                                    retryCount = failure.attempts
+                                    message = decision.errorForCloud,
+                                    errorClass = rootError::class.java.simpleName
                                 )
                                 refreshPendingOutcomeCount()
                                 updateNotification("DEGRADED • Job #${failure.jobId} • FAILED")
@@ -549,9 +545,8 @@ class FiscalAgentForegroundService : Service() {
                                 jobPhase = phase,
                                 provider = settings.provider,
                                 runtimeId = identity.runtimeId,
-                                message = "${decision.failureClass.name}:${decision.reasonCode}",
-                                errorClass = rootError::class.java.simpleName,
-                                retryCount = failure.attempts
+                                message = decision.reasonCode,
+                                errorClass = rootError::class.java.simpleName
                             )
                             refreshPendingOutcomeCount()
                             updateNotification("$health • Job #${failure.jobId} • $phase")
@@ -567,19 +562,14 @@ class FiscalAgentForegroundService : Service() {
                             )
                             stateStore.setServiceStatus(true, false, "manual_hold:${failure.jobId}")
                             diagnosticLogger.record(
-                                eventType = if (decision.reasonCode == "provider_retry_exhausted") {
-                                    FiscalAgentDiagnosticLogger.EVENT_RETRY_EXHAUSTED
-                                } else {
-                                    FiscalAgentDiagnosticLogger.EVENT_MANUAL_HOLD
-                                },
+                                eventType = FiscalAgentDiagnosticLogger.EVENT_MANUAL_HOLD,
                                 health = FiscalAgentRuntimeState.HEALTH_DEGRADED,
                                 jobId = failure.jobId,
                                 jobPhase = FiscalAgentRuntimeStateStore.PHASE_MANUAL_HOLD,
                                 provider = settings.provider,
                                 runtimeId = identity.runtimeId,
-                                message = "${decision.failureClass.name}:${decision.reasonCode}",
-                                errorClass = rootError::class.java.simpleName,
-                                retryCount = failure.attempts
+                                message = decision.reasonCode,
+                                errorClass = rootError::class.java.simpleName
                             )
                             refreshPendingOutcomeCount()
                             updateNotification("DEGRADED • MANUAL_HOLD • Job #${failure.jobId}")

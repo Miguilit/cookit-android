@@ -21,12 +21,7 @@ data class FiscalAgentCredentials(
     val configured: Boolean get() = deviceId.isNotBlank() && deviceToken.isNotBlank()
 }
 
-class FiscalAgentException(
-    message: String,
-    val responseBody: String = "",
-    val statusCode: Int? = null
-) : Exception(message)
-
+class FiscalAgentException(message: String, val responseBody: String = "") : Exception(message)
 class FiscalAgentTransportException(message: String, cause: Throwable) : Exception(message, cause)
 
 /**
@@ -63,18 +58,16 @@ class FiscalAgentClient {
                 val code = connection.responseCode
                 if (code == 204) return@withContext null
                 val text = readResponse(connection, code)
-                if (code !in 200..299) {
-                    throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text, statusCode = code)
-                }
+                if (code !in 200..299) throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text)
                 if (text.isBlank()) return@withContext null
 
                 val envelope = JSONObject(text)
                 if (!envelope.optBoolean("success", true)) {
-                    throw FiscalAgentException("Cookit Fiscal Agent returned success=false", text, statusCode = code)
+                    throw FiscalAgentException("Cookit Fiscal Agent returned success=false", text)
                 }
                 if (envelope.isNull("data")) return@withContext null
                 val data = envelope.optJSONObject("data")
-                    ?: throw FiscalAgentException("Cookit Fiscal Agent returned malformed job data", text, statusCode = code)
+                    ?: throw FiscalAgentException("Cookit Fiscal Agent returned malformed job data", text)
                 FiscalAgentJob.fromJson(data)
             } finally {
                 connection.disconnect()
@@ -105,16 +98,12 @@ class FiscalAgentClient {
         identity: FiscalRuntimeIdentity,
         success: Boolean,
         error: String? = null,
-        receipt: JSONObject? = null,
-        failureClass: String? = null,
-        retryDisposition: String? = null
+        receipt: JSONObject? = null
     ): JSONObject {
         val payload = runtimePayload(identity)
             .put("success", success)
         error?.takeIf { it.isNotBlank() }?.let { payload.put("error", it) }
         receipt?.let { payload.put("receipt", it) }
-        failureClass?.takeIf { it.isNotBlank() }?.let { payload.put("failure_class", it) }
-        retryDisposition?.takeIf { it.isNotBlank() }?.let { payload.put("retry_disposition", it) }
         return request(
             "/api/v1/fiscal/agent/jobs/$transactionId/acknowledge",
             credentials,
@@ -157,9 +146,7 @@ class FiscalAgentClient {
                 connection.outputStream.bufferedWriter(StandardCharsets.UTF_8).use { it.write(body.toString()) }
                 val code = connection.responseCode
                 val text = readResponse(connection, code)
-                if (code !in 200..299) {
-                    throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text, statusCode = code)
-                }
+                if (code !in 200..299) throw FiscalAgentException("Cookit Fiscal Agent HTTP $code", text)
                 if (text.isBlank()) JSONObject() else JSONObject(text)
             } finally {
                 connection.disconnect()

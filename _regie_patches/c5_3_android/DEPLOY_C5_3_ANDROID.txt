@@ -1,0 +1,43 @@
+Cookit Android — 0.14.9.1 / versionCode 31 — C5.3 consolidation
+
+Expected base:
+  branch update/cookit-0.14.9-c5-3-retry-policy
+  commit fe3ed3c
+  versionName 0.14.9
+  versionCode 30
+
+Invariants preserved:
+- Durable provider outcome is checked before any FDM call.
+- Once a provider outcome is durable locally, retry is Cloud-only.
+- Mock remains DEBUG-only.
+- Real Checkbox/Eutronix adapter remains fail-closed.
+- No new UI state machine.
+- No new hardcoded French UI copy is introduced.
+
+Apply:
+
+export ANDROID_ROOT="/home/u683350338/domains/allmart.be/public_html/_private_source/cookit-android"
+cd "$ANDROID_ROOT"
+
+git status --short
+git rev-parse --short HEAD
+python3 _regie_patches/c5_3_android/apply_c5_3_android.py
+
+git diff --check
+git diff --stat
+grep -nE 'versionCode|versionName' app/build.gradle.kts
+
+Expected:
+  versionCode = 31
+  versionName = "0.14.9.1"
+
+Then:
+
+git switch -c update/cookit-0.14.9.1-c5-3-consolidation
+git add -A
+git diff --cached --check
+git status --short
+git commit -m "Cookit Android 0.14.9.1: consolidate C5.3 fiscal retry handling"
+git push -u origin update/cookit-0.14.9.1-c5-3-consolidation
+
+Build with the existing GitHub Actions workflow.

@@ -13,7 +13,6 @@ class FiscalAgentDiagnosticLogger(
         runtimeId: String? = null,
         message: String? = null,
         errorClass: String? = null,
-        retryCount: Int? = null,
         now: Long = System.currentTimeMillis()
     ) {
         val state = stateStore.load()
@@ -41,7 +40,7 @@ class FiscalAgentDiagnosticLogger(
                 connectivity = if (health == FiscalAgentRuntimeState.HEALTH_OFFLINE) CONNECTIVITY_OFFLINE else CONNECTIVITY_ONLINE,
                 message = cleanMessage,
                 errorClass = errorClass?.take(160),
-                retryCount = retryCount ?: state.retryAttempt.takeIf { it > 0 } ?: state.consecutiveFailures,
+                retryCount = state.consecutiveFailures,
                 pendingOutcomes = state.pendingOutcomeCount,
                 watchdogCount = state.watchdogRestarts
             )
@@ -59,7 +58,6 @@ class FiscalAgentDiagnosticLogger(
         const val EVENT_JOB_COMPLETED = "JOB_COMPLETED"
         const val EVENT_RETRY_DECISION = "RETRY_DECISION"
         const val EVENT_RETRY_SCHEDULED = "RETRY_SCHEDULED"
-        const val EVENT_RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
         const val EVENT_JOB_TERMINAL_FAILED = "JOB_TERMINAL_FAILED"
         const val EVENT_MANUAL_HOLD = "MANUAL_HOLD"
         const val EVENT_MANUAL_RESUME = "MANUAL_RESUME"

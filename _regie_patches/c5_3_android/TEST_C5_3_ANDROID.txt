@@ -1,0 +1,55 @@
+C5.3 Android 0.14.9.1 validation campaign
+
+Precondition:
+- Backend C5.3 consolidation deployed first.
+- fiscal_profiles.enabled remains OFF for branch 12 during Mock campaign.
+- Mock FDM enabled only in DEBUG.
+
+Scenarios:
+
+1) success
+Expected:
+- attempts=1
+- Cloud status=fiscalized
+- receipt_count=1
+- no retry event
+
+2) graphql_error
+Expected:
+- classification PROVIDER_REJECTED
+- disposition TERMINAL_FAILURE
+- Android sends acknowledge success=false
+- Cloud status=failed
+- no automatic provider retry
+
+3) auth_required
+Expected:
+- classification AUTH
+- MANUAL_HOLD
+- no provider retry loop
+
+4) http_500 / malformed / timeout
+Expected:
+- bounded provider retry
+- RETRY_SCHEDULED diagnostics
+- at most 3 provider claims
+- exhaustion => RETRY_EXHAUSTED + MANUAL_HOLD
+
+5) lost_response_once
+Expected:
+- durable provider/idempotency behavior remains intact
+- receipt_count=1
+- no duplicate fiscal receipt
+
+6) Cloud loss after provider accepted
+Expected:
+- provider outcome persists in fiscal_agent_outcomes
+- subsequent execution replays /submitted + /acknowledge
+- no second FDM call
+- response_meta.replayed_from_local_journal=true
+
+7) Diagnostic export
+Expected:
+- retry event retry_count equals fiscal job attempts, not health consecutiveFailures
+- classification is present in diagnostic message code
+- no Device Token / Bearer / Keystore secret exported
