@@ -12,6 +12,7 @@ import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.cert.CertificateFactory
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
@@ -274,10 +275,11 @@ class Module2StatusClient(private val context: Context) {
                 readTimeout = 20_000
                 doOutput = true
                 sslSocketFactory = sslContext.socketFactory
+                hostnameVerifier = module2HostnameVerifier(endpoint)
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Authorization", "Bearer $bearerToken")
-                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0B1")
+                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0B3")
             }
             connection = conn
 
@@ -300,6 +302,26 @@ class Module2StatusClient(private val context: Context) {
             )
         } finally {
             connection?.disconnect()
+        }
+    }
+
+    /**
+     * Module2's distributed server identity certificate currently uses a generic CN ("Server")
+     * without a DNS/IP Subject Alternative Name. Android's default HTTPS verifier therefore
+     * rejects fdm.module2.be (and would also reject a physical FDM reached by LAN IP) even after
+     * the certificate chain has been successfully validated against the Module2 CA.
+     *
+     * Keep certificate-chain validation strict via createModule2SslContext(), but scope the
+     * hostname exception to the exact host configured in the selected Module2 endpoint. This is
+     * deliberately NOT a global trust-all verifier. If Module2 later serves a hostname-valid
+     * certificate, the platform verifier wins first and this compatibility path is not used.
+     */
+    private fun module2HostnameVerifier(endpoint: String): HostnameVerifier {
+        val configuredHost = runCatching { URI.create(endpoint).host }.getOrNull()
+        val platformVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
+        return HostnameVerifier { hostname, session ->
+            platformVerifier.verify(hostname, session) ||
+                (configuredHost != null && hostname.equals(configuredHost, ignoreCase = true))
         }
     }
 
