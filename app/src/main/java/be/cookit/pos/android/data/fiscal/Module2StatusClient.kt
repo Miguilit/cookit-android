@@ -15,22 +15,44 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class Module2StatusResult(
     val endpoint: String = "",
     val connected: Boolean = false,
+    val statusAvailable: Boolean = false,
     val httpStatus: Int? = null,
     val fdmId: String? = null,
     val fdmSwVersion: String? = null,
     val fdmDateTime: String? = null,
-    val bufferCapacityUsed: Int? = null,
+    val bufferCapacityUsed: Double? = null,
     val initialized: Boolean? = null,
-    val warningCount: Int = 0,
-    val errorCount: Int = 0,
+    val informations: List<String> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    val errors: List<String> = emptyList(),
     val latencyMs: Long? = null,
+    val schemaVariant: String? = null,
     val message: String? = null
-)
+) {
+    fun normalized(): FiscalProviderStatus = FiscalProviderStatus(
+        provider = FiscalFdmSettings.PROVIDER_MODULE2,
+        transportConnected = connected,
+        statusAvailable = statusAvailable,
+        fdmId = fdmId,
+        firmwareVersion = fdmSwVersion,
+        fdmDateTime = fdmDateTime,
+        bufferCapacityUsed = bufferCapacityUsed,
+        initialized = initialized,
+        informations = informations,
+        warnings = warnings,
+        errors = errors,
+        httpStatus = httpStatus,
+        latencyMs = latencyMs,
+        schemaVariant = schemaVariant,
+        message = message
+    )
+}
 
 private data class Module2HttpResponse(
     val status: Int,
@@ -38,12 +60,17 @@ private data class Module2HttpResponse(
     val latencyMs: Long
 )
 
+private data class Module2StatusQueryCandidate(
+    val variant: String,
+    val query: String
+)
+
 /**
- * A15.0A read-only Module2 simulator/physical-FDM client.
+ * A15.0B Module2 read-only status client.
  *
- * The primary check requests the documented status object. If a translated/manual schema label
- * differs, A15.0A falls back to a GraphQL __typename handshake. This still proves the complete
- * mTLS + Bearer + GraphQL transport without enabling any fiscal mutation.
+ * GKS 2.0 defines a standard status query. Historic public specification revisions contained a
+ * fmdSwVersion typo while current revisions use fdmSwVersion. We probe both forms and normalize the
+ * response so the rest of Cookit never depends on a manufacturer/schema spelling detail.
  */
 class Module2StatusClient(private val context: Context) {
     suspend fun status(
@@ -51,72 +78,65 @@ class Module2StatusClient(private val context: Context) {
         bearerToken: String
     ): Module2StatusResult = withContext(Dispatchers.IO) {
         require(settings.isModule2) { "Module2 provider is not selected" }
-        require(settings.useTls) { "Module2 A15.0A requires HTTPS/mTLS" }
+        require(settings.useTls) { "Module2 requires HTTPS/mTLS" }
         require(settings.configured) { "Module2 endpoint is not configured" }
         val token = bearerToken.trim().removePrefix("Bearer ").trim()
         require(token.isNotBlank()) { "Module2 Bearer token is not configured" }
 
         val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
         val sslContext = createModule2SslContext()
+        var totalLatency = 0L
+        val failures = mutableListOf<String>()
 
         try {
-            val statusResponse = post(
-                endpoint = endpoint,
-                bearerToken = token,
-                sslContext = sslContext,
-                operationName = "CookitModule2Status",
-                query = """
-                    query CookitModule2Status {
-                      status {
-                        device {
-                          fdmId
-                          fdmSwVersion
-                          fdmDateTime
-                          bufferCapacityUsed
-                        }
-                        initialized
-                        informations { message }
-                        warnings { message }
-                        errors { message }
-                      }
-                    }
-                """.trimIndent()
-            )
-
-            if (statusResponse.status !in 200..299) {
-                return@withContext Module2StatusResult(
+            for (candidate in statusCandidates()) {
+                val response = post(
                     endpoint = endpoint,
-                    connected = false,
-                    httpStatus = statusResponse.status,
-                    latencyMs = statusResponse.latencyMs,
-                    message = "Module2 HTTP ${statusResponse.status}"
+                    bearerToken = token,
+                    sslContext = sslContext,
+                    operationName = "CookitModule2Status",
+                    query = candidate.query
                 )
+                totalLatency += response.latencyMs
+
+                if (response.status !in 200..299) {
+                    return@withContext Module2StatusResult(
+                        endpoint = endpoint,
+                        connected = false,
+                        statusAvailable = false,
+                        httpStatus = response.status,
+                        latencyMs = totalLatency,
+                        message = "Module2 HTTP ${response.status}"
+                    )
+                }
+
+                val envelope = runCatching { JSONObject(response.body) }.getOrNull()
+                val payload = envelope?.optJSONObject("data")?.optJSONObject("status")
+                if (payload != null) {
+                    val device = payload.optJSONObject("device")
+                    return@withContext Module2StatusResult(
+                        endpoint = endpoint,
+                        connected = true,
+                        statusAvailable = true,
+                        httpStatus = response.status,
+                        fdmId = device?.optNonBlank("fdmId"),
+                        fdmSwVersion = device?.optNonBlank("fdmSwVersion"),
+                        fdmDateTime = device?.optNonBlank("fdmDateTime"),
+                        bufferCapacityUsed = device?.optNullableDouble("bufferCapacityUsed"),
+                        initialized = payload.optNullableBoolean("initialized"),
+                        informations = payload.messageList("informations"),
+                        warnings = payload.messageList("warnings"),
+                        errors = payload.messageList("errors"),
+                        latencyMs = totalLatency,
+                        schemaVariant = candidate.variant,
+                        message = "Module2 status OK (${candidate.variant})"
+                    )
+                }
+
+                failures += "${candidate.variant}: ${envelope?.firstGraphqlError() ?: "data.status missing"}"
             }
 
-            val envelope = runCatching { JSONObject(statusResponse.body) }.getOrNull()
-            val payload = envelope?.optJSONObject("data")?.optJSONObject("status")
-            if (payload != null) {
-                val device = payload.optJSONObject("device")
-                return@withContext Module2StatusResult(
-                    endpoint = endpoint,
-                    connected = true,
-                    httpStatus = statusResponse.status,
-                    fdmId = device?.optString("fdmId")?.takeIf { it.isNotBlank() },
-                    fdmSwVersion = device?.optString("fdmSwVersion")?.takeIf { it.isNotBlank() },
-                    fdmDateTime = device?.optString("fdmDateTime")?.takeIf { it.isNotBlank() },
-                    bufferCapacityUsed = device?.optInt("bufferCapacityUsed")?.takeIf { it >= 0 },
-                    initialized = if (payload.has("initialized") && !payload.isNull("initialized")) payload.optBoolean("initialized") else null,
-                    warningCount = payload.optJSONArray("warnings")?.length() ?: 0,
-                    errorCount = payload.optJSONArray("errors")?.length() ?: 0,
-                    latencyMs = statusResponse.latencyMs,
-                    message = "Module2 mTLS + Bearer + GraphQL status OK"
-                )
-            }
-
-            val statusGraphqlError = envelope?.firstGraphqlError()
-                ?: if (statusResponse.body.isBlank()) "empty status response" else "data.status missing"
-
-            // Schema-safe transport fallback: no fiscal operation and no introspection dependency.
+            // Transport-only fallback. This deliberately performs no fiscal mutation.
             val handshake = post(
                 endpoint = endpoint,
                 bearerToken = token,
@@ -124,6 +144,7 @@ class Module2StatusClient(private val context: Context) {
                 operationName = "CookitModule2Handshake",
                 query = "query CookitModule2Handshake { __typename }"
             )
+            totalLatency += handshake.latencyMs
             val handshakeEnvelope = runCatching { JSONObject(handshake.body) }.getOrNull()
             val handshakeOkay = handshake.status in 200..299 &&
                 handshakeEnvelope?.optJSONObject("data")?.optString("__typename")?.isNotBlank() == true
@@ -131,23 +152,86 @@ class Module2StatusClient(private val context: Context) {
             Module2StatusResult(
                 endpoint = endpoint,
                 connected = handshakeOkay,
+                statusAvailable = false,
                 httpStatus = handshake.status,
-                latencyMs = statusResponse.latencyMs + handshake.latencyMs,
+                latencyMs = totalLatency,
+                schemaVariant = "TRANSPORT_ONLY",
                 message = if (handshakeOkay) {
-                    "Module2 mTLS + Bearer + GraphQL handshake OK; status query needs schema confirmation ($statusGraphqlError)"
+                    "Module2 transport OK; status schema unresolved (${failures.joinToString(" | ")})"
                 } else {
                     handshakeEnvelope?.firstGraphqlError()
-                        ?: "Module2 GraphQL handshake failed after status query: $statusGraphqlError"
+                        ?: "Module2 GraphQL handshake failed (${failures.joinToString(" | ")})"
                 }
             )
         } catch (error: Throwable) {
             Module2StatusResult(
                 endpoint = endpoint,
                 connected = false,
+                statusAvailable = false,
+                latencyMs = totalLatency.takeIf { it > 0 },
                 message = error.message ?: error::class.java.simpleName
             )
         }
     }
+
+    private fun statusCandidates(): List<Module2StatusQueryCandidate> = listOf(
+        Module2StatusQueryCandidate(
+            variant = "GKS_2_CURRENT",
+            query = """
+                query CookitModule2Status {
+                  status(language: EN) {
+                    device {
+                      fdmId
+                      fdmSwVersion
+                      fdmDateTime
+                      bufferCapacityUsed
+                    }
+                    initialized
+                    informations { message }
+                    warnings { message }
+                    errors { message }
+                  }
+                }
+            """.trimIndent()
+        ),
+        Module2StatusQueryCandidate(
+            variant = "GKS_2_LEGACY_FMD_SW",
+            query = """
+                query CookitModule2Status {
+                  status(language: EN) {
+                    device {
+                      fdmId
+                      fdmSwVersion: fmdSwVersion
+                      fdmDateTime
+                      bufferCapacityUsed
+                    }
+                    initialized
+                    informations { message }
+                    warnings { message }
+                    errors { message }
+                  }
+                }
+            """.trimIndent()
+        ),
+        Module2StatusQueryCandidate(
+            variant = "GKS_2_MINIMAL",
+            query = """
+                query CookitModule2Status {
+                  status(language: EN) {
+                    device {
+                      fdmId
+                      fdmDateTime
+                      bufferCapacityUsed
+                    }
+                    initialized
+                    informations { message }
+                    warnings { message }
+                    errors { message }
+                  }
+                }
+            """.trimIndent()
+        )
+    )
 
     private fun post(
         endpoint: String,
@@ -168,7 +252,7 @@ class Module2StatusClient(private val context: Context) {
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("Content-Type", "application/json")
                 setRequestProperty("Authorization", "Bearer $bearerToken")
-                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0A")
+                setRequestProperty("User-Agent", "CookitPOS-Android-Module2-A15.0B")
             }
             connection = conn
 
@@ -199,6 +283,29 @@ class Module2StatusClient(private val context: Context) {
         if (errors.length() == 0) return null
         return errors.optJSONObject(0)?.optString("message")?.takeIf { it.isNotBlank() }
             ?: errors.optString(0).takeIf { it.isNotBlank() }
+    }
+
+    private fun JSONObject.optNonBlank(name: String): String? =
+        optString(name).takeIf { has(name) && !isNull(name) && it.isNotBlank() }
+
+    private fun JSONObject.optNullableDouble(name: String): Double? {
+        if (!has(name) || isNull(name)) return null
+        return runCatching { getDouble(name) }.getOrNull()?.takeIf { it.isFinite() }
+    }
+
+    private fun JSONObject.optNullableBoolean(name: String): Boolean? {
+        if (!has(name) || isNull(name)) return null
+        return runCatching { getBoolean(name) }.getOrNull()
+    }
+
+    private fun JSONObject.messageList(name: String): List<String> {
+        val array: JSONArray = optJSONArray(name) ?: return emptyList()
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                item.optString("message").takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
     }
 
     private fun createModule2SslContext(): SSLContext {

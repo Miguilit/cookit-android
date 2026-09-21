@@ -3001,19 +3001,42 @@ private fun FiscalityScreen(
                             fontSize = 11.sp
                         )
                     }
-                    if (state.module2Status.connected) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            FiscalCompactMetric(Modifier.weight(1f), "FDM", state.module2Status.fdmId ?: "—")
-                            FiscalCompactMetric(Modifier.weight(1f), "Firmware", state.module2Status.fdmSwVersion ?: "—")
-                            FiscalCompactMetric(Modifier.weight(1f), "Buffer", state.module2Status.bufferCapacityUsed?.let { "$it%" } ?: "—")
-                            FiscalCompactMetric(Modifier.weight(1f), "Errors", state.module2Status.errorCount.toString())
+                    if (state.fdmProviderStatus.transportConnected) {
+                        if (state.fdmProviderStatus.statusAvailable) {
+                            val bufferLabel = state.fdmProviderStatus.bufferCapacityUsed?.let { value ->
+                                if (value == value.toLong().toDouble()) "${value.toLong()}%" else String.format(Locale.US, "%.2f%%", value)
+                            } ?: "—"
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                FiscalCompactMetric(Modifier.weight(1f), "FDM", state.fdmProviderStatus.fdmId ?: "—")
+                                FiscalCompactMetric(Modifier.weight(1f), "Firmware", state.fdmProviderStatus.firmwareVersion ?: "—")
+                                FiscalCompactMetric(Modifier.weight(1f), "Buffer", bufferLabel)
+                                FiscalCompactMetric(Modifier.weight(1f), "Initialized", when (state.fdmProviderStatus.initialized) { true -> "Yes"; false -> "No"; null -> "—" })
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                FiscalCompactMetric(Modifier.weight(1f), "Warnings", state.fdmProviderStatus.warnings.size.toString())
+                                FiscalCompactMetric(Modifier.weight(1f), "Errors", state.fdmProviderStatus.errors.size.toString())
+                                FiscalCompactMetric(Modifier.weight(1f), "Schema", state.fdmProviderStatus.schemaVariant ?: "—")
+                                FiscalCompactMetric(Modifier.weight(1f), "FDM time", state.fdmProviderStatus.fdmDateTime ?: "—")
+                            }
                         }
                         Text(
-                            "mTLS + Bearer + GraphQL OK${state.module2Status.latencyMs?.let { " • ${it} ms" }.orEmpty()}",
-                            color = CookitGreen,
+                            buildString {
+                                append(if (state.fdmProviderStatus.statusAvailable) "Module2 status OK" else "Module2 transport OK; status unavailable")
+                                state.fdmProviderStatus.latencyMs?.let { append(" • ${it} ms") }
+                            },
+                            color = if (state.fdmProviderStatus.statusAvailable) CookitGreen else CookitOrange,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
+                        state.fdmProviderStatus.message?.takeIf { it.isNotBlank() }?.let { message ->
+                            Text(message, color = CookitMuted, fontSize = 10.sp)
+                        }
+                        if (state.fdmProviderStatus.warnings.isNotEmpty()) {
+                            Text("Warnings: ${state.fdmProviderStatus.warnings.joinToString(" | ")}", color = CookitOrange, fontSize = 10.sp)
+                        }
+                        if (state.fdmProviderStatus.errors.isNotEmpty()) {
+                            Text("Errors: ${state.fdmProviderStatus.errors.joinToString(" | ")}", color = MaterialTheme.colorScheme.error, fontSize = 10.sp)
+                        }
                     } else if (!state.module2Message.isNullOrBlank()) {
                         Text(state.module2Message, color = CookitMuted, fontSize = 11.sp)
                     }
@@ -3072,7 +3095,7 @@ private fun FiscalityScreen(
                         OutlinedButton(onClick = vm::verifyFdmAdapterGate) { Text(fs.verifyAdapterGate) }
                     } else if (state.fdmSettings.isModule2) {
                         Text(
-                            "A15.0A: status handshake only. signSale remains fail-closed until the Module2 fiscal mapping is completed.",
+                            "A15.0B: normalized Module2 status/health enabled. signSale remains fail-closed until the fiscal mapping is completed.",
                             color = CookitOrange,
                             fontSize = 11.sp
                         )

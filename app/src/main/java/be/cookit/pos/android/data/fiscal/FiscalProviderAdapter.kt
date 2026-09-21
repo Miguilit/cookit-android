@@ -15,6 +15,27 @@ data class FiscalProviderReadiness(
     val readyForFiscalization: Boolean get() = networkConfigured && mappingInstalled
 }
 
+/** Normalized provider health/status independent from the FDM manufacturer. */
+data class FiscalProviderStatus(
+    val provider: String = "",
+    val transportConnected: Boolean = false,
+    val statusAvailable: Boolean = false,
+    val fdmId: String? = null,
+    val firmwareVersion: String? = null,
+    val fdmDateTime: String? = null,
+    val bufferCapacityUsed: Double? = null,
+    val initialized: Boolean? = null,
+    val informations: List<String> = emptyList(),
+    val warnings: List<String> = emptyList(),
+    val errors: List<String> = emptyList(),
+    val httpStatus: Int? = null,
+    val latencyMs: Long? = null,
+    val schemaVariant: String? = null,
+    val message: String? = null
+) {
+    val healthy: Boolean get() = transportConnected && statusAvailable && initialized != false && errors.isEmpty()
+}
+
 /** Permanent seam between Cookit's canonical fiscal event and an FDM GraphQL schema. */
 interface FiscalProviderAdapter {
     val providerId: String
@@ -46,7 +67,7 @@ class CheckboxFiscalProviderAdapter : FiscalProviderAdapter {
 }
 
 
-/** A15.0A Module2 boundary: status/mTLS is enabled separately; sale mapping remains fail-closed. */
+/** A15.0B Module2 boundary: normalized status is enabled; sale mapping remains fail-closed. */
 class Module2FiscalProviderAdapter : FiscalProviderAdapter {
     override val providerId: String = FiscalFdmSettings.PROVIDER_MODULE2
     override val saleMutationName: String = "signSale"
@@ -56,12 +77,12 @@ class Module2FiscalProviderAdapter : FiscalProviderAdapter {
         networkConfigured = settings.configured && settings.useTls,
         mappingInstalled = false,
         mutationName = saleMutationName,
-        reason = "A15.0A Module2 mTLS/status available; signSale mapping intentionally gated until fiscal field mapping is complete"
+        reason = "A15.0B Module2 normalized status available; signSale mapping intentionally gated until fiscal field mapping is complete"
     )
 
     override fun buildSaleOperation(event: FiscalOutboxEntity): FdmGraphqlOperation {
         throw FiscalProviderMappingUnavailable(
-            "Module2 signSale is intentionally disabled in A15.0A; only the read-only status handshake is enabled."
+            "Module2 signSale is intentionally disabled in A15.0B; status/health validation is enabled while fiscal sale mapping remains gated."
         )
     }
 }

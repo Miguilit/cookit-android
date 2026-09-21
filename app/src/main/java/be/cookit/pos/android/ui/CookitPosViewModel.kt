@@ -111,6 +111,7 @@ data class PosUiState(
     val module2TokenConfigured: Boolean = false,
     val module2StatusBusy: Boolean = false,
     val module2Status: Module2StatusResult = Module2StatusResult(),
+    val fdmProviderStatus: FiscalProviderStatus = FiscalProviderStatus(),
     val module2Message: String? = null,
     val mockFdmBusy: Boolean = false,
     val mockFdmMessage: String? = null,
@@ -380,6 +381,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 module2TokenConfigured = module2CredentialStore.configured(),
                 module2Message = null,
                 module2Status = if (module2Selected) it.module2Status else Module2StatusResult(),
+                fdmProviderStatus = if (module2Selected) it.fdmProviderStatus else FiscalProviderStatus(),
                 mockFdmMessage = null,
                 embeddedMockFdmStatus = embeddedStatus
             )
@@ -404,6 +406,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             it.copy(
                 module2TokenConfigured = false,
                 module2Status = Module2StatusResult(),
+                fdmProviderStatus = FiscalProviderStatus(),
                 module2Message = "module2_token_cleared"
             )
         }
@@ -438,8 +441,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     module2StatusBusy = false,
                     fdmProbeBusy = false,
                     module2Status = result,
+                    fdmProviderStatus = result.normalized(),
                     fdmProbe = probe,
-                    module2Message = if (result.connected) "module2_status_ok" else "module2_status_failed:${result.message.orEmpty()}",
+                    module2Message = when {
+                        result.statusAvailable -> "module2_status_ok"
+                        result.connected -> "module2_transport_ok_status_unavailable:${result.message.orEmpty()}"
+                        else -> "module2_status_failed:${result.message.orEmpty()}"
+                    },
                     fdmMessage = if (result.connected) "probe_reachable" else "probe_failed"
                 )
             }
