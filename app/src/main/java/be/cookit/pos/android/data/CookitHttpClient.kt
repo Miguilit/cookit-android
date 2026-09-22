@@ -2,6 +2,8 @@ package be.cookit.pos.android.data
 
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.domain.*
+import be.cookit.pos.android.data.fiscal.FiscalShadowOrderResolution
+import be.cookit.pos.android.data.fiscal.FiscalShadowResolutionParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -38,6 +40,7 @@ data class PlatformSnapshot(
 class CookitHttpClient {
     var languageCode: String = "fr"
     private val baseUrl = BuildConfig.COOKIT_API_BASE_URL.trimEnd('/') + "/"
+    private val originUrl = baseUrl.substringBefore("/api/application-integration/").trimEnd('/') + "/"
 
     suspend fun login(email: String, password: String): String = withContext(Dispatchers.IO) {
         val body = JSONObject()
@@ -209,6 +212,14 @@ class CookitHttpClient {
                 )
             }
         }
+    }
+
+    suspend fun fiscalShadowResolution(token: String, orderId: Long): FiscalShadowOrderResolution = withContext(Dispatchers.IO) {
+        val json = requestAbsolute(
+            originUrl + "api/v1/fiscal/orders/$orderId/shadow-resolution",
+            token = token
+        )
+        FiscalShadowResolutionParser.parse(json)
     }
 
     suspend fun orderDraft(token: String, orderId: Long): RemoteOrderDraft = withContext(Dispatchers.IO) {
@@ -895,8 +906,15 @@ class CookitHttpClient {
         method: String = "GET",
         token: String? = null,
         body: JSONObject? = null
+    ): JSONObject = requestAbsolute(baseUrl + path.trimStart('/'), method, token, body)
+
+    private fun requestAbsolute(
+        absoluteUrl: String,
+        method: String = "GET",
+        token: String? = null,
+        body: JSONObject? = null
     ): JSONObject {
-        val connection = (URL(baseUrl + path.trimStart('/')).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(absoluteUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 15_000
             readTimeout = 20_000

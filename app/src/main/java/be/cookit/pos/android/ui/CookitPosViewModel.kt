@@ -723,10 +723,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     return@launch
                 }
 
+                val cookitToken = token ?: error("Cookit API session is unavailable")
+                val shadowResolution = api.fiscalShadowResolution(cookitToken, event.orderId)
                 val result = module2StatusClient.trainingSaleFromFinalizedEvent(
                     settings = settings,
                     bearerToken = bearer,
-                    event = event
+                    event = event,
+                    shadowResolution = shadowResolution
                 )
                 if (result.success) {
                     module2TrainingReceiptStore.markSent(event, result)
@@ -2290,10 +2293,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 issues += "snapshot ${snapshot.schema}; pay a new order with A15.0E"
             }
             if (snapshot.lines.isEmpty()) issues += "no fiscal lines"
-            val missingVat = snapshot.lines.filter { it.vatLabel.isNullOrBlank() && it.vatRate == null }
-            if (missingVat.isNotEmpty()) {
-                issues += "VAT missing for ${missingVat.joinToString(", ") { it.name }.take(160)}"
-            }
             if (snapshot.lines.sumOf { it.lineTotalMinor } != snapshot.grossTotalMinor) {
                 issues += "charges/discounts/rounding not mapped yet"
             }
@@ -2319,7 +2318,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 message = when {
                     alreadySent -> "already sent to Module2 TRAINING"
                     issues.isNotEmpty() -> issues.joinToString(" | ")
-                    else -> "ready"
+                    else -> "ready • VAT resolved by CookitFiscal SHADOW on send"
                 }
             )
         }.getOrElse { error ->

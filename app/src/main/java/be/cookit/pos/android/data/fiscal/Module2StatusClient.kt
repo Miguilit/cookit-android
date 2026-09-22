@@ -521,14 +521,17 @@ class Module2StatusClient(private val context: Context) {
     }
 
     /**
-     * A15.0E sends the immutable fiscal-outbox snapshot of a PAID Cookit order to the Module2
-     * simulator with isTraining=true. The snapshot hash, VAT metadata, payment and totals are
-     * validated before any GraphQL mutation is attempted.
+     * A15.0F1 sends the immutable fiscal-outbox snapshot of a PAID Cookit order to the Module2
+     * simulator with isTraining=true, but VAT treatment is supplied by CookitFiscal SHADOW.
+     * The immutable local snapshot remains authoritative for identity, quantities, prices, payment
+     * and totals; the backend resolver is authoritative for country/context/class/rate. Both sides
+     * are cross-checked before any GraphQL mutation is attempted.
      */
     suspend fun trainingSaleFromFinalizedEvent(
         settings: FiscalFdmSettings,
         bearerToken: String,
-        event: FiscalOutboxEntity
+        event: FiscalOutboxEntity,
+        shadowResolution: FiscalShadowOrderResolution
     ): Module2TrainingSaleResult = withContext(Dispatchers.IO) {
         require(settings.isModule2) { "Module2 provider is not selected" }
         require(settings.useTls) { "Module2 requires HTTPS/mTLS" }
@@ -539,12 +542,13 @@ class Module2StatusClient(private val context: Context) {
         require(token.isNotBlank()) { "Module2 Bearer token is not configured" }
         val snapshot = FiscalSaleSnapshotParser.parse(event)
         require(snapshot.schema == "cookit.android.fiscal.sale.v2") {
-            "This paid order uses ${snapshot.schema}; create and pay a new order with A15.0E to obtain VAT-complete snapshot v2"
+            "This paid order uses ${snapshot.schema}; create and pay a new order with A15.0E+ to obtain fiscal snapshot v2"
         }
         require(snapshot.lines.isNotEmpty()) { "Finalized Cookit order has no fiscal lines" }
         require(snapshot.paymentAmountMinor == snapshot.grossTotalMinor) {
             "Payment total does not match fiscal gross total"
         }
+        val resolvedLines = shadowResolution.validateAgainst(snapshot)
         val linesTotalMinor = snapshot.lines.sumOf { it.lineTotalMinor }
         require(linesTotalMinor == snapshot.grossTotalMinor) {
             "Order contains charges, discounts or rounding not yet represented as fiscal lines (${linesTotalMinor} != ${snapshot.grossTotalMinor})"
@@ -561,10 +565,11 @@ class Module2StatusClient(private val context: Context) {
         val bookingPeriodId = trainingBookingPeriodId(bookingDate)
         val transactionLines = JSONArray()
 
-        snapshot.lines.forEach { line ->
+        snapshot.lines.forEachIndexed { index, line ->
             require(line.quantity > 0) { "Invalid quantity for ${line.name}" }
             require(line.unitPriceMinor >= 0L && line.lineTotalMinor >= 0L) { "Invalid amount for ${line.name}" }
-            val label = normalizeVatLabel(line.vatLabel, line.vatRate)
+            val resolved = resolvedLines[index]
+            val label = normalizeVatLabel(null, resolved.rate)
             transactionLines.put(
                 JSONObject()
                     .put("lineType", "SINGLE_PRODUCT")

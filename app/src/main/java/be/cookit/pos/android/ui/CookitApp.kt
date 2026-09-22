@@ -3190,6 +3190,11 @@ private fun FiscalityScreen(
                                 color = if (finalized.ready) CookitGreen else if (finalized.alreadySent) CookitMuted else CookitOrange,
                                 fontSize = 10.sp
                             )
+                            Text(
+                                "VAT source: CookitFiscal SHADOW resolver (country + regime + order context + fiscal class). Validated against this immutable snapshot before signSale.",
+                                color = CookitMuted,
+                                fontSize = 10.sp
+                            )
                         }
                         OutlinedButton(
                             onClick = vm::runModule2FinalizedOrderTrainingSale,
