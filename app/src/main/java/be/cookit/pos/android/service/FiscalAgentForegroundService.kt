@@ -43,6 +43,8 @@ import be.cookit.pos.android.data.fiscal.FiscalFdmSettings
 import be.cookit.pos.android.data.fiscal.FiscalFdmSettingsStore
 import be.cookit.pos.android.data.fiscal.FiscalProviderMappingUnavailable
 import be.cookit.pos.android.data.fiscal.FiscalRuntimeRepository
+import be.cookit.pos.android.data.fiscal.Module2CredentialStore
+import be.cookit.pos.android.data.fiscal.Module2StatusClient
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -127,7 +129,14 @@ class FiscalAgentForegroundService : Service() {
         settingsStore = FiscalFdmSettingsStore(this)
         runtimeRepository = FiscalRuntimeRepository(database.fiscalRuntimeDao())
         client = FiscalAgentClient()
-        fdmRuntime = FiscalFdmRuntime(FdmGraphqlClient())
+        val module2CredentialStore =
+            Module2CredentialStore(this)
+
+        fdmRuntime = FiscalFdmRuntime(
+            client = FdmGraphqlClient(),
+            module2Client = Module2StatusClient(this),
+            module2CredentialStore = module2CredentialStore
+        )
         fdmProbe = FdmConnectivityProbe()
         outcomeDao = database.fiscalAgentOutcomeDao()
         runner = FiscalAgentRunner(client, fdmRuntime, outcomeDao)

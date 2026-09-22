@@ -100,6 +100,13 @@ class FiscalAgentRunner(
 
         try {
             val event = job.asProviderEvent(identity)
+
+            val preparedSale =
+                if (settings.isModule2) {
+                    job.preparedSignSale(identity)
+                } else {
+                    null
+                }
             val existing = outcomeDao.byTransactionId(job.id)
             val replayedFromJournal = existing != null
             val outcome = existing?.also { validateStoredOutcome(it, job) } ?: run {
@@ -115,17 +122,115 @@ class FiscalAgentRunner(
                 val mockHeaders = mockScenario?.let { mapOf("X-Cookit-Mock-Scenario" to it) }.orEmpty()
 
                 progress(FiscalAgentRuntimeStateStore.PHASE_FDM_CALL)
-                val envelope = fdmRuntime.submitSale(settings, event, headers = mockHeaders)
-                val sale = envelope.optJSONObject("data")?.optJSONObject("signSale")
-                    ?: throw FdmGraphqlException("FDM response does not contain data.signSale", envelope.toString())
+
+                val envelope = fdmRuntime.submitSale(
+                    settings = settings,
+                    event = event,
+                    preparedSale = preparedSale,
+                    headers = mockHeaders
+                )
+
+                val sale = envelope
+                    .optJSONObject("data")
+                    ?.optJSONObject("signSale")
+                    ?: throw FdmGraphqlException(
+                        "FDM response does not contain data.signSale",
+                        envelope.toString()
+                    )
+
                 providerResponseReceived = true
-                if (!sale.optBoolean("success", false)) {
-                    throw FdmGraphqlException("FDM signSale did not succeed", envelope.toString())
+
+                val receiptNumber: String
+                val signature: String?
+                val verificationCode: String?
+                val providerReference: String?
+                val providerDuplicate: Boolean
+
+                if (settings.isModule2) {
+                    val expectedTicket =
+                        preparedSale?.sequenceNumber
+                            ?: throw FiscalAgentIntegrityException(
+                                "Prepared Module2 fiscal sequence missing"
+                            )
+
+                    val actualTicket =
+                        if (
+                            sale.has("posFiscalTicketNo") &&
+                            !sale.isNull("posFiscalTicketNo")
+                        ) {
+                            runCatching {
+                                sale.getInt("posFiscalTicketNo")
+                            }.getOrNull()
+                        } else {
+                            null
+                        }
+                            ?: throw FdmGraphqlException(
+                                "Module2 posFiscalTicketNo missing",
+                                envelope.toString()
+                            )
+
+                    if (actualTicket != expectedTicket) {
+                        throw FiscalAgentIntegrityException(
+                            "Module2 receipt ticket mismatch: " +
+                                "expected=$expectedTicket " +
+                                "actual=$actualTicket"
+                        )
+                    }
+
+                    receiptNumber = actualTicket.toString()
+
+                    signature =
+                        sale.optString("digitalSignature")
+                            .takeIf { it.isNotBlank() }
+
+                    verificationCode =
+                        sale.optString("shortSignature")
+                            .takeIf { it.isNotBlank() }
+
+                    providerReference =
+                        sale.optJSONObject("fdmRef")
+                            ?.optString("fdmId")
+                            ?.takeIf { it.isNotBlank() }
+
+                    providerDuplicate = false
+
+                } else {
+                    /*
+                     * Existing Cookit Mock contract remains unchanged.
+                     */
+                    if (!sale.optBoolean("success", false)) {
+                        throw FdmGraphqlException(
+                            "FDM signSale did not succeed",
+                            envelope.toString()
+                        )
+                    }
+
+                    receiptNumber =
+                        sale.optString("receiptNumber")
+                            .takeIf { it.isNotBlank() }
+                            ?: throw FdmGraphqlException(
+                                "FDM receipt number missing",
+                                envelope.toString()
+                            )
+
+                    signature =
+                        sale.optString("signature")
+                            .takeIf { it.isNotBlank() }
+
+                    verificationCode =
+                        sale.optString("verificationCode")
+                            .takeIf { it.isNotBlank() }
+
+                    providerReference =
+                        sale.optString("providerReference")
+                            .takeIf { it.isNotBlank() }
+
+                    providerDuplicate =
+                        sale.optBoolean("duplicate", false)
                 }
 
-                val receiptNumber = sale.optString("receiptNumber").takeIf { it.isNotBlank() }
-                    ?: throw FdmGraphqlException("FDM receipt number missing", envelope.toString())
                 val now = System.currentTimeMillis()
+
                 val created = FiscalAgentOutcomeEntity(
                     transactionId = job.id,
                     publicId = job.publicId,
@@ -133,16 +238,15 @@ class FiscalAgentRunner(
                     snapshotHash = event.snapshotHash,
                     provider = settings.provider,
                     receiptNumber = receiptNumber,
-                    signature = sale.optString("signature").takeIf { it.isNotBlank() },
-                    verificationCode = sale.optString("verificationCode").takeIf { it.isNotBlank() },
-                    providerReference = sale.optString("providerReference").takeIf { it.isNotBlank() },
+                    signature = signature,
+                    verificationCode = verificationCode,
+                    providerReference = providerReference,
                     rawResponseJson = envelope.toString(),
-                    providerDuplicate = sale.optBoolean("duplicate", false),
+                    providerDuplicate = providerDuplicate,
                     state = FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED,
                     createdAtEpochMs = now,
                     updatedAtEpochMs = now
                 )
-
                 val inserted = outcomeDao.insert(created)
                 if (inserted == -1L) {
                     outcomeDao.byTransactionId(job.id)?.also { validateStoredOutcome(it, job) }

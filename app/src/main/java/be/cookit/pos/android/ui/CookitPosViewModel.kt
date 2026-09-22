@@ -202,10 +202,16 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         )
     } else storedFdmSettings
     private val fdmGraphqlClient = FdmGraphqlClient()
-    private val fdmRuntime = FiscalFdmRuntime(fdmGraphqlClient)
+    private val module2CredentialStore =
+        Module2CredentialStore(application)
+    private val module2StatusClient =
+        Module2StatusClient(application)
+    private val fdmRuntime = FiscalFdmRuntime(
+        client = fdmGraphqlClient,
+        module2Client = module2StatusClient,
+        module2CredentialStore = module2CredentialStore
+    )
     private val fdmConnectivityProbe = FdmConnectivityProbe()
-    private val module2CredentialStore = Module2CredentialStore(application)
-    private val module2StatusClient = Module2StatusClient(application)
     private val module2TrainingReceiptStore = Module2TrainingReceiptStore(application)
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
     private val fiscalAgentRuntimeStateStore = FiscalAgentRuntimeStateStore(application)

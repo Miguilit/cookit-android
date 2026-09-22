@@ -9,6 +9,19 @@ import org.json.JSONObject
 
 class FiscalAgentIntegrityException(message: String) : IllegalStateException(message)
 
+/**
+ * Immutable A15.0F8.2 request prepared by Cookit Cloud.
+ *
+ * requestCanonicalJson is opaque transport evidence. Android validates it,
+ * but MUST NOT rebuild or reserialize it before Module2 submission.
+ */
+data class PreparedFiscalSignSale(
+    val requestCanonicalJson: String,
+    val requestSha256: String,
+    val sequenceNumber: Int,
+    val training: Boolean
+)
+
 data class FiscalAgentJob(
     val id: Long,
     val publicId: String,
@@ -42,15 +55,176 @@ data class FiscalAgentJob(
         }
     }
 
-    fun asProviderEvent(identity: FiscalRuntimeIdentity): FiscalOutboxEntity {
+    fun preparedSignSale(identity: FiscalRuntimeIdentity): PreparedFiscalSignSale {
         validateScope(identity)
-        val canonicalSnapshot = FiscalCanonicalJson.encode(snapshot.toCanonicalValue())
-        val calculatedHash = FiscalCanonicalJson.sha256Hex(canonicalSnapshot)
-        if (!calculatedHash.equals(snapshotHash, ignoreCase = true)) {
+        validateSnapshotIntegrity()
+
+        val schema = snapshot.optString("schema")
+        if (schema != "cookit.be.fiscal.local-agent-job.v1") {
             throw FiscalAgentIntegrityException(
-                "Cloud fiscal snapshot SHA-256 mismatch for transaction $id"
+                "Unsupported prepared fiscal snapshot schema for transaction $id"
             )
         }
+
+        val job = snapshot.optJSONObject("job")
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal snapshot job contract missing for transaction $id"
+            )
+
+        if (job.optString("operation") != "signSale") {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal operation is not signSale for transaction $id"
+            )
+        }
+
+        val jobTraining = runCatching {
+            job.getBoolean("training")
+        }.getOrElse {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal job training flag missing for transaction $id"
+            )
+        }
+
+        /*
+         * F8.2 deliberately opens only the remote Module2 TRAINING path.
+         * Production sale activation requires a separate recovery design for
+         * the ambiguous case where the FDM accepts a request but the HTTP
+         * response is lost before Android can journal the outcome.
+         */
+        if (!jobTraining) {
+            throw FiscalAgentIntegrityException(
+                "A15.0F8.2 Module2 transport accepts TRAINING jobs only"
+            )
+        }
+
+        val sequence = job.optInt("sequence_number", 0)
+        if (sequence <= 0) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal sequence missing for transaction $id"
+            )
+        }
+
+        val requestCanonicalJson = snapshot
+            .optString("request_canonical_json")
+            .takeIf { it.isNotBlank() }
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal canonical request missing for transaction $id"
+            )
+
+        val expected = snapshot.optJSONObject("expected")
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal expected integrity contract missing for transaction $id"
+            )
+
+        val expectedSha = expected
+            .optString("request_sha256")
+            .lowercase()
+            .takeIf { it.matches(Regex("^[0-9a-f]{64}$")) }
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal request SHA-256 missing for transaction $id"
+            )
+
+        val actualSha = FiscalCanonicalJson.sha256Hex(requestCanonicalJson)
+        if (!actualSha.equals(expectedSha, ignoreCase = true)) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal request SHA-256 mismatch for transaction $id"
+            )
+        }
+
+        val canonicalRequest = try {
+            JSONObject(requestCanonicalJson)
+        } catch (error: Throwable) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal canonical request is malformed for transaction $id"
+            )
+        }
+
+        val query = canonicalRequest
+            .optString("query")
+            .takeIf { it.isNotBlank() }
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal GraphQL query missing for transaction $id"
+            )
+
+        val storedRequest = snapshot.optJSONObject("request")
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal request object missing for transaction $id"
+            )
+
+        if (storedRequest.optString("query") != query) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal query semantic mismatch for transaction $id"
+            )
+        }
+
+        val variables = canonicalRequest.optJSONObject("variables")
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal GraphQL variables missing for transaction $id"
+            )
+
+        val requestTraining = runCatching {
+            variables.getBoolean("training")
+        }.getOrElse {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal request training flag missing for transaction $id"
+            )
+        }
+
+        if (!requestTraining || requestTraining != jobTraining) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal training contract mismatch for transaction $id"
+            )
+        }
+
+        val data = variables.optJSONObject("data")
+            ?: throw FiscalAgentIntegrityException(
+                "Prepared fiscal SaleInput missing for transaction $id"
+            )
+
+        val ticketNumber = data.optInt("posFiscalTicketNo", 0)
+        if (ticketNumber != sequence) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal ticket/sequence mismatch for transaction $id"
+            )
+        }
+
+        val storedVariables = storedRequest.optJSONObject("variables")
+            ?: throw FiscalAgentIntegrityException(
+                "Stored fiscal request variables missing for transaction $id"
+            )
+
+        val storedTraining = runCatching {
+            storedVariables.getBoolean("training")
+        }.getOrElse {
+            throw FiscalAgentIntegrityException(
+                "Stored fiscal request training flag missing for transaction $id"
+            )
+        }
+
+        val storedTicket = storedVariables
+            .optJSONObject("data")
+            ?.optInt("posFiscalTicketNo", 0)
+            ?: 0
+
+        if (storedTraining != requestTraining || storedTicket != ticketNumber) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal request semantic proof mismatch for transaction $id"
+            )
+        }
+
+        return PreparedFiscalSignSale(
+            requestCanonicalJson = requestCanonicalJson,
+            requestSha256 = actualSha,
+            sequenceNumber = sequence,
+            training = true
+        )
+    }
+
+    fun asProviderEvent(identity: FiscalRuntimeIdentity): FiscalOutboxEntity {
+        validateScope(identity)
+        val canonicalSnapshot = validateSnapshotIntegrity()
+        val calculatedHash =
+            FiscalCanonicalJson.sha256Hex(canonicalSnapshot)
 
         val now = System.currentTimeMillis()
         return FiscalOutboxEntity(
@@ -76,6 +250,21 @@ data class FiscalAgentJob(
             activatedAtEpochMs = now,
             cloudSyncedAtEpochMs = now
         )
+    }
+
+    private fun validateSnapshotIntegrity(): String {
+        val canonicalSnapshot = FiscalCanonicalJson.encode(
+            snapshot.toCanonicalValue()
+        )
+        val calculatedHash = FiscalCanonicalJson.sha256Hex(canonicalSnapshot)
+
+        if (!calculatedHash.equals(snapshotHash, ignoreCase = true)) {
+            throw FiscalAgentIntegrityException(
+                "Cloud fiscal snapshot SHA-256 mismatch for transaction $id"
+            )
+        }
+
+        return canonicalSnapshot
     }
 
     companion object {

@@ -67,22 +67,36 @@ class CheckboxFiscalProviderAdapter : FiscalProviderAdapter {
 }
 
 
-/** A15.0B Module2 boundary: normalized status is enabled; sale mapping remains fail-closed. */
+/**
+ * A15.0F8.2 Module2 boundary.
+ *
+ * Fiscal field mapping is no longer rebuilt on Android: Cookit Cloud supplies
+ * the immutable canonical signSale request. The generic operation builder
+ * therefore remains deliberately unavailable.
+ */
 class Module2FiscalProviderAdapter : FiscalProviderAdapter {
     override val providerId: String = FiscalFdmSettings.PROVIDER_MODULE2
     override val saleMutationName: String = "signSale"
 
-    override fun readiness(settings: FiscalFdmSettings): FiscalProviderReadiness = FiscalProviderReadiness(
+    override fun readiness(
+        settings: FiscalFdmSettings
+    ): FiscalProviderReadiness = FiscalProviderReadiness(
         provider = providerId,
         networkConfigured = settings.configured && settings.useTls,
-        mappingInstalled = false,
+        mappingInstalled = true,
         mutationName = saleMutationName,
-        reason = "A15.0B Module2 normalized status available; signSale mapping intentionally gated until fiscal field mapping is complete"
+        reason = if (settings.configured && settings.useTls) {
+            "A15.0F8.2 cloud-prepared Module2 signSale transport active (TRAINING only)"
+        } else {
+            "Module2 requires a configured HTTPS/mTLS endpoint"
+        }
     )
 
-    override fun buildSaleOperation(event: FiscalOutboxEntity): FdmGraphqlOperation {
+    override fun buildSaleOperation(
+        event: FiscalOutboxEntity
+    ): FdmGraphqlOperation {
         throw FiscalProviderMappingUnavailable(
-            "Module2 signSale is intentionally disabled in A15.0B; status/health validation is enabled while fiscal sale mapping remains gated."
+            "Module2 A15.0F8.2 requires the immutable cloud-prepared canonical request; Android must not rebuild SaleInput."
         )
     }
 }

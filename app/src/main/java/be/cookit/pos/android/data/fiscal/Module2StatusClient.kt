@@ -125,6 +125,95 @@ class Module2StatusClient(private val context: Context) {
     private companion object {
         val MODULE2_BELGIUM_ZONE: ZoneId = ZoneId.of("Europe/Brussels")
     }
+    /**
+     * A15.0F8.2 cloud-prepared signSale transport.
+     *
+     * The canonical GraphQL body was built and hashed by Cookit Cloud.
+     * It is written byte-for-byte to the Module2 HTTPS connection.
+     * Do not rebuild it with JSONObject and do not add operationName.
+     */
+    suspend fun executePreparedSignSale(
+        settings: FiscalFdmSettings,
+        bearerToken: String,
+        requestCanonicalJson: String
+    ): JSONObject = withContext(Dispatchers.IO) {
+        require(settings.isModule2) { "Module2 provider is not selected" }
+        require(settings.useTls) { "Module2 requires HTTPS/mTLS" }
+        require(settings.configured) { "Module2 endpoint is not configured" }
+
+        val token = bearerToken.trim().removePrefix("Bearer ").trim()
+        require(token.isNotBlank()) { "Module2 Bearer token is not configured" }
+        require(requestCanonicalJson.isNotBlank()) {
+            "Prepared Module2 GraphQL request is empty"
+        }
+
+        /*
+         * Parse only as a local sanity check. The parsed object is NEVER used
+         * to rebuild the HTTP body.
+         */
+        val request = try {
+            JSONObject(requestCanonicalJson)
+        } catch (error: Throwable) {
+            throw FiscalAgentIntegrityException(
+                "Prepared Module2 GraphQL request is malformed"
+            )
+        }
+
+        if (request.optString("query").isBlank()) {
+            throw FiscalAgentIntegrityException(
+                "Prepared Module2 GraphQL query is missing"
+            )
+        }
+
+        val endpoint = settings.endpoint
+            ?: error("Module2 endpoint unavailable")
+
+        val response = postCanonical(
+            endpoint = endpoint,
+            bearerToken = token,
+            sslContext = createModule2SslContext(),
+            canonicalBody = requestCanonicalJson
+        )
+
+        if (response.status !in 200..299) {
+            throw FdmGraphqlException(
+                message = "Module2 GraphQL HTTP ${response.status}",
+                responseBody = response.body,
+                httpStatus = response.status
+            )
+        }
+
+        val envelope = try {
+            if (response.body.isBlank()) JSONObject()
+            else JSONObject(response.body)
+        } catch (error: Throwable) {
+            throw FdmGraphqlException(
+                message = "Module2 returned malformed JSON",
+                responseBody = response.body,
+                httpStatus = response.status
+            )
+        }
+
+        val graphqlErrors = envelope.graphqlErrors()
+        if (graphqlErrors.isNotEmpty()) {
+            throw FdmGraphqlException(
+                message = graphqlErrors.first(),
+                responseBody = response.body,
+                httpStatus = response.status
+            )
+        }
+
+        if (envelope.optJSONObject("data")?.optJSONObject("signSale") == null) {
+            throw FdmGraphqlException(
+                message = "Module2 response does not contain data.signSale",
+                responseBody = response.body,
+                httpStatus = response.status
+            )
+        }
+
+        envelope
+    }
+
     suspend fun status(
         settings: FiscalFdmSettings,
         bearerToken: String
@@ -881,6 +970,73 @@ class Module2StatusClient(private val context: Context) {
             """.trimIndent()
         )
     )
+
+    /**
+     * Writes the frozen Cookit Cloud GraphQL request exactly as received.
+     * This is intentionally separate from post(), which reconstructs a JSON
+     * envelope for legacy/manual Module2 operations.
+     */
+    private fun postCanonical(
+        endpoint: String,
+        bearerToken: String,
+        sslContext: SSLContext,
+        canonicalBody: String
+    ): Module2HttpResponse {
+        val started = System.nanoTime()
+        var connection: HttpsURLConnection? = null
+
+        try {
+            val conn = (
+                URI.create(endpoint).toURL().openConnection()
+                    as HttpsURLConnection
+            ).apply {
+                requestMethod = "POST"
+                connectTimeout = 10_000
+                readTimeout = 20_000
+                doOutput = true
+                sslSocketFactory = sslContext.socketFactory
+                hostnameVerifier = module2HostnameVerifier(endpoint)
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("Authorization", "Bearer $bearerToken")
+                setRequestProperty(
+                    "User-Agent",
+                    "CookitPOS-Android-Module2-A15.0F8.2"
+                )
+            }
+
+            connection = conn
+
+            conn.outputStream
+                .bufferedWriter(StandardCharsets.UTF_8)
+                .use { writer ->
+                    writer.write(canonicalBody)
+                }
+
+            val status = conn.responseCode
+            val stream =
+                if (status in 200..299) conn.inputStream
+                else conn.errorStream
+
+            val text = stream?.let {
+                BufferedReader(
+                    InputStreamReader(it, StandardCharsets.UTF_8)
+                ).use { reader ->
+                    reader.readText()
+                }
+            }.orEmpty()
+
+            return Module2HttpResponse(
+                status = status,
+                body = text,
+                latencyMs = (
+                    System.nanoTime() - started
+                ) / 1_000_000L
+            )
+        } finally {
+            connection?.disconnect()
+        }
+    }
 
     private fun post(
         endpoint: String,
