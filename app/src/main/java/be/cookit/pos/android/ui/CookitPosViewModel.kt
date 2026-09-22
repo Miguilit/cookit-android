@@ -43,6 +43,8 @@ data class Module2FinalizedOrderCandidate(
     val paymentMethod: String = "",
     val cashierName: String? = null,
     val snapshotHash: String = "",
+    val fiscalSummary: List<String> = emptyList(),
+    val financialSummary: List<String> = emptyList(),
     val ready: Boolean = false,
     val alreadySent: Boolean = false,
     val message: String? = null
@@ -2293,14 +2295,38 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 issues += "snapshot ${snapshot.schema}; pay a new order with A15.0E"
             }
             if (snapshot.lines.isEmpty()) issues += "no fiscal lines"
-            if (snapshot.lines.sumOf { it.lineTotalMinor } != snapshot.grossTotalMinor) {
-                issues += "charges/discounts/rounding not mapped yet"
-            }
-            if (snapshot.paymentAmountMinor != snapshot.grossTotalMinor) {
-                issues += "payment/total mismatch"
-            }
-            if (snapshot.paymentMethod.lowercase() !in setOf("cash", "card")) {
-                issues += "unsupported payment ${snapshot.paymentMethod}"
+
+            var fiscalSummary = emptyList<String>()
+            var financialSummary = emptyList<String>()
+            var paymentDisplay = snapshot.paymentMethod.uppercase()
+            if (issues.isEmpty()) {
+                val currentToken = token
+                if (currentToken == null) {
+                    issues += "Cookit API session unavailable"
+                } else {
+                    runCatchingPreservingCancellation {
+                        val shadow = api.fiscalShadowResolution(currentToken, event.orderId)
+                        shadow.validateAgainst(snapshot)
+                        shadow
+                    }.onSuccess { shadow ->
+                        fiscalSummary = buildList {
+                            shadow.lines.forEach { line ->
+                                val rate = line.rate?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: "?"
+                                add("${line.name}: ${line.fiscalClass} → ${line.taxCategoryCode ?: "?"} @ ${rate}%")
+                            }
+                            shadow.adjustments.forEach { adjustment ->
+                                val rate = adjustment.rate?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: "?"
+                                add("${adjustment.name}: ${adjustment.taxCategoryCode ?: "?"} @ ${rate}%")
+                            }
+                        }
+                        financialSummary = shadow.financials.map { financial ->
+                            "${financial.type.uppercase()} €${String.format(java.util.Locale.US, "%.2f", financial.amountMinor / 100.0)}"
+                        }
+                        paymentDisplay = shadow.financials.joinToString(" + ") { it.type.uppercase() }.ifBlank { paymentDisplay }
+                    }.onFailure { error ->
+                        issues += (error.message ?: "CookitFiscal SHADOW validation failed")
+                    }
+                }
             }
             Module2FinalizedOrderCandidate(
                 available = true,
@@ -2310,15 +2336,17 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 status = event.status,
                 lineCount = snapshot.lines.size,
                 total = snapshot.grossTotalMinor.toDouble() / 100.0,
-                paymentMethod = snapshot.paymentMethod,
+                paymentMethod = paymentDisplay,
                 cashierName = snapshot.cashierName,
                 snapshotHash = event.snapshotHash,
+                fiscalSummary = fiscalSummary,
+                financialSummary = financialSummary,
                 ready = issues.isEmpty() && !alreadySent,
                 alreadySent = alreadySent,
                 message = when {
                     alreadySent -> "already sent to Module2 TRAINING"
                     issues.isNotEmpty() -> issues.joinToString(" | ")
-                    else -> "ready • VAT resolved by CookitFiscal SHADOW on send"
+                    else -> "ready • CookitFiscal SHADOW validated (items + adjustments + financials)"
                 }
             )
         }.getOrElse { error ->

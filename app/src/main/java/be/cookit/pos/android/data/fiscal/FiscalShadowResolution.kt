@@ -9,7 +9,7 @@ import kotlin.math.abs
 /**
  * Read-only fiscal resolution returned by CookitFiscal's shadow endpoint.
  *
- * A15.0F1 deliberately treats this as authoritative for TRAINING VAT selection while the immutable
+ * A15.0F2 treats this as authoritative for TRAINING fiscal selection while the immutable
  * local sale snapshot remains authoritative for order identity, quantities, prices, payment and
  * totals. Production fiscalization will persist the resolved treatment in the fiscal transaction
  * snapshot instead of resolving it after payment.
@@ -32,6 +32,26 @@ data class FiscalShadowLineResolution(
     val reason: String?
 )
 
+data class FiscalShadowAdjustmentResolution(
+    val kind: String,
+    val name: String,
+    val grossMinor: Long,
+    val strategy: String?,
+    val resultType: String?,
+    val taxCategoryCode: String?,
+    val rate: Double?
+)
+
+data class FiscalShadowFinancialLine(
+    val id: String,
+    val name: String,
+    val type: String,
+    val inputMethod: String,
+    val amountMinor: Long,
+    val amountType: String,
+    val source: String?
+)
+
 data class FiscalShadowOrderResolution(
     val mode: String,
     val mutation: String,
@@ -49,6 +69,8 @@ data class FiscalShadowOrderResolution(
     val resolvedNetMinor: Long,
     val resolvedTaxMinor: Long,
     val lines: List<FiscalShadowLineResolution>,
+    val adjustments: List<FiscalShadowAdjustmentResolution>,
+    val financials: List<FiscalShadowFinancialLine>,
     val warnings: List<String>
 ) {
     fun validateAgainst(snapshot: FiscalSaleSnapshot): List<FiscalShadowLineResolution> {
@@ -123,6 +145,51 @@ data class FiscalShadowOrderResolution(
             remote
         }
         require(remaining.isEmpty()) { "CookitFiscal returned unmatched fiscal lines" }
+
+        adjustments.forEach { adjustment ->
+            require(adjustment.kind == "delivery_fee") {
+                "Unsupported fiscal adjustment for Module2 TRAINING: ${adjustment.kind}"
+            }
+            require(adjustment.grossMinor > 0L) { "Invalid fiscal adjustment amount for ${adjustment.name}" }
+            require(adjustment.resultType.equals("tax", ignoreCase = true)) {
+                "Module2 TRAINING currently requires TAX allocation for ${adjustment.name}"
+            }
+            require(!adjustment.taxCategoryCode.isNullOrBlank()) {
+                "CookitFiscal adjustment ${adjustment.name} has no tax category code"
+            }
+            require(adjustment.rate != null) {
+                "CookitFiscal adjustment ${adjustment.name} has no resolved tax rate"
+            }
+        }
+        val itemGrossMinor = snapshot.lines.sumOf { it.lineTotalMinor }
+        val adjustmentGrossMinor = adjustments.sumOf { it.grossMinor }
+        require(itemGrossMinor + adjustmentGrossMinor == snapshot.grossTotalMinor) {
+            "CookitFiscal fiscal lines do not represent immutable gross total (${itemGrossMinor + adjustmentGrossMinor} != ${snapshot.grossTotalMinor})"
+        }
+
+        val supportedPaymentTypes = setOf(
+            "UNKNOWN", "CASH", "CARD_DEBIT", "CARD_UNKNOWN", "CARD_CREDIT", "CARD_OTHER",
+            "CHEQUE_MEAL", "CHEQUE_OTHER", "APP", "ONLINE", "CUSTOMER_CREDIT", "ROOM_CREDIT",
+            "LOYALTY_REWARDS", "VOUCHER_STORE", "VOUCHER_SUPPLIER", "VOUCHER_OTHER", "OTHER"
+        )
+        financials.forEach { financial ->
+            require(financial.amountMinor > 0L) { "Invalid fiscal financial amount for ${financial.name}" }
+            require(financial.type.uppercase() in supportedPaymentTypes) {
+                "Unsupported Module2 financial type ${financial.type}"
+            }
+            require(financial.inputMethod.uppercase() in setOf("MANUAL", "AUTOMATIC")) {
+                "Unsupported Module2 input method ${financial.inputMethod}"
+            }
+            require(financial.amountType.equals("PAYMENT", ignoreCase = true)) {
+                "Unsupported Module2 amount type ${financial.amountType}"
+            }
+        }
+        require(financials.isNotEmpty()) { "CookitFiscal returned no financial lines" }
+        val financialTotalMinor = financials.sumOf { it.amountMinor }
+        require(financialTotalMinor == snapshot.grossTotalMinor) {
+            "CookitFiscal financial total differs from immutable gross total ($financialTotalMinor != ${snapshot.grossTotalMinor})"
+        }
+
         return aligned
     }
 }
@@ -163,6 +230,43 @@ object FiscalShadowResolutionParser {
             }
         }
 
+        val rawAdjustments = root.optJSONArray("adjustments") ?: JSONArray()
+        val adjustments = buildList {
+            for (index in 0 until rawAdjustments.length()) {
+                val adjustment = rawAdjustments.optJSONObject(index) ?: continue
+                val allocation = adjustment.optJSONObject("allocation") ?: JSONObject()
+                add(
+                    FiscalShadowAdjustmentResolution(
+                        kind = adjustment.optString("kind"),
+                        name = adjustment.optString("name").ifBlank { "Adjustment" },
+                        grossMinor = moneyToMinor(adjustment.opt("gross")),
+                        strategy = allocation.optString("strategy").takeIf { it.isNotBlank() },
+                        resultType = allocation.optString("result_type").takeIf { it.isNotBlank() },
+                        taxCategoryCode = allocation.optString("tax_category_code").takeIf { it.isNotBlank() },
+                        rate = allocation.doubleOrNull("rate")
+                    )
+                )
+            }
+        }
+
+        val rawFinancials = root.optJSONArray("financials") ?: JSONArray()
+        val financials = buildList {
+            for (index in 0 until rawFinancials.length()) {
+                val financial = rawFinancials.optJSONObject(index) ?: continue
+                add(
+                    FiscalShadowFinancialLine(
+                        id = financial.optString("id").ifBlank { "financial-$index" },
+                        name = financial.optString("name").ifBlank { "PAYMENT" },
+                        type = financial.optString("type").ifBlank { "UNKNOWN" },
+                        inputMethod = financial.optString("input_method").ifBlank { "MANUAL" },
+                        amountMinor = moneyToMinor(financial.opt("amount")),
+                        amountType = financial.optString("amount_type").ifBlank { "PAYMENT" },
+                        source = financial.optString("source").takeIf { it.isNotBlank() }
+                    )
+                )
+            }
+        }
+
         return FiscalShadowOrderResolution(
             mode = root.optString("mode").ifBlank { "unknown" },
             mutation = root.optString("mutation").ifBlank { "unknown" },
@@ -180,6 +284,8 @@ object FiscalShadowResolutionParser {
             resolvedNetMinor = moneyToMinor(totals.opt("resolved_net")),
             resolvedTaxMinor = moneyToMinor(totals.opt("resolved_tax")),
             lines = lines,
+            adjustments = adjustments,
+            financials = financials,
             warnings = root.stringList("warnings")
         )
     }

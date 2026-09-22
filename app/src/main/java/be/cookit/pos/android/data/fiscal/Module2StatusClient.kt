@@ -94,6 +94,8 @@ data class Module2TrainingSaleResult(
     val verificationUrl: String? = null,
     val bufferCapacityUsed: Double? = null,
     val vatCalc: List<String> = emptyList(),
+    val fiscalResolution: List<String> = emptyList(),
+    val financials: List<String> = emptyList(),
     val warnings: List<String> = emptyList(),
     val informations: List<String> = emptyList(),
     val footer: List<String> = emptyList(),
@@ -521,10 +523,10 @@ class Module2StatusClient(private val context: Context) {
     }
 
     /**
-     * A15.0F1 sends the immutable fiscal-outbox snapshot of a PAID Cookit order to the Module2
+     * A15.0F2 sends the immutable fiscal-outbox snapshot of a PAID Cookit order to the Module2
      * simulator with isTraining=true, but VAT treatment is supplied by CookitFiscal SHADOW.
      * The immutable local snapshot remains authoritative for identity, quantities, prices, payment
-     * and totals; the backend resolver is authoritative for country/context/class/rate. Both sides
+     * and totals; the backend resolver is authoritative for country/context/class/rate plus allocated adjustments/financials. Both sides
      * are cross-checked before any GraphQL mutation is attempted.
      */
     suspend fun trainingSaleFromFinalizedEvent(
@@ -545,15 +547,7 @@ class Module2StatusClient(private val context: Context) {
             "This paid order uses ${snapshot.schema}; create and pay a new order with A15.0E+ to obtain fiscal snapshot v2"
         }
         require(snapshot.lines.isNotEmpty()) { "Finalized Cookit order has no fiscal lines" }
-        require(snapshot.paymentAmountMinor == snapshot.grossTotalMinor) {
-            "Payment total does not match fiscal gross total"
-        }
         val resolvedLines = shadowResolution.validateAgainst(snapshot)
-        val linesTotalMinor = snapshot.lines.sumOf { it.lineTotalMinor }
-        require(linesTotalMinor == snapshot.grossTotalMinor) {
-            "Order contains charges, discounts or rounding not yet represented as fiscal lines (${linesTotalMinor} != ${snapshot.grossTotalMinor})"
-        }
-
         val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
         val ticketNo = nextTrainingTicketNo()
         val now = OffsetDateTime.now(MODULE2_BELGIUM_ZONE).withNano(0)
@@ -596,21 +590,48 @@ class Module2StatusClient(private val context: Context) {
             )
         }
 
-        val normalizedPayment = snapshot.paymentMethod.trim().lowercase()
-        val paymentType = when (normalizedPayment) {
-            "cash" -> "CASH"
-            "card" -> "CARD_UNKNOWN"
-            else -> error("Unsupported finalized Cookit payment method for Module2 TRAINING: ${snapshot.paymentMethod}")
+        shadowResolution.adjustments.forEachIndexed { index, adjustment ->
+            val rate = adjustment.rate ?: error("Missing VAT rate for ${adjustment.name}")
+            val label = normalizeVatLabel(null, rate)
+            transactionLines.put(
+                JSONObject()
+                    .put("lineType", "SINGLE_PRODUCT")
+                    .put(
+                        "mainProduct",
+                        JSONObject()
+                            .put("productId", "COOKIT-${adjustment.kind.uppercase()}-${index + 1}".take(600))
+                            .put("productName", adjustment.name.take(600))
+                            .put("departmentId", "DELIVERY")
+                            .put("departmentName", "Delivery")
+                            .put("quantity", 1)
+                            .put("quantityType", "PIECE")
+                            .put("unitPrice", minorToMoney(adjustment.grossMinor))
+                            .put(
+                                "vats",
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("label", label)
+                                        .put("price", minorToMoney(adjustment.grossMinor))
+                                )
+                            )
+                    )
+                    .put("lineTotal", minorToMoney(adjustment.grossMinor))
+            )
         }
-        val payment = JSONObject()
-            .put("id", if (paymentType == "CASH") "cash" else "card")
-            .put("name", if (paymentType == "CASH") "CASH" else "CARD")
-            .put("type", paymentType)
-            .put("inputMethod", "MANUAL")
-            .put("amount", minorToMoney(snapshot.paymentAmountMinor))
-            .put("amountType", "PAYMENT")
-        if (paymentType == "CASH") {
-            payment.put("drawer", JSONObject().put("id", "1").put("name", "Drawer 1"))
+
+        val financials = JSONArray()
+        shadowResolution.financials.forEach { financial ->
+            val financialJson = JSONObject()
+                .put("id", financial.id.take(600))
+                .put("name", financial.name.take(600))
+                .put("type", financial.type.uppercase())
+                .put("inputMethod", financial.inputMethod.uppercase())
+                .put("amount", minorToMoney(financial.amountMinor))
+                .put("amountType", financial.amountType.uppercase())
+            if (financial.type.equals("CASH", ignoreCase = true)) {
+                financialJson.put("drawer", JSONObject().put("id", "1").put("name", "Drawer 1"))
+            }
+            financials.put(financialJson)
         }
 
         val data = JSONObject()
@@ -635,9 +656,22 @@ class Module2StatusClient(private val context: Context) {
                     .put("transactionLines", transactionLines)
                     .put("transactionTotal", minorToMoney(snapshot.grossTotalMinor))
             )
-            .put("financials", JSONArray().put(payment))
+            .put("financials", financials)
 
-        executeTrainingSale(endpoint, token, ticketNo, data, "CookitModule2FinalizedOrderTrainingSale")
+        val result = executeTrainingSale(endpoint, token, ticketNo, data, "CookitModule2FinalizedOrderTrainingSale")
+        result.copy(
+            fiscalResolution = buildList {
+                resolvedLines.forEach { resolved ->
+                    add("${resolved.name}: ${resolved.fiscalClass} -> ${resolved.taxCategoryCode} @ ${resolved.rate}%")
+                }
+                shadowResolution.adjustments.forEach { adjustment ->
+                    add("${adjustment.name}: ${adjustment.taxCategoryCode} @ ${adjustment.rate}% [${adjustment.strategy.orEmpty()}]")
+                }
+            },
+            financials = shadowResolution.financials.map { financial ->
+                "${financial.type.uppercase()} ${minorToMoney(financial.amountMinor)} EUR (${financial.source.orEmpty()})"
+            }
+        )
     }
 
     private fun module2BelgiumDateTime(raw: String?, fallback: OffsetDateTime): OffsetDateTime {

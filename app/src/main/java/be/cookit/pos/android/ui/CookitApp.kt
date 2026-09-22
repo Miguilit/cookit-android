@@ -3191,10 +3191,17 @@ private fun FiscalityScreen(
                                 fontSize = 10.sp
                             )
                             Text(
-                                "VAT source: CookitFiscal SHADOW resolver (country + regime + order context + fiscal class). Validated against this immutable snapshot before signSale.",
+                                "VAT source: CookitFiscal SHADOW resolver (country + regime + order context + fiscal class). Items, adjustments and financials are validated against this immutable snapshot before signSale.",
                                 color = CookitMuted,
                                 fontSize = 10.sp
                             )
+                            finalized.fiscalSummary.takeIf { it.isNotEmpty() }?.let { rows ->
+                                Text("Fiscal resolution", fontWeight = FontWeight.SemiBold, fontSize = 10.sp, color = CookitInk)
+                                rows.forEach { row -> Text(row, color = CookitMuted, fontSize = 10.sp) }
+                            }
+                            finalized.financialSummary.takeIf { it.isNotEmpty() }?.let { rows ->
+                                Text("Financials: ${rows.joinToString(" + ")}", color = CookitMuted, fontSize = 10.sp)
+                            }
                         }
                         OutlinedButton(
                             onClick = vm::runModule2FinalizedOrderTrainingSale,
@@ -3227,6 +3234,13 @@ private fun FiscalityScreen(
                                     FiscalCompactMetric(Modifier.weight(1f), "Latency", training.latencyMs?.let { "${it} ms" } ?: "—")
                                 }
                                 Text("TRAINING signSale accepted", color = CookitGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                training.fiscalResolution.takeIf { it.isNotEmpty() }?.let { rows ->
+                                    Text("Resolved fiscal lines", color = CookitInk, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                    rows.forEach { row -> Text(row, color = CookitMuted, fontSize = 10.sp) }
+                                }
+                                training.financials.takeIf { it.isNotEmpty() }?.let {
+                                    Text("Financials: ${it.joinToString(" + ")}", color = CookitMuted, fontSize = 10.sp)
+                                }
                                 training.vatCalc.takeIf { it.isNotEmpty() }?.let {
                                     Text("VAT: ${it.joinToString(" | ")}", color = CookitMuted, fontSize = 10.sp)
                                 }
