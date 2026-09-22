@@ -515,6 +515,120 @@ class Module2StatusClient(private val context: Context) {
         executeTrainingSale(endpoint, token, ticketNo, data, "CookitModule2CookitCartTrainingSale")
     }
 
+    /**
+     * A15.0E sends the immutable fiscal-outbox snapshot of a PAID Cookit order to the Module2
+     * simulator with isTraining=true. The snapshot hash, VAT metadata, payment and totals are
+     * validated before any GraphQL mutation is attempted.
+     */
+    suspend fun trainingSaleFromFinalizedEvent(
+        settings: FiscalFdmSettings,
+        bearerToken: String,
+        event: FiscalOutboxEntity
+    ): Module2TrainingSaleResult = withContext(Dispatchers.IO) {
+        require(settings.isModule2) { "Module2 provider is not selected" }
+        require(settings.useTls) { "Module2 requires HTTPS/mTLS" }
+        require(settings.configured) { "Module2 endpoint is not configured" }
+        require(event.activatedAtEpochMs != null) { "Cookit fiscal event is not activated by a completed payment" }
+
+        val token = bearerToken.trim().removePrefix("Bearer ").trim()
+        require(token.isNotBlank()) { "Module2 Bearer token is not configured" }
+        val snapshot = FiscalSaleSnapshotParser.parse(event)
+        require(snapshot.schema == "cookit.android.fiscal.sale.v2") {
+            "This paid order uses ${snapshot.schema}; create and pay a new order with A15.0E to obtain VAT-complete snapshot v2"
+        }
+        require(snapshot.lines.isNotEmpty()) { "Finalized Cookit order has no fiscal lines" }
+        require(snapshot.paymentAmountMinor == snapshot.grossTotalMinor) {
+            "Payment total does not match fiscal gross total"
+        }
+        val linesTotalMinor = snapshot.lines.sumOf { it.lineTotalMinor }
+        require(linesTotalMinor == snapshot.grossTotalMinor) {
+            "Order contains charges, discounts or rounding not yet represented as fiscal lines (${linesTotalMinor} != ${snapshot.grossTotalMinor})"
+        }
+
+        val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
+        val ticketNo = nextTrainingTicketNo()
+        val now = OffsetDateTime.now().withNano(0)
+        val deviceId = trainingDeviceId()
+        val bookingDate = snapshot.bookingDate.ifBlank { now.toLocalDate().toString() }
+        val bookingPeriodId = trainingBookingPeriodId(bookingDate)
+        val transactionLines = JSONArray()
+
+        snapshot.lines.forEach { line ->
+            require(line.quantity > 0) { "Invalid quantity for ${line.name}" }
+            require(line.unitPriceMinor >= 0L && line.lineTotalMinor >= 0L) { "Invalid amount for ${line.name}" }
+            val label = normalizeVatLabel(line.vatLabel, line.vatRate)
+            transactionLines.put(
+                JSONObject()
+                    .put("lineType", "SINGLE_PRODUCT")
+                    .put(
+                        "mainProduct",
+                        JSONObject()
+                            .put("productId", line.productId.take(600))
+                            .put("productName", line.name.take(600))
+                            .put("departmentId", (line.departmentId ?: "0").take(600))
+                            .put("departmentName", (line.departmentName ?: "Cookit").take(600))
+                            .put("quantity", line.quantity)
+                            .put("quantityType", "PIECE")
+                            .put("unitPrice", minorToMoney(line.unitPriceMinor))
+                            .put(
+                                "vats",
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("label", label)
+                                        .put("price", minorToMoney(line.lineTotalMinor))
+                                )
+                            )
+                    )
+                    .put("lineTotal", minorToMoney(line.lineTotalMinor))
+            )
+        }
+
+        val normalizedPayment = snapshot.paymentMethod.trim().lowercase()
+        val paymentType = when (normalizedPayment) {
+            "cash" -> "CASH"
+            "card" -> "CARD_UNKNOWN"
+            else -> error("Unsupported finalized Cookit payment method for Module2 TRAINING: ${snapshot.paymentMethod}")
+        }
+        val payment = JSONObject()
+            .put("id", if (paymentType == "CASH") "cash" else "card")
+            .put("name", if (paymentType == "CASH") "CASH" else "CARD")
+            .put("type", paymentType)
+            .put("inputMethod", "MANUAL")
+            .put("amount", minorToMoney(snapshot.paymentAmountMinor))
+            .put("amountType", "PAYMENT")
+        if (paymentType == "CASH") {
+            payment.put("drawer", JSONObject().put("id", "1").put("name", "Drawer 1"))
+        }
+
+        val data = JSONObject()
+            .put("language", "EN")
+            // Simulator-only fiscal identity. Cookit order/cashier/terminal data comes from snapshot v2.
+            .put("vatNo", "BE0000000097")
+            .put("estNo", "2000000042")
+            .put("posId", "CPOS0031234567")
+            .put("posFiscalTicketNo", ticketNo)
+            .put("posDateTime", snapshot.posDateTime.ifBlank { now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) })
+            .put("posSwVersion", BuildConfig.VERSION_NAME)
+            .put("deviceId", deviceId)
+            .put("terminalId", snapshot.terminalId.ifBlank { "COOKIT-ANDROID-TRAINING" }.take(600))
+            .put("bookingPeriodId", bookingPeriodId)
+            .put("bookingDate", bookingDate)
+            .put("ticketMedium", "PAPER")
+            // Keep the vendor's simulator employee identifier until production employee mapping is provisioned.
+            .put("employeeId", "84022899837")
+            .put(
+                "transaction",
+                JSONObject()
+                    .put("transactionLines", transactionLines)
+                    .put("transactionTotal", minorToMoney(snapshot.grossTotalMinor))
+            )
+            .put("financials", JSONArray().put(payment))
+
+        executeTrainingSale(endpoint, token, ticketNo, data, "CookitModule2FinalizedOrderTrainingSale")
+    }
+
+    private fun minorToMoney(value: Long): Double = value.toDouble() / 100.0
+
     private suspend fun executeTrainingSale(
         endpoint: String,
         token: String,

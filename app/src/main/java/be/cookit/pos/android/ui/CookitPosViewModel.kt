@@ -32,6 +32,22 @@ private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result
     Result.failure(error)
 }
 
+data class Module2FinalizedOrderCandidate(
+    val available: Boolean = false,
+    val orderId: Long? = null,
+    val localEventId: String = "",
+    val schema: String = "",
+    val status: String = "",
+    val lineCount: Int = 0,
+    val total: Double = 0.0,
+    val paymentMethod: String = "",
+    val cashierName: String? = null,
+    val snapshotHash: String = "",
+    val ready: Boolean = false,
+    val alreadySent: Boolean = false,
+    val message: String? = null
+)
+
 data class PosUiState(
     val authenticated: Boolean = false,
     val demoMode: Boolean = false,
@@ -113,6 +129,7 @@ data class PosUiState(
     val module2Status: Module2StatusResult = Module2StatusResult(),
     val module2TrainingSaleBusy: Boolean = false,
     val module2TrainingSale: Module2TrainingSaleResult = Module2TrainingSaleResult(),
+    val module2FinalizedCandidate: Module2FinalizedOrderCandidate = Module2FinalizedOrderCandidate(),
     val fdmProviderStatus: FiscalProviderStatus = FiscalProviderStatus(),
     val module2Message: String? = null,
     val mockFdmBusy: Boolean = false,
@@ -187,6 +204,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fdmConnectivityProbe = FdmConnectivityProbe()
     private val module2CredentialStore = Module2CredentialStore(application)
     private val module2StatusClient = Module2StatusClient(application)
+    private val module2TrainingReceiptStore = Module2TrainingReceiptStore(application)
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
     private val fiscalAgentRuntimeStateStore = FiscalAgentRuntimeStateStore(application)
     private val fiscalAgentDiagnosticDao = localDatabase.fiscalAgentDiagnosticDao()
@@ -645,6 +663,100 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         module2TrainingSaleBusy = false,
                         module2TrainingSale = Module2TrainingSaleResult(attempted = true, success = false, message = message),
                         module2Message = "module2_cookit_training_failed:$message"
+                    )
+                }
+            }
+        }
+    }
+
+    fun runModule2FinalizedOrderTrainingSale() {
+        val state = _ui.value
+        val settings = state.fdmSettings
+        if (!settings.isModule2 || !settings.configured) {
+            _ui.update { it.copy(module2Message = "module2_not_configured") }
+            return
+        }
+        val bearer = module2CredentialStore.loadBearerToken()
+        if (bearer.isNullOrBlank()) {
+            _ui.update { it.copy(module2TokenConfigured = false, module2Message = "module2_token_required") }
+            return
+        }
+        if (!state.fdmProviderStatus.transportConnected) {
+            _ui.update { it.copy(module2Message = "module2_finalized_training_requires_status_test") }
+            return
+        }
+        if (!state.module2FinalizedCandidate.available) {
+            _ui.update { it.copy(module2Message = "module2_finalized_training_no_paid_order") }
+            return
+        }
+        if (state.module2FinalizedCandidate.alreadySent) {
+            _ui.update { it.copy(module2Message = "module2_finalized_training_already_sent") }
+            return
+        }
+        if (!state.module2FinalizedCandidate.ready) {
+            _ui.update {
+                it.copy(module2Message = "module2_finalized_training_not_ready:${state.module2FinalizedCandidate.message.orEmpty()}")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    module2TrainingSaleBusy = true,
+                    module2TrainingSale = Module2TrainingSaleResult(),
+                    module2Message = "module2_finalized_training_running"
+                )
+            }
+            try {
+                val identity = fiscalRuntimeRepository.ensureIdentity()
+                val event = fiscalOutboxRepository.latestActivated(identity)
+                    ?: error("No activated Cookit fiscal event")
+                if (module2TrainingReceiptStore.isSent(event.localEventId, event.snapshotHash)) {
+                    refreshModule2FinalizedCandidate()
+                    _ui.update {
+                        it.copy(
+                            module2TrainingSaleBusy = false,
+                            module2Message = "module2_finalized_training_already_sent"
+                        )
+                    }
+                    return@launch
+                }
+
+                val result = module2StatusClient.trainingSaleFromFinalizedEvent(
+                    settings = settings,
+                    bearerToken = bearer,
+                    event = event
+                )
+                if (result.success) {
+                    module2TrainingReceiptStore.markSent(event, result)
+                }
+                val refreshedStatus = if (result.success) {
+                    runCatchingPreservingCancellation { module2StatusClient.status(settings, bearer) }.getOrNull()
+                } else null
+                refreshModule2FinalizedCandidate()
+                _ui.update { current ->
+                    current.copy(
+                        module2TrainingSaleBusy = false,
+                        module2TrainingSale = result,
+                        module2Status = refreshedStatus ?: current.module2Status,
+                        fdmProviderStatus = refreshedStatus?.normalized() ?: current.fdmProviderStatus,
+                        module2Message = if (result.success) {
+                            "module2_finalized_training_ok"
+                        } else {
+                            "module2_finalized_training_failed:${result.message.orEmpty()}"
+                        }
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }
+                _ui.update {
+                    it.copy(
+                        module2TrainingSaleBusy = false,
+                        module2TrainingSale = Module2TrainingSaleResult(attempted = true, success = false, message = message),
+                        module2Message = "module2_finalized_training_failed:$message"
                     )
                 }
             }
@@ -2102,14 +2214,29 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         paymentMethod: String
     ): FiscalOutboxEntity? = runCatchingPreservingCancellation {
         val remote = api.orderDraft(currentToken, orderId)
+        val state = _ui.value
+        val catalogById = state.products.associateBy { it.id }
+        val enrichedLines = remote.lines.map { line ->
+            val product = catalogById[line.menuItemId]
+            line.copy(
+                name = line.name ?: product?.name,
+                categoryId = line.categoryId ?: product?.categoryId,
+                vatRate = line.vatRate ?: product?.vatRate,
+                vatLabel = line.vatLabel ?: product?.vatLabel
+            )
+        }
+        val categoryNames = state.categories.associate { it.id to it.name }
         val identity = fiscalRuntimeRepository.ensureIdentity()
         fiscalOutboxRepository.prepareRemoteSale(
             identity = identity,
             orderId = orderId,
             orderType = remote.type,
-            lines = remote.lines,
+            lines = enrichedLines,
             amount = remote.total,
-            paymentMethod = paymentMethod
+            paymentMethod = paymentMethod,
+            cashierId = state.user.id.takeIf { it > 0L },
+            cashierName = state.user.name.takeIf { it.isNotBlank() },
+            categoryNamesById = categoryNames
         )
     }.onSuccess {
         refreshFiscalHealth()
@@ -2148,6 +2275,57 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     it.copy(fiscalLocalDbError = error.message ?: "Lecture de la fiscal outbox impossible")
                 }
             }
+        refreshModule2FinalizedCandidate()
+    }
+
+    private suspend fun refreshModule2FinalizedCandidate() {
+        val candidate = runCatchingPreservingCancellation {
+            val identity = fiscalRuntimeRepository.ensureIdentity()
+            val event = fiscalOutboxRepository.latestActivated(identity)
+                ?: return@runCatchingPreservingCancellation Module2FinalizedOrderCandidate()
+            val snapshot = FiscalSaleSnapshotParser.parse(event)
+            val alreadySent = module2TrainingReceiptStore.isSent(event.localEventId, event.snapshotHash)
+            val issues = mutableListOf<String>()
+            if (snapshot.schema != "cookit.android.fiscal.sale.v2") {
+                issues += "snapshot ${snapshot.schema}; pay a new order with A15.0E"
+            }
+            if (snapshot.lines.isEmpty()) issues += "no fiscal lines"
+            val missingVat = snapshot.lines.filter { it.vatLabel.isNullOrBlank() && it.vatRate == null }
+            if (missingVat.isNotEmpty()) {
+                issues += "VAT missing for ${missingVat.joinToString(", ") { it.name }.take(160)}"
+            }
+            if (snapshot.lines.sumOf { it.lineTotalMinor } != snapshot.grossTotalMinor) {
+                issues += "charges/discounts/rounding not mapped yet"
+            }
+            if (snapshot.paymentAmountMinor != snapshot.grossTotalMinor) {
+                issues += "payment/total mismatch"
+            }
+            if (snapshot.paymentMethod.lowercase() !in setOf("cash", "card")) {
+                issues += "unsupported payment ${snapshot.paymentMethod}"
+            }
+            Module2FinalizedOrderCandidate(
+                available = true,
+                orderId = event.orderId,
+                localEventId = event.localEventId,
+                schema = snapshot.schema,
+                status = event.status,
+                lineCount = snapshot.lines.size,
+                total = snapshot.grossTotalMinor.toDouble() / 100.0,
+                paymentMethod = snapshot.paymentMethod,
+                cashierName = snapshot.cashierName,
+                snapshotHash = event.snapshotHash,
+                ready = issues.isEmpty() && !alreadySent,
+                alreadySent = alreadySent,
+                message = when {
+                    alreadySent -> "already sent to Module2 TRAINING"
+                    issues.isNotEmpty() -> issues.joinToString(" | ")
+                    else -> "ready"
+                }
+            )
+        }.getOrElse { error ->
+            Module2FinalizedOrderCandidate(message = error.message ?: "Unable to read finalized fiscal snapshot")
+        }
+        _ui.update { it.copy(module2FinalizedCandidate = candidate) }
     }
 
     private fun kickFiscalSync() {

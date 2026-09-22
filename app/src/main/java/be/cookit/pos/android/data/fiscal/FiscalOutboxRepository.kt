@@ -28,6 +28,9 @@ class FiscalOutboxRepository(
         lines: List<CartLine>,
         amount: Double,
         paymentMethod: PosPaymentMethod,
+        cashierId: Long? = null,
+        cashierName: String? = null,
+        categoryNamesById: Map<Long, String> = emptyMap(),
         nowEpochMs: Long = System.currentTimeMillis()
     ): FiscalOutboxEntity = prepare(
         identity = identity,
@@ -39,11 +42,17 @@ class FiscalOutboxRepository(
                 name = it.product.name,
                 quantity = it.quantity,
                 unitPriceMinor = moneyMinor(it.product.price),
-                lineTotalMinor = moneyMinor(it.total)
+                lineTotalMinor = moneyMinor(it.total),
+                departmentId = it.product.categoryId,
+                departmentName = categoryNamesById[it.product.categoryId],
+                vatRate = it.product.vatRate,
+                vatLabel = it.product.vatLabel
             )
         },
         amountMinor = moneyMinor(amount),
         paymentMethod = paymentMethod.apiValue,
+        cashierId = cashierId,
+        cashierName = cashierName,
         nowEpochMs = nowEpochMs
     )
 
@@ -54,6 +63,9 @@ class FiscalOutboxRepository(
         lines: List<RemoteOrderLine>,
         amount: Double,
         paymentMethod: String,
+        cashierId: Long? = null,
+        cashierName: String? = null,
+        categoryNamesById: Map<Long, String> = emptyMap(),
         nowEpochMs: Long = System.currentTimeMillis()
     ): FiscalOutboxEntity = prepare(
         identity = identity,
@@ -65,11 +77,17 @@ class FiscalOutboxRepository(
                 name = it.name ?: "Article ${it.menuItemId}",
                 quantity = it.quantity,
                 unitPriceMinor = moneyMinor(it.price),
-                lineTotalMinor = moneyMinor(it.price * it.quantity)
+                lineTotalMinor = moneyMinor(it.price * it.quantity),
+                departmentId = it.categoryId,
+                departmentName = it.categoryId?.let(categoryNamesById::get),
+                vatRate = it.vatRate,
+                vatLabel = it.vatLabel
             )
         },
         amountMinor = moneyMinor(amount),
         paymentMethod = paymentMethod,
+        cashierId = cashierId,
+        cashierName = cashierName,
         nowEpochMs = nowEpochMs
     )
 
@@ -79,6 +97,8 @@ class FiscalOutboxRepository(
         orderType: OrderType,
         amount: Double,
         paymentMethod: String,
+        cashierId: Long? = null,
+        cashierName: String? = null,
         nowEpochMs: Long = System.currentTimeMillis()
     ): FiscalOutboxEntity = prepare(
         identity = identity,
@@ -87,6 +107,8 @@ class FiscalOutboxRepository(
         lines = emptyList(),
         amountMinor = moneyMinor(amount),
         paymentMethod = paymentMethod,
+        cashierId = cashierId,
+        cashierName = cashierName,
         nowEpochMs = nowEpochMs
     )
 
@@ -110,6 +132,12 @@ class FiscalOutboxRepository(
         val restaurantId = identity.restaurantId ?: return null
         val branchId = identity.branchId ?: return null
         return dao.latestForBranch(restaurantId, branchId)
+    }
+
+    suspend fun latestActivated(identity: FiscalRuntimeIdentity): FiscalOutboxEntity? {
+        val restaurantId = identity.restaurantId ?: return null
+        val branchId = identity.branchId ?: return null
+        return dao.latestActivatedForBranch(restaurantId, branchId)
     }
 
     suspend fun prepared(identity: FiscalRuntimeIdentity, limit: Int = 20): List<FiscalOutboxEntity> {
@@ -169,6 +197,8 @@ class FiscalOutboxRepository(
         lines: List<LineSnapshot>,
         amountMinor: Long,
         paymentMethod: String,
+        cashierId: Long?,
+        cashierName: String?,
         nowEpochMs: Long
     ): FiscalOutboxEntity {
         require(orderId > 0) { "A fiscal sale requires a positive Cookit order id" }
@@ -182,7 +212,7 @@ class FiscalOutboxRepository(
         val bookingDate = Instant.ofEpochMilli(nowEpochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
         val snapshot = linkedMapOf<String, Any?>(
-            "schema" to "cookit.android.fiscal.sale.v1",
+            "schema" to "cookit.android.fiscal.sale.v2",
             "local_event_id" to localEventId,
             "runtime_id" to identity.runtimeId,
             "terminal_id" to identity.terminalId,
@@ -195,6 +225,10 @@ class FiscalOutboxRepository(
             "pos_date_time" to posDateTime,
             "booking_date" to bookingDate,
             "order_type" to orderType.name.lowercase(),
+            "cashier" to linkedMapOf(
+                "id" to cashierId,
+                "name" to cashierName
+            ),
             "payment" to linkedMapOf(
                 "method" to paymentMethod,
                 "amount_minor" to amountMinor,
@@ -204,9 +238,13 @@ class FiscalOutboxRepository(
                 linkedMapOf<String, Any?>(
                     "product_id" to line.productId,
                     "name" to line.name,
+                    "department_id" to line.departmentId,
+                    "department_name" to line.departmentName,
                     "quantity" to line.quantity,
                     "unit_price_minor" to line.unitPriceMinor,
-                    "line_total_minor" to line.lineTotalMinor
+                    "line_total_minor" to line.lineTotalMinor,
+                    "vat_rate" to line.vatRate,
+                    "vat_label" to line.vatLabel
                 )
             },
             "totals" to linkedMapOf(
@@ -257,6 +295,10 @@ class FiscalOutboxRepository(
         val name: String,
         val quantity: Int,
         val unitPriceMinor: Long,
-        val lineTotalMinor: Long
+        val lineTotalMinor: Long,
+        val departmentId: Long?,
+        val departmentName: String?,
+        val vatRate: Double?,
+        val vatLabel: String?
     )
 }

@@ -3163,6 +3163,49 @@ private fun FiscalityScreen(
                             Text(message, color = if ("_ok" in message) CookitGreen else CookitOrange, fontSize = 10.sp)
                         }
 
+                        HorizontalDivider(color = CookitLine)
+                        Text("Paid order snapshot → Module2 TRAINING", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        val finalized = state.module2FinalizedCandidate
+                        if (!finalized.available) {
+                            Text(
+                                "No paid A15.0E fiscal snapshot yet. Create a new Cookit order, pay it normally, then return here.",
+                                color = CookitMuted,
+                                fontSize = 10.sp
+                            )
+                        } else {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                FiscalCompactMetric(Modifier.weight(1f), "Order", finalized.orderId?.let { "#$it" } ?: "—")
+                                FiscalCompactMetric(Modifier.weight(1f), "Lines", finalized.lineCount.toString())
+                                FiscalCompactMetric(Modifier.weight(1f), "Total", String.format(Locale.US, "€%.2f", finalized.total))
+                                FiscalCompactMetric(Modifier.weight(1f), "Payment", finalized.paymentMethod.uppercase())
+                            }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                FiscalCompactMetric(Modifier.weight(1f), "Snapshot", finalized.schema.substringAfterLast('.').ifBlank { "—" })
+                                FiscalCompactMetric(Modifier.weight(1f), "Outbox", finalized.status.ifBlank { "—" })
+                                FiscalCompactMetric(Modifier.weight(1f), "Cashier", finalized.cashierName ?: "—")
+                                FiscalCompactMetric(Modifier.weight(1f), "Guard", if (finalized.alreadySent) "Sent" else if (finalized.ready) "Ready" else "Blocked")
+                            }
+                            Text(
+                                "Immutable snapshot ${finalized.snapshotHash.take(12)}… • ${finalized.message.orEmpty()}",
+                                color = if (finalized.ready) CookitGreen else if (finalized.alreadySent) CookitMuted else CookitOrange,
+                                fontSize = 10.sp
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = vm::runModule2FinalizedOrderTrainingSale,
+                            enabled = !state.module2TrainingSaleBusy && state.module2TokenConfigured &&
+                                state.fdmProviderStatus.transportConnected && finalized.ready && !finalized.alreadySent
+                        ) {
+                            if (state.module2TrainingSaleBusy) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(if (finalized.alreadySent) "Finalized order already sent" else "Send finalized order TRAINING")
+                        }
+                        state.module2Message?.takeIf { it.startsWith("module2_finalized_training") }?.let { message ->
+                            Text(message, color = if ("_ok" in message || "already_sent" in message) CookitGreen else CookitOrange, fontSize = 10.sp)
+                        }
+
                         val training = state.module2TrainingSale
                         if (training.attempted) {
                             if (training.success) {
