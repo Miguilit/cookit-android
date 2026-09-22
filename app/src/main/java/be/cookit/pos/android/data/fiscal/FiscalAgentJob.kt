@@ -38,6 +38,7 @@ data class FiscalAgentJob(
     val grossTotal: String,
     val snapshot: JSONObject,
     val snapshotHash: String,
+    val snapshotCanonicalJson: String,
     val attempts: Int,
     val claimExpiresAtEpochMs: Long?,
     val metadata: JSONObject?
@@ -253,10 +254,14 @@ data class FiscalAgentJob(
     }
 
     private fun validateSnapshotIntegrity(): String {
-        val canonicalSnapshot = FiscalCanonicalJson.encode(
-            snapshot.toCanonicalValue()
-        )
-        val calculatedHash = FiscalCanonicalJson.sha256Hex(canonicalSnapshot)
+        if (snapshotCanonicalJson.isBlank()) {
+            throw FiscalAgentIntegrityException(
+                "Cloud fiscal canonical snapshot missing for transaction $id"
+            )
+        }
+
+        val calculatedHash =
+            FiscalCanonicalJson.sha256Hex(snapshotCanonicalJson)
 
         if (!calculatedHash.equals(snapshotHash, ignoreCase = true)) {
             throw FiscalAgentIntegrityException(
@@ -264,36 +269,149 @@ data class FiscalAgentJob(
             )
         }
 
-        return canonicalSnapshot
+        return snapshotCanonicalJson
     }
 
     companion object {
-        fun fromJson(json: JSONObject): FiscalAgentJob = FiscalAgentJob(
-            id = json.optLong("id").takeIf { it > 0 }
-                ?: throw FiscalAgentIntegrityException("Fiscal Agent job id missing"),
-            publicId = json.optString("public_id").takeIf { it.isNotBlank() }
-                ?: throw FiscalAgentIntegrityException("Fiscal Agent job public_id missing"),
-            restaurantId = json.optLong("restaurant_id").takeIf { it > 0 }
-                ?: throw FiscalAgentIntegrityException("Fiscal Agent job restaurant_id missing"),
-            branchId = json.optLong("branch_id").takeIf { it > 0 }
-                ?: throw FiscalAgentIntegrityException("Fiscal Agent job branch_id missing"),
-            localEventId = json.optNullableString("local_event_id"),
-            idempotencyKey = json.optNullableString("idempotency_key"),
-            orderId = if (json.isNull("order_id")) null else json.optLong("order_id").takeIf { it > 0 },
-            type = json.optString("type", "sale"),
-            documentKind = json.optString("document_kind", "vat_receipt"),
-            sceEventClass = json.optNullableString("sce_event_class"),
-            sceEventType = json.optNullableString("sce_event_type"),
-            currency = json.optString("currency", "EUR"),
-            grossTotal = json.optString("gross_total", "0"),
-            snapshot = json.optJSONObject("snapshot")
-                ?: throw FiscalAgentIntegrityException("Fiscal Agent job snapshot missing"),
-            snapshotHash = json.optString("snapshot_hash").takeIf { it.length == 64 }
-                ?: throw FiscalAgentIntegrityException("Fiscal Agent job snapshot_hash missing"),
-            attempts = json.optInt("attempts", 0),
-            claimExpiresAtEpochMs = json.optNullableString("claim_expires_at")?.toEpochMsOrNull(),
-            metadata = json.optJSONObject("metadata")
-        )
+        fun fromJson(json: JSONObject): FiscalAgentJob {
+            val snapshotHash =
+                json.optString("snapshot_hash")
+                    .takeIf {
+                        it.length == 64 &&
+                            it.all { character ->
+                                character.isDigit() ||
+                                    character.lowercaseChar() in 'a'..'f'
+                            }
+                    }
+                    ?: throw FiscalAgentIntegrityException(
+                        "Fiscal Agent job snapshot_hash missing"
+                    )
+
+            val snapshotCanonicalJson =
+                json.optString("snapshot_canonical_json")
+                    .takeIf { it.isNotBlank() }
+                    ?: throw FiscalAgentIntegrityException(
+                        "Fiscal Agent job snapshot_canonical_json missing"
+                    )
+
+            val calculatedHash =
+                FiscalCanonicalJson.sha256Hex(
+                    snapshotCanonicalJson
+                )
+
+            if (!calculatedHash.equals(
+                    snapshotHash,
+                    ignoreCase = true
+                )
+            ) {
+                throw FiscalAgentIntegrityException(
+                    "Cloud fiscal snapshot SHA-256 mismatch before parsing"
+                )
+            }
+
+            /*
+             * The authoritative structured snapshot is parsed FROM the
+             * canonical bytes whose SHA-256 has just been verified.
+             *
+             * The sibling JSON object in the HTTP envelope is deliberately
+             * not authoritative for fiscal execution.
+             */
+            val verifiedSnapshot =
+                runCatching {
+                    JSONObject(snapshotCanonicalJson)
+                }.getOrElse {
+                    throw FiscalAgentIntegrityException(
+                        "Cloud fiscal canonical snapshot is invalid JSON"
+                    )
+                }
+
+            return FiscalAgentJob(
+                id = json.optLong("id").takeIf { it > 0 }
+                    ?: throw FiscalAgentIntegrityException(
+                        "Fiscal Agent job id missing"
+                    ),
+
+                publicId =
+                    json.optString("public_id")
+                        .takeIf { it.isNotBlank() }
+                        ?: throw FiscalAgentIntegrityException(
+                            "Fiscal Agent job public_id missing"
+                        ),
+
+                restaurantId =
+                    json.optLong("restaurant_id")
+                        .takeIf { it > 0 }
+                        ?: throw FiscalAgentIntegrityException(
+                            "Fiscal Agent job restaurant_id missing"
+                        ),
+
+                branchId =
+                    json.optLong("branch_id")
+                        .takeIf { it > 0 }
+                        ?: throw FiscalAgentIntegrityException(
+                            "Fiscal Agent job branch_id missing"
+                        ),
+
+                localEventId =
+                    json.optNullableString("local_event_id"),
+
+                idempotencyKey =
+                    json.optNullableString("idempotency_key"),
+
+                orderId =
+                    if (json.isNull("order_id")) {
+                        null
+                    } else {
+                        json.optLong("order_id")
+                            .takeIf { it > 0 }
+                    },
+
+                type =
+                    json.optString("type", "sale"),
+
+                documentKind =
+                    json.optString(
+                        "document_kind",
+                        "vat_receipt"
+                    ),
+
+                sceEventClass =
+                    json.optNullableString(
+                        "sce_event_class"
+                    ),
+
+                sceEventType =
+                    json.optNullableString(
+                        "sce_event_type"
+                    ),
+
+                currency =
+                    json.optString("currency", "EUR"),
+
+                grossTotal =
+                    json.optString("gross_total", "0"),
+
+                snapshot =
+                    verifiedSnapshot,
+
+                snapshotHash =
+                    snapshotHash,
+
+                snapshotCanonicalJson =
+                    snapshotCanonicalJson,
+
+                attempts =
+                    json.optInt("attempts", 0),
+
+                claimExpiresAtEpochMs =
+                    json.optNullableString(
+                        "claim_expires_at"
+                    )?.toEpochMsOrNull(),
+
+                metadata =
+                    json.optJSONObject("metadata")
+            )
+        }
     }
 }
 
