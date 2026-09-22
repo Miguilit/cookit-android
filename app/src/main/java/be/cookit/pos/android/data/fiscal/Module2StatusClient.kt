@@ -12,7 +12,9 @@ import java.security.SecureRandom
 import java.security.KeyFactory
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.cert.CertificateFactory
+import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
@@ -118,6 +120,9 @@ private data class Module2StatusQueryCandidate(
  * response so the rest of Cookit never depends on a manufacturer/schema spelling detail.
  */
 class Module2StatusClient(private val context: Context) {
+    private companion object {
+        val MODULE2_BELGIUM_ZONE: ZoneId = ZoneId.of("Europe/Brussels")
+    }
     suspend fun status(
         settings: FiscalFdmSettings,
         bearerToken: String
@@ -239,7 +244,7 @@ class Module2StatusClient(private val context: Context) {
 
         val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
         val ticketNo = nextTrainingTicketNo()
-        val now = OffsetDateTime.now().withNano(0)
+        val now = OffsetDateTime.now(MODULE2_BELGIUM_ZONE).withNano(0)
         val deviceId = trainingDeviceId()
         val bookingPeriodId = trainingBookingPeriodId(now.toLocalDate().toString())
 
@@ -445,7 +450,7 @@ class Module2StatusClient(private val context: Context) {
 
         val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
         val ticketNo = nextTrainingTicketNo()
-        val now = OffsetDateTime.now().withNano(0)
+        val now = OffsetDateTime.now(MODULE2_BELGIUM_ZONE).withNano(0)
         val deviceId = trainingDeviceId()
         val bookingPeriodId = trainingBookingPeriodId(now.toLocalDate().toString())
         val transactionLines = JSONArray()
@@ -547,9 +552,12 @@ class Module2StatusClient(private val context: Context) {
 
         val endpoint = settings.endpoint ?: error("Module2 endpoint unavailable")
         val ticketNo = nextTrainingTicketNo()
-        val now = OffsetDateTime.now().withNano(0)
+        val now = OffsetDateTime.now(MODULE2_BELGIUM_ZONE).withNano(0)
+        val module2PosDateTime = module2BelgiumDateTime(snapshot.posDateTime, now)
         val deviceId = trainingDeviceId()
-        val bookingDate = snapshot.bookingDate.ifBlank { now.toLocalDate().toString() }
+        // Module2 validates Belgian civil time: +01:00 in winter, +02:00 in summer.
+        // Keep the immutable snapshot instant, but serialize that same instant in Europe/Brussels.
+        val bookingDate = module2PosDateTime.toLocalDate().toString()
         val bookingPeriodId = trainingBookingPeriodId(bookingDate)
         val transactionLines = JSONArray()
 
@@ -607,7 +615,7 @@ class Module2StatusClient(private val context: Context) {
             .put("estNo", "2000000042")
             .put("posId", "CPOS0031234567")
             .put("posFiscalTicketNo", ticketNo)
-            .put("posDateTime", snapshot.posDateTime.ifBlank { now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) })
+            .put("posDateTime", module2PosDateTime.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
             .put("posSwVersion", BuildConfig.VERSION_NAME)
             .put("deviceId", deviceId)
             .put("terminalId", snapshot.terminalId.ifBlank { "COOKIT-ANDROID-TRAINING" }.take(600))
@@ -625,6 +633,25 @@ class Module2StatusClient(private val context: Context) {
             .put("financials", JSONArray().put(payment))
 
         executeTrainingSale(endpoint, token, ticketNo, data, "CookitModule2FinalizedOrderTrainingSale")
+    }
+
+    private fun module2BelgiumDateTime(raw: String?, fallback: OffsetDateTime): OffsetDateTime {
+        val instant = raw
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { value ->
+                runCatching {
+                    OffsetDateTime.parse(value, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant()
+                }.recoverCatching {
+                    Instant.parse(value)
+                }.getOrNull()
+            }
+            ?: fallback.toInstant()
+
+        return instant
+            .atZone(MODULE2_BELGIUM_ZONE)
+            .toOffsetDateTime()
+            .withNano(0)
     }
 
     private fun minorToMoney(value: Long): Double = value.toDouble() / 100.0
