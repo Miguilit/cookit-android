@@ -408,6 +408,58 @@ class FiscalAgentRunner(
                 )
             }
 
+            /*
+             * A15.0F8.7.2
+             *
+             * Deterministic Cookit Cloud ACK outage AFTER:
+             *
+             *   1. the real Module2 TRAINING result is durable in Room,
+             *   2. Cookit Cloud has accepted /submitted,
+             *   3. the local outcome state is durable as cloud_submitted.
+             *
+             * The retry path must therefore:
+             *   - never call Module2 again,
+             *   - never send /submitted again,
+             *   - replay only /acknowledge from the durable journal.
+             *
+             * LIVE Module2 transactions cannot activate this hook.
+             */
+            val simulateCloudAckFailureAfterSubmitted =
+                job.metadata
+                    ?.optBoolean(
+                        "simulate_cloud_ack_failure_after_submitted",
+                        false
+                    ) == true
+
+            val cloudAckFailureTestAllowed =
+                explicitTestJob
+                    && settings.isModule2
+                    && preparedSale?.training == true
+
+            if (
+                ! replayedFromJournal
+                && simulateCloudAckFailureAfterSubmitted
+                && cloudAckFailureTestAllowed
+            ) {
+                val persistedAfterSubmit =
+                    outcomeDao.byTransactionId(job.id)
+
+                if (
+                    persistedAfterSubmit?.state
+                    != FiscalAgentOutcomeEntity.STATE_CLOUD_SUBMITTED
+                ) {
+                    throw FiscalAgentIntegrityException(
+                        "A15.0F8.7.2 expected durable cloud_submitted state before ACK fault injection"
+                    )
+                }
+
+                progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_ACK)
+
+                throw IOException(
+                    "A15.0F8.7.2 simulated Cookit Cloud ACK outage after durable cloud_submitted state"
+                )
+            }
+
             val freshOutcome = outcomeDao.byTransactionId(job.id) ?: outcome
             if (freshOutcome.state != FiscalAgentOutcomeEntity.STATE_CLOUD_ACKED) {
                 progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_ACK)
