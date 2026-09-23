@@ -298,18 +298,32 @@ class FiscalAgentRunner(
 
                     receiptNumber = actualTicket.toString()
 
+                    /*
+                     * A15.0F8.8
+                     *
+                     * Module2 fields are nullable GraphQL values.
+                     * JSONObject.optString() converts JSONObject.NULL to the
+                     * literal string "null", which must never escape into a
+                     * fiscal receipt.
+                     *
+                     * shortSignature is also NOT verificationCode. The full
+                     * provider envelope remains durable in rawResponseJson
+                     * and the receipt projection below extracts its native
+                     * fields without changing the Room schema.
+                     */
                     signature =
-                        sale.optString("digitalSignature")
-                            .takeIf { it.isNotBlank() }
+                        sale.optNullableNonBlank(
+                            "digitalSignature"
+                        )
 
                     verificationCode =
-                        sale.optString("shortSignature")
-                            .takeIf { it.isNotBlank() }
+                        null
 
                     providerReference =
                         sale.optJSONObject("fdmRef")
-                            ?.optString("fdmId")
-                            ?.takeIf { it.isNotBlank() }
+                            ?.optNullableNonBlank(
+                                "fdmId"
+                            )
 
                     providerDuplicate = false
 
@@ -618,23 +632,190 @@ class FiscalAgentRunner(
         }
     }
 
-    private fun FiscalAgentOutcomeEntity.toCloudReceipt(replayedFromJournal: Boolean): JSONObject {
+    private fun FiscalAgentOutcomeEntity.toCloudReceipt(
+        replayedFromJournal: Boolean
+    ): JSONObject {
+        /*
+         * A15.0F8.8
+         *
+         * Optional Module2 receipt fields are reconstructed from the exact
+         * durable raw provider envelope. This deliberately avoids changing
+         * the Room outcome schema and keeps old durable outcomes replayable.
+         */
+        val providerEnvelope =
+            runCatching {
+                JSONObject(rawResponseJson)
+            }.getOrNull()
+
+        val sale =
+            providerEnvelope
+                ?.optJSONObject("data")
+                ?.optJSONObject("signSale")
+
+        val fdmRef =
+            sale
+                ?.optJSONObject("fdmRef")
+
+        val module2 =
+            provider ==
+                FiscalFdmSettings.PROVIDER_MODULE2
+
+        val effectiveVerificationCode =
+            if (module2) {
+                null
+            } else {
+                verificationCode
+                    ?.trim()
+                    ?.takeIf {
+                        it.isNotEmpty() &&
+                            !it.equals(
+                                "null",
+                                ignoreCase = true
+                            )
+                    }
+            }
+
+        val shortSignature =
+            if (module2) {
+                sale?.optNullableNonBlank(
+                    "shortSignature"
+                )
+            } else {
+                null
+            }
+
+        val verificationUrl =
+            if (module2) {
+                sale?.optNullableNonBlank(
+                    "verificationUrl"
+                )
+            } else {
+                null
+            }
+
+        val fdmDateTime =
+            if (module2) {
+                fdmRef?.optNullableNonBlank(
+                    "fdmDateTime"
+                )
+            } else {
+                null
+            }
+
+        /*
+         * Module2 returns eventLabel=T for the durable TRAINING outcome.
+         * The Cloud also independently enforces test_only from the immutable
+         * transaction metadata, so this client value is observability only.
+         */
+        val providerTestOnly =
+            when {
+                provider ==
+                    FiscalFdmSettings.PROVIDER_MOCK ->
+                    true
+
+                module2 ->
+                    fdmRef
+                        ?.optNullableNonBlank(
+                            "eventLabel"
+                        )
+                        ?.equals(
+                            "T",
+                            ignoreCase = true
+                        ) == true
+
+                else ->
+                    false
+            }
+
         return JSONObject()
-            .put("receipt_number", receiptNumber)
-            .put("signature", signature)
-            .put("verification_code", verificationCode)
-            .put("provider_reference", providerReference)
-            .put("raw_response", rawResponseJson)
+            .put(
+                "receipt_number",
+                receiptNumber
+            )
+            .put(
+                "signature",
+                signature
+            )
+            .put(
+                "verification_code",
+                effectiveVerificationCode
+            )
+            .put(
+                "short_signature",
+                shortSignature
+            )
+            .put(
+                "provider_reference",
+                providerReference
+            )
+            .put(
+                "verification_url",
+                verificationUrl
+            )
+            .put(
+                "fdm_datetime",
+                fdmDateTime
+            )
+            .put(
+                "raw_response",
+                rawResponseJson
+            )
             .put(
                 "response_meta",
                 JSONObject()
-                    .put("provider", provider)
-                    .put("duplicate", providerDuplicate)
-                    .put("android_agent", true)
-                    .put("test_only", provider == FiscalFdmSettings.PROVIDER_MOCK)
-                    .put("local_outcome_journal", true)
-                    .put("replayed_from_local_journal", replayedFromJournal)
+                    /*
+                     * Keep provider for backward compatibility.
+                     */
+                    .put(
+                        "provider",
+                        provider
+                    )
+                    .put(
+                        "runtime_transport_provider",
+                        provider
+                    )
+                    .put(
+                        "duplicate",
+                        providerDuplicate
+                    )
+                    .put(
+                        "android_agent",
+                        true
+                    )
+                    .put(
+                        "test_only",
+                        providerTestOnly
+                    )
+                    .put(
+                        "local_outcome_journal",
+                        true
+                    )
+                    .put(
+                        "replayed_from_local_journal",
+                        replayedFromJournal
+                    )
             )
+    }
+
+    private fun JSONObject.optNullableNonBlank(
+        name: String
+    ): String? {
+        if (
+            !has(name)
+            || isNull(name)
+        ) {
+            return null
+        }
+
+        return optString(name)
+            .trim()
+            .takeIf {
+                it.isNotEmpty()
+                    && !it.equals(
+                        "null",
+                        ignoreCase = true
+                    )
+            }
     }
 
     companion object {
