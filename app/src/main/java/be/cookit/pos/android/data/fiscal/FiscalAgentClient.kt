@@ -159,7 +159,7 @@ class FiscalAgentClient {
         .put("provider", settings.provider)
         .put("agent_version", BuildConfig.VERSION_NAME)
         .put("protocol_version", "sce2_graphql")
-        .put("capabilities", JSONArray(listOf("durable_outbox", "offline_recovery", "local_fdm_graphql", "cloud_job_runner_c3", "foreground_service_c4", "durable_provider_outcome_journal", "health_watchdog_c5_1", "retry_policy_c5_3", "cloud_prepared_signsale_v1")))
+        .put("capabilities", runtimeCapabilities())
 
     fun defaultHeartbeatPayload(
         identity: FiscalRuntimeIdentity,
@@ -169,6 +169,31 @@ class FiscalAgentClient {
         .put("provider", settings.provider)
         .put("agent_version", BuildConfig.VERSION_NAME)
         .put("protocol_version", "sce2_graphql")
+        .put("capabilities", runtimeCapabilities())
+
+    /*
+     * A15.0F9.3
+     *
+     * Capabilities are advertised on both handshake and heartbeat so an
+     * installed runtime can self-refresh its cloud binding after an upgrade.
+     *
+     * Keep canonical readiness names alongside the historical feature names.
+     */
+    private fun runtimeCapabilities(): JSONArray = JSONArray(
+        listOf(
+            "local_persistence",
+            "local_fdm_transport",
+            "durable_outbox",
+            "offline_recovery",
+            "local_fdm_graphql",
+            "cloud_job_runner_c3",
+            "foreground_service_c4",
+            "durable_provider_outcome_journal",
+            "health_watchdog_c5_1",
+            "retry_policy_c5_3",
+            "cloud_prepared_signsale_v1"
+        )
+    )
 
     private fun runtimePayload(identity: FiscalRuntimeIdentity): JSONObject = JSONObject()
         .put("runtime_id", identity.runtimeId)
