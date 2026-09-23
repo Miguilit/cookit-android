@@ -162,10 +162,26 @@ class FiscalAgentRunner(
                             false
                         ) == true
 
+                /*
+                 * A15.0F8.7.6
+                 *
+                 * A manual reconciliation adds
+                 * previous_attempts_before_manual_retry to the immutable
+                 * job metadata. Once present, the F8.7.5 process-death
+                 * injector must never fire again for this transaction.
+                 *
+                 * This makes the crash injector strictly first-attempt-only.
+                 */
+                val alreadyManuallyReconciled =
+                    job.metadata
+                        ?.has("previous_attempts_before_manual_retry")
+                        == true
+
                 val providerBarrierCrashAllowed =
                     job.metadata?.optBoolean("test_only", false) == true &&
                         settings.isModule2 &&
-                        preparedSale?.training == true
+                        preparedSale?.training == true &&
+                        !alreadyManuallyReconciled
 
                 if (
                     simulateProcessDeathAfterProviderBarrier &&
