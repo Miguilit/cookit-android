@@ -141,6 +141,47 @@ class FiscalAgentRunner(
 
                 progress(FiscalAgentRuntimeStateStore.PHASE_FDM_CALL)
 
+                /*
+                 * A15.0F8.7.4
+                 *
+                 * Deterministic watchdog/single-flight test.
+                 *
+                 * The Cloud-side provider-call ambiguity barrier has already
+                 * been persisted at this point, but signSale has NOT yet been
+                 * sent to Module2.
+                 *
+                 * Keeping this coroutine busy for > WATCHDOG_STALL_MS must
+                 * cause the watchdog to report:
+                 *
+                 *   watchdog_busy_stall_no_parallel_restart
+                 *
+                 * It must never start a second fiscal loop.
+                 *
+                 * Restricted to explicit Module2 TRAINING test jobs.
+                 */
+                val providerCallStallMs =
+                    job.metadata
+                        ?.optLong(
+                            "simulate_provider_call_stall_ms",
+                            0L
+                        )
+                        ?.coerceAtLeast(0L)
+                        ?: 0L
+
+                val providerCallStallAllowed =
+                    job.metadata?.optBoolean("test_only", false) == true &&
+                        settings.isModule2 &&
+                        preparedSale?.training == true
+
+                if (
+                    providerCallStallMs > 0L &&
+                    providerCallStallAllowed
+                ) {
+                    delay(
+                        providerCallStallMs.coerceAtMost(150_000L)
+                    )
+                }
+
                 val envelope = fdmRuntime.submitSale(
                     settings = settings,
                     event = event,
