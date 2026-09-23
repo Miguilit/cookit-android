@@ -261,10 +261,45 @@ class FiscalAgentRunner(
                 else FiscalAgentRuntimeStateStore.PHASE_PROVIDER_ACCEPTED
             )
 
-            if (!replayedFromJournal && settings.isMock && job.metadata?.optBoolean("test_only", false) == true) {
-                val requestedDelay = job.metadata.optLong("cloud_submit_delay_ms", 0L)
-                val delayMs = requestedDelay.coerceIn(0L, MAX_TEST_CLOUD_SUBMIT_DELAY_MS)
-                if (delayMs > 0L) delay(delayMs)
+            /*
+             * A15.0F8.4
+             *
+             * Deterministic crash/replay test hook.
+             *
+             * The delay is allowed only for an explicitly test-only job and
+             * either:
+             *   - the mock provider, or
+             *   - a Cloud-prepared Module2 TRAINING request.
+             *
+             * A LIVE Module2 request can therefore never activate this hook.
+             */
+            val explicitTestJob =
+                job.metadata?.optBoolean("test_only", false) == true
+
+            val deterministicDelayAllowed =
+                settings.isMock
+                    || preparedSale?.training == true
+
+            if (
+                ! replayedFromJournal
+                && explicitTestJob
+                && deterministicDelayAllowed
+            ) {
+                val requestedDelay =
+                    job.metadata?.optLong(
+                        "cloud_submit_delay_ms",
+                        0L
+                    ) ?: 0L
+
+                val delayMs =
+                    requestedDelay.coerceIn(
+                        0L,
+                        MAX_TEST_CLOUD_SUBMIT_DELAY_MS
+                    )
+
+                if (delayMs > 0L) {
+                    delay(delayMs)
+                }
             }
 
             if (outcome.state == FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED) {
