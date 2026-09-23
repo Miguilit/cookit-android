@@ -590,6 +590,33 @@ class FiscalAgentForegroundService : Service() {
                         }
 
                         FiscalRetryDisposition.MANUAL_HOLD -> {
+                            /*
+                             * A15.0F8.6
+                             *
+                             * Best-effort immediate Cloud hold. Even if this
+                             * Cloud call itself fails, the durable
+                             * provider_call_started_at barrier already blocks
+                             * backend automatic provider requeue.
+                             */
+                            if (
+                                failure.providerCallStarted
+                                && ! failure.providerOutcomePersisted
+                            ) {
+                                try {
+                                    client.providerOutcomeAmbiguous(
+                                        credentials = credentials,
+                                        transactionId = failure.jobId,
+                                        identity = identity,
+                                        error = decision.errorForCloud
+                                    )
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Throwable) {
+                                    // Local MANUAL_HOLD remains authoritative
+                                    // until Cloud reconciliation succeeds.
+                                }
+                            }
+
                             stateStore.setManualHold(
                                 jobId = failure.jobId,
                                 disposition = decision.disposition.name,

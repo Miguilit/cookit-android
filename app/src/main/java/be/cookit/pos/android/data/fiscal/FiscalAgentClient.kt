@@ -89,6 +89,35 @@ class FiscalAgentClient {
         }
     }
 
+    suspend fun providerCallStarted(
+        credentials: FiscalAgentCredentials,
+        transactionId: Long,
+        identity: FiscalRuntimeIdentity
+    ): JSONObject = request(
+        "/api/v1/fiscal/agent/jobs/$transactionId/provider-call-started",
+        credentials,
+        runtimePayload(identity)
+    )
+
+    suspend fun providerOutcomeAmbiguous(
+        credentials: FiscalAgentCredentials,
+        transactionId: Long,
+        identity: FiscalRuntimeIdentity,
+        error: String?
+    ): JSONObject {
+        val payload = runtimePayload(identity)
+
+        error
+            ?.takeIf { it.isNotBlank() }
+            ?.let { payload.put("error", it.take(2000)) }
+
+        return request(
+            "/api/v1/fiscal/agent/jobs/$transactionId/provider-outcome-ambiguous",
+            credentials,
+            payload
+        )
+    }
+
     suspend fun submitted(
         credentials: FiscalAgentCredentials,
         transactionId: Long,

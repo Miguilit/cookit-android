@@ -1,5 +1,7 @@
 package be.cookit.pos.android.data.fiscal
 
+import java.io.IOException
+
 import be.cookit.pos.android.domain.FiscalRuntimeIdentity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -90,6 +92,7 @@ class FiscalAgentRunner(
         val job = client.nextJob(credentials, identity) ?: return FiscalAgentRunResult(processed = false)
         var phase = FiscalAgentRuntimeStateStore.PHASE_CLAIMED
         var providerResponseReceived = false
+        var providerCallStarted = false
 
         fun progress(nextPhase: String) {
             phase = nextPhase
@@ -120,6 +123,21 @@ class FiscalAgentRunner(
                     null
                 }
                 val mockHeaders = mockScenario?.let { mapOf("X-Cookit-Mock-Scenario" to it) }.orEmpty()
+
+                /*
+                 * A15.0F8.6
+                 *
+                 * Persist a Cloud-side ambiguity barrier BEFORE signSale.
+                 * Once this call succeeds, no automatic provider retry is
+                 * allowed unless explicit reconciliation occurs.
+                 */
+                client.providerCallStarted(
+                    credentials = credentials,
+                    transactionId = job.id,
+                    identity = identity
+                )
+
+                providerCallStarted = true
 
                 progress(FiscalAgentRuntimeStateStore.PHASE_FDM_CALL)
 
@@ -227,6 +245,42 @@ class FiscalAgentRunner(
 
                     providerDuplicate =
                         sale.optBoolean("duplicate", false)
+                }
+
+                /*
+                 * A15.0F8.6 deterministic ambiguity test.
+                 *
+                 * The provider has returned an accepted sale, but the result
+                 * is deliberately discarded before Room persistence.
+                 *
+                 * This hook is impossible for a LIVE Module2 job.
+                 */
+                val simulateProviderOutcomeLoss =
+                    job.metadata
+                        ?.optBoolean(
+                            "simulate_provider_outcome_loss",
+                            false
+                        ) == true
+
+                val explicitTestOnlyJob =
+                    job.metadata
+                        ?.optBoolean(
+                            "test_only",
+                            false
+                        ) == true
+
+                val ambiguityTestAllowed =
+                    settings.isMock
+                        || preparedSale?.training == true
+
+                if (
+                    simulateProviderOutcomeLoss
+                    && explicitTestOnlyJob
+                    && ambiguityTestAllowed
+                ) {
+                    throw IOException(
+                        "A15.0F8.6 simulated provider outcome loss after accepted signSale before durable local journal"
+                    )
                 }
 
                 val now = System.currentTimeMillis()
@@ -349,6 +403,7 @@ class FiscalAgentRunner(
                 claimExpiresAtEpochMs = job.claimExpiresAtEpochMs,
                 providerOutcomePersisted = providerOutcomePersisted,
                 providerResponseReceived = providerResponseReceived,
+                providerCallStarted = providerCallStarted,
                 cause = error
             )
         }

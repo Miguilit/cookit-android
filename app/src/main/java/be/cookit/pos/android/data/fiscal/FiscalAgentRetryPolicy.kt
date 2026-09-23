@@ -11,6 +11,7 @@ class FiscalAgentJobExecutionException(
     val claimExpiresAtEpochMs: Long?,
     val providerOutcomePersisted: Boolean,
     val providerResponseReceived: Boolean,
+    val providerCallStarted: Boolean = false,
     cause: Throwable
 ) : Exception(cause.message, cause)
 
@@ -89,11 +90,27 @@ class FiscalAgentRetryPolicy {
         }
 
         if (error is IOException) {
+            if (failure.providerCallStarted) {
+                return ambiguousProviderHold(
+                    failureClass = FiscalFailureClass.NETWORK,
+                    reasonCode = "fdm_transport_ambiguous_hold",
+                    message = errorText
+                )
+            }
+
             return retryAmbiguousProvider(
                 failure = failure,
                 failureClass = FiscalFailureClass.NETWORK,
                 nowEpochMs = nowEpochMs,
-                reasonCode = "fdm_transport_ambiguous",
+                reasonCode = "fdm_transport_pre_call_retry",
+                message = errorText
+            )
+        }
+
+        if (failure.providerCallStarted) {
+            return ambiguousProviderHold(
+                failureClass = FiscalFailureClass.UNKNOWN,
+                reasonCode = "fdm_outcome_ambiguous_hold",
                 message = errorText
             )
         }
@@ -199,13 +216,21 @@ class FiscalAgentRetryPolicy {
         }
 
         if (status == 408 || status == 425 || status == 429 || (status != null && status in 500..599)) {
-            return retryAmbiguousProvider(
-                failure = failure,
-                failureClass = FiscalFailureClass.TRANSIENT,
-                nowEpochMs = nowEpochMs,
-                reasonCode = "fdm_transient_retry",
-                message = message
-            )
+            return if (failure.providerCallStarted) {
+                ambiguousProviderHold(
+                    failureClass = FiscalFailureClass.TRANSIENT,
+                    reasonCode = "fdm_transient_ambiguous_hold",
+                    message = message
+                )
+            } else {
+                retryAmbiguousProvider(
+                    failure = failure,
+                    failureClass = FiscalFailureClass.TRANSIENT,
+                    nowEpochMs = nowEpochMs,
+                    reasonCode = "fdm_transient_pre_call_retry",
+                    message = message
+                )
+            }
         }
 
         val explicitProviderRejection =
@@ -228,13 +253,21 @@ class FiscalAgentRetryPolicy {
                 failure.providerResponseReceived
 
         if (ambiguous) {
-            return retryAmbiguousProvider(
-                failure = failure,
-                failureClass = FiscalFailureClass.UNKNOWN,
-                nowEpochMs = nowEpochMs,
-                reasonCode = "fdm_ambiguous_retry",
-                message = message
-            )
+            return if (failure.providerCallStarted) {
+                ambiguousProviderHold(
+                    failureClass = FiscalFailureClass.UNKNOWN,
+                    reasonCode = "fdm_response_ambiguous_hold",
+                    message = message
+                )
+            } else {
+                retryAmbiguousProvider(
+                    failure = failure,
+                    failureClass = FiscalFailureClass.UNKNOWN,
+                    nowEpochMs = nowEpochMs,
+                    reasonCode = "fdm_ambiguous_pre_call_retry",
+                    message = message
+                )
+            }
         }
 
         return FiscalRetryDecision(
@@ -244,6 +277,23 @@ class FiscalAgentRetryPolicy {
             errorForCloud = message.ifBlank { "Unclassified FDM failure" }.take(MAX_ERROR_LENGTH)
         )
     }
+
+    private fun ambiguousProviderHold(
+        failureClass: FiscalFailureClass,
+        reasonCode: String,
+        message: String
+    ): FiscalRetryDecision = FiscalRetryDecision(
+        disposition = FiscalRetryDisposition.MANUAL_HOLD,
+        failureClass = failureClass,
+        reasonCode = reasonCode,
+        retryAtEpochMs = null,
+        errorForCloud =
+            message
+                .ifBlank {
+                    "Provider call started but no durable outcome exists"
+                }
+                .take(MAX_ERROR_LENGTH)
+    )
 
     private fun retryAmbiguousProvider(
         failure: FiscalAgentJobExecutionException,
