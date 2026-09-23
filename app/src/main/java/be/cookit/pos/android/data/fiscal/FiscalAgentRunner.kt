@@ -139,6 +139,51 @@ class FiscalAgentRunner(
 
                 providerCallStarted = true
 
+                /*
+                 * A15.0F8.7.5
+                 *
+                 * Deterministic process-death window:
+                 *
+                 *   Cookit Cloud provider-call barrier = durable
+                 *   Module2 signSale                  = NOT called yet
+                 *
+                 * After process restart the system must NOT automatically
+                 * call Module2 for this transaction. The Cloud barrier is
+                 * intentionally conservative because after a real crash the
+                 * restarted process cannot prove whether the provider call
+                 * was transmitted.
+                 *
+                 * Restricted to explicit Module2 TRAINING test jobs.
+                 */
+                val simulateProcessDeathAfterProviderBarrier =
+                    job.metadata
+                        ?.optBoolean(
+                            "simulate_process_death_after_provider_barrier",
+                            false
+                        ) == true
+
+                val providerBarrierCrashAllowed =
+                    job.metadata?.optBoolean("test_only", false) == true &&
+                        settings.isModule2 &&
+                        preparedSale?.training == true
+
+                if (
+                    simulateProcessDeathAfterProviderBarrier &&
+                    providerBarrierCrashAllowed
+                ) {
+                    /*
+                     * Deliberately no PHASE_FDM_CALL before termination:
+                     * signSale has not been invoked.
+                     *
+                     * killProcess + exitProcess makes this a genuine
+                     * process-death test rather than an exception/retry test.
+                     */
+                    android.os.Process.killProcess(
+                        android.os.Process.myPid()
+                    )
+                    kotlin.system.exitProcess(0)
+                }
+
                 progress(FiscalAgentRuntimeStateStore.PHASE_FDM_CALL)
 
                 /*
