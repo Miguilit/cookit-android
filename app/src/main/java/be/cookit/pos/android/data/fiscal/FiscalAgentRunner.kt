@@ -356,6 +356,48 @@ class FiscalAgentRunner(
                 }
             }
 
+            /*
+             * A15.0F8.7.1
+             *
+             * Deterministic Cookit Cloud outage AFTER the provider outcome
+             * has been durably persisted in Room.
+             *
+             * This hook is intentionally restricted to:
+             *   - an explicitly test-only job,
+             *   - Module2,
+             *   - a Cloud-prepared TRAINING request.
+             *
+             * It therefore cannot execute for a LIVE Module2 transaction.
+             *
+             * On failure, providerOutcomePersisted=true forces
+             * RETRY_CLOUD_SYNC. The foreground service will then execute
+             * flushPendingOutcome() before processNext(), replaying the
+             * durable local result without calling Module2 again.
+             */
+            val simulateCloudSubmitFailureAfterOutcome =
+                job.metadata
+                    ?.optBoolean(
+                        "simulate_cloud_submit_failure_after_outcome",
+                        false
+                    ) == true
+
+            val cloudFailureTestAllowed =
+                explicitTestJob
+                    && settings.isModule2
+                    && preparedSale?.training == true
+
+            if (
+                ! replayedFromJournal
+                && simulateCloudSubmitFailureAfterOutcome
+                && cloudFailureTestAllowed
+            ) {
+                progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_SUBMIT)
+
+                throw IOException(
+                    "A15.0F8.7.1 simulated Cookit Cloud outage after durable local provider outcome"
+                )
+            }
+
             if (outcome.state == FiscalAgentOutcomeEntity.STATE_PROVIDER_ACCEPTED) {
                 progress(FiscalAgentRuntimeStateStore.PHASE_CLOUD_SUBMIT)
                 client.submitted(credentials, job.id, identity)
