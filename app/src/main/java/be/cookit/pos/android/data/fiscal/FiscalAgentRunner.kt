@@ -174,8 +174,7 @@ class FiscalAgentRunner(
                  */
                 val alreadyManuallyReconciled =
                     job.metadata
-                        ?.has("previous_attempts_before_manual_retry")
-                        == true
+                        ?.has("previous_attempts_before_manual_retry") == true
 
                 val providerBarrierCrashAllowed =
                     job.metadata?.optBoolean("test_only", false) == true &&
