@@ -955,58 +955,593 @@ class CookitHttpClient {
         )
     }
 
-    suspend fun cashRegisters(token: String): List<CashRegister> = withContext(Dispatchers.IO) {
-        val json = request("pos/cash-register/registers", token = token)
-        val array = findArrayDeep(json, setOf("registers", "data")) ?: JSONArray()
+    suspend fun cashRegisters(
+        token: String
+    ): List<CashRegister> = withContext(Dispatchers.IO) {
+        val json =
+            request(
+                "pos/cash-register/registers",
+                token = token
+            )
+
+        val array =
+            findArrayDeep(
+                json,
+                setOf("registers", "data")
+            ) ?: JSONArray()
+
         buildList {
             for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i) ?: continue
-                val id = obj.longAny("id", "cash_register_id", "register_id") ?: continue
-                add(CashRegister(id, obj.optText("name", "register_name", "title") ?: "Caisse $id"))
+                val obj =
+                    array.optJSONObject(i)
+                        ?: continue
+
+                val id =
+                    obj.longAny(
+                        "id",
+                        "cash_register_id",
+                        "register_id"
+                    ) ?: continue
+
+                add(
+                    CashRegister(
+                        id = id,
+                        name =
+                            obj.optText(
+                                "name",
+                                "register_name",
+                                "title"
+                            )
+                                ?: "Caisse $id",
+                        isActive =
+                            obj.boolAny(
+                                "is_active",
+                                "active"
+                            ) ?: true
+                    )
+                )
             }
         }
     }
 
-    suspend fun cashDenominations(token: String): List<CashDenomination> = withContext(Dispatchers.IO) {
-        val json = request("pos/cash-register/denominations", token = token)
-        val array = findArrayDeep(json, setOf("denominations", "data")) ?: JSONArray()
+    suspend fun cashDenominations(
+        token: String
+    ): List<CashDenomination> = withContext(Dispatchers.IO) {
+        val json =
+            request(
+                "pos/cash-register/denominations",
+                token = token
+            )
+
+        val array =
+            findArrayDeep(
+                json,
+                setOf("denominations", "data")
+            ) ?: JSONArray()
+
         buildList {
             for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i) ?: continue
-                val value = obj.doubleAny("value", "amount", "denomination") ?: continue
-                val label = obj.optText("label", "name") ?: String.format(Locale.FRANCE, "%.2f €", value)
-                add(CashDenomination(label, value))
+                val obj =
+                    array.optJSONObject(i)
+                        ?: continue
+
+                val value =
+                    obj.doubleAny(
+                        "value",
+                        "amount",
+                        "denomination"
+                    ) ?: continue
+
+                val label =
+                    obj.optText(
+                        "label",
+                        "name"
+                    )
+                        ?: String.format(
+                            Locale.FRANCE,
+                            "%.2f €",
+                            value
+                        )
+
+                add(
+                    CashDenomination(
+                        label = label,
+                        value = value,
+                        id =
+                            obj.longAny(
+                                "id",
+                                "denomination_id"
+                            ),
+                        uuid =
+                            obj.optText(
+                                "uuid"
+                            ),
+                        type =
+                            obj.optText(
+                                "type"
+                            )
+                    )
+                )
             }
-        }.sortedBy { it.value }
+        }.sortedBy {
+            it.value
+        }
     }
 
-    suspend fun activeCashSession(token: String): CashSession? = withContext(Dispatchers.IO) {
-        val json = try {
-            request("pos/cash-register/sessions/active", token = token)
-        } catch (e: CookitApiException) {
-            if (e.statusCode == 404) return@withContext null else throw e
-        }
-        val obj = findObjectDeep(json, setOf("session", "data")) ?: json
-        val id = obj.longAny("id", "session_id") ?: return@withContext null
-        CashSession(
-            id = id,
-            registerId = obj.longAny("cash_register_id", "register_id"),
-            status = obj.optText("status") ?: "active",
-            openingAmount = obj.doubleAny("opening_amount", "opening_balance", "opening_cash"),
-            expectedAmount = obj.doubleAny("expected_amount", "expected_balance", "expected_cash")
+    suspend fun activeCashSession(
+        token: String
+    ): CashSession? = withContext(Dispatchers.IO) {
+        val json =
+            try {
+                request(
+                    "pos/cash-register/sessions/active",
+                    token = token
+                )
+            } catch (e: CookitApiException) {
+                if (e.statusCode == 404) {
+                    return@withContext null
+                }
+
+                throw e
+            }
+
+        val obj =
+            findObjectDeep(
+                json,
+                setOf("session", "data")
+            ) ?: json
+
+        parseCashSession(obj)
+    }
+
+    suspend fun cashSession(
+        token: String,
+        sessionId: Long
+    ): CashSession = withContext(Dispatchers.IO) {
+        val json =
+            request(
+                "pos/cash-register/sessions/$sessionId",
+                token = token
+            )
+
+        val obj =
+            findObjectDeep(
+                json,
+                setOf("session", "data")
+            ) ?: json
+
+        parseCashSession(obj)
+            ?: throw CookitApiException(
+                200,
+                "Cash session payload is incomplete."
+            )
+    }
+
+    suspend fun openCashSession(
+        token: String,
+        registerId: Long,
+        openingAmount: Double
+    ): CashSession = withContext(Dispatchers.IO) {
+        val body =
+            JSONObject()
+                .put(
+                    "cash_register_id",
+                    registerId
+                )
+                .put(
+                    "opening_float",
+                    openingAmount
+                )
+                .put(
+                    "opening_amount",
+                    openingAmount
+                )
+                .put(
+                    "opening_balance",
+                    openingAmount
+                )
+
+        val json =
+            request(
+                "pos/cash-register/sessions/open",
+                method = "POST",
+                token = token,
+                body = body
+            )
+
+        val obj =
+            findObjectDeep(
+                json,
+                setOf("session", "data")
+            ) ?: json
+
+        parseCashSession(obj)
+            ?: throw CookitApiException(
+                200,
+                "Session opened but response is incomplete."
+            )
+    }
+
+    suspend fun cashSessionSummary(
+        token: String,
+        sessionId: Long
+    ): CashRegisterSummary = withContext(Dispatchers.IO) {
+        val json =
+            request(
+                "pos/cash-register/sessions/$sessionId/summary",
+                token = token
+            )
+
+        val data =
+            json.optJSONObject("data")
+                ?: json
+
+        val totals =
+            data.optJSONObject("totals")
+                ?: JSONObject()
+
+        CashRegisterSummary(
+            totals =
+                CashRegisterTotals(
+                    openingFloat =
+                        totals.doubleAny(
+                            "opening_float",
+                            "opening_amount"
+                        ) ?: 0.0,
+                    cashSales =
+                        totals.doubleAny(
+                            "cash_sales"
+                        ) ?: 0.0,
+                    cashIn =
+                        totals.doubleAny(
+                            "cash_in"
+                        ) ?: 0.0,
+                    cashOut =
+                        totals.doubleAny(
+                            "cash_out"
+                        ) ?: 0.0,
+                    safeDrops =
+                        totals.doubleAny(
+                            "safe_drops",
+                            "safe_drop"
+                        ) ?: 0.0,
+                    refunds =
+                        totals.doubleAny(
+                            "refunds"
+                        ) ?: 0.0,
+                    runningTotal =
+                        totals.doubleAny(
+                            "running_total"
+                        ) ?: 0.0
+                ),
+            expectedCash =
+                data.doubleAny(
+                    "expected_cash",
+                    "expected_amount"
+                ) ?: 0.0,
+            countedCash =
+                data.doubleAny(
+                    "counted_cash"
+                ) ?: 0.0,
+            physicalCashCounted =
+                data.doubleAny(
+                    "physical_cash_counted"
+                ),
+            discrepancy =
+                data.doubleAny(
+                    "discrepancy"
+                ) ?: 0.0,
+            transactionsCount =
+                data.longAny(
+                    "transactions_count"
+                )?.toInt() ?: 0
         )
     }
 
-    suspend fun openCashSession(token: String, registerId: Long, openingAmount: Double): CashSession = withContext(Dispatchers.IO) {
-        val body = JSONObject()
-            .put("cash_register_id", registerId)
-            .put("register_id", registerId)
-            .put("opening_amount", openingAmount)
-            .put("opening_balance", openingAmount)
-        val json = request("pos/cash-register/sessions/open", method = "POST", token = token, body = body)
-        val obj = findObjectDeep(json, setOf("session", "data")) ?: json
-        val id = obj.longAny("id", "session_id") ?: throw CookitApiException(200, "Session ouverte mais identifiant introuvable.")
-        CashSession(id, obj.longAny("cash_register_id", "register_id") ?: registerId, obj.optText("status") ?: "active", openingAmount)
+    suspend fun cashTransactions(
+        token: String,
+        sessionId: Long
+    ): List<CashMovement> = withContext(Dispatchers.IO) {
+        val json =
+            request(
+                "pos/cash-register/sessions/$sessionId/transactions",
+                token = token
+            )
+
+        val array =
+            findArrayDeep(
+                json,
+                setOf("transactions", "data")
+            ) ?: JSONArray()
+
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj =
+                    array.optJSONObject(i)
+                        ?: continue
+
+                parseCashMovement(obj)
+                    ?.let {
+                        add(it)
+                    }
+            }
+        }
+    }
+
+    suspend fun cashIn(
+        token: String,
+        amount: Double,
+        reason: String?,
+        reference: String? = null
+    ): CashMovement =
+        recordCashMovement(
+            token = token,
+            endpoint = "cash-in",
+            amount = amount,
+            reason = reason,
+            reference = reference
+        )
+
+    suspend fun cashOut(
+        token: String,
+        amount: Double,
+        reason: String?,
+        reference: String? = null
+    ): CashMovement =
+        recordCashMovement(
+            token = token,
+            endpoint = "cash-out",
+            amount = amount,
+            reason = reason,
+            reference = reference
+        )
+
+    suspend fun safeDrop(
+        token: String,
+        amount: Double,
+        reason: String?,
+        reference: String? = null
+    ): CashMovement =
+        recordCashMovement(
+            token = token,
+            endpoint = "safe-drop",
+            amount = amount,
+            reason = reason,
+            reference = reference
+        )
+
+    private suspend fun recordCashMovement(
+        token: String,
+        endpoint: String,
+        amount: Double,
+        reason: String?,
+        reference: String?
+    ): CashMovement = withContext(Dispatchers.IO) {
+        val body =
+            JSONObject()
+                .put(
+                    "amount",
+                    amount
+                )
+
+        if (! reason.isNullOrBlank()) {
+            body.put(
+                "reason",
+                reason.trim()
+            )
+        }
+
+        if (! reference.isNullOrBlank()) {
+            body.put(
+                "reference",
+                reference.trim()
+            )
+        }
+
+        val json =
+            request(
+                "pos/cash-register/transactions/$endpoint",
+                method = "POST",
+                token = token,
+                body = body
+            )
+
+        val obj =
+            findObjectDeep(
+                json,
+                setOf("transaction", "data")
+            ) ?: json
+
+        parseCashMovement(obj)
+            ?: throw CookitApiException(
+                200,
+                "Cash movement response is incomplete."
+            )
+    }
+
+    suspend fun closeCashSession(
+        token: String,
+        sessionId: Long,
+        denominationCounts: Map<Long, Int>,
+        closingNote: String?
+    ): CashSession = withContext(Dispatchers.IO) {
+        val counts =
+            JSONArray()
+
+        denominationCounts
+            .toSortedMap()
+            .forEach {
+                (denominationId, count) ->
+
+                counts.put(
+                    JSONObject()
+                        .put(
+                            "denomination_id",
+                            denominationId
+                        )
+                        .put(
+                            "count",
+                            count.coerceAtLeast(0)
+                        )
+                )
+            }
+
+        val body =
+            JSONObject()
+                .put(
+                    "denomination_counts",
+                    counts
+                )
+
+        if (! closingNote.isNullOrBlank()) {
+            body.put(
+                "closing_note",
+                closingNote.trim()
+            )
+        }
+
+        val json =
+            request(
+                "pos/cash-register/sessions/$sessionId/close",
+                method = "POST",
+                token = token,
+                body = body
+            )
+
+        val obj =
+            findObjectDeep(
+                json,
+                setOf("session", "data")
+            ) ?: json
+
+        parseCashSession(obj)
+            ?: cashSession(
+                token,
+                sessionId
+            )
+    }
+
+    private fun parseCashSession(
+        obj: JSONObject
+    ): CashSession? {
+        val id =
+            obj.longAny(
+                "id",
+                "session_id"
+            ) ?: return null
+
+        val register =
+            obj.optJSONObject(
+                "cash_register"
+            )
+                ?: obj.optJSONObject(
+                    "register"
+                )
+
+        return CashSession(
+            id = id,
+            registerId =
+                obj.longAny(
+                    "cash_register_id",
+                    "register_id"
+                )
+                    ?: register?.longAny(
+                        "id"
+                    ),
+            status =
+                obj.optText(
+                    "status"
+                )
+                    ?: "open",
+            openingAmount =
+                obj.doubleAny(
+                    "opening_float",
+                    "opening_amount",
+                    "opening_balance",
+                    "opening_cash"
+                ),
+            expectedAmount =
+                obj.doubleAny(
+                    "expected_cash",
+                    "expected_amount",
+                    "expected_balance"
+                ),
+            registerName =
+                register?.optText(
+                    "name"
+                ),
+            openedAt =
+                obj.optText(
+                    "opened_at"
+                ),
+            closedAt =
+                obj.optText(
+                    "closed_at"
+                ),
+            physicalCashCounted =
+                obj.doubleAny(
+                    "physical_cash_counted"
+                ),
+            countedCash =
+                obj.doubleAny(
+                    "counted_cash"
+                ),
+            discrepancy =
+                obj.doubleAny(
+                    "discrepancy"
+                ),
+            closingAttemptId =
+                obj.optText(
+                    "closing_attempt_id"
+                ),
+            transactionsCount =
+                obj.longAny(
+                    "transactions_count"
+                )?.toInt() ?: 0
+        )
+    }
+
+    private fun parseCashMovement(
+        obj: JSONObject
+    ): CashMovement? {
+        val id =
+            obj.longAny(
+                "id",
+                "transaction_id"
+            ) ?: return null
+
+        return CashMovement(
+            id = id,
+            type =
+                obj.optText(
+                    "type"
+                )
+                    ?: "unknown",
+            amount =
+                obj.doubleAny(
+                    "amount"
+                ) ?: 0.0,
+            runningAmount =
+                obj.doubleAny(
+                    "running_amount"
+                ),
+            reason =
+                obj.optText(
+                    "reason"
+                ),
+            reference =
+                obj.optText(
+                    "reference"
+                ),
+            happenedAt =
+                obj.optText(
+                    "happened_at"
+                ),
+            createdBy =
+                obj.longAny(
+                    "created_by"
+                )
+        )
     }
 
     private fun parseServerEpochMs(raw: String?): Long? {

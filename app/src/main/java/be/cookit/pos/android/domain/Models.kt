@@ -269,12 +269,46 @@ data class DiscoveredPrinter(
 data class CashDenomination(
     val label: String,
     val value: Double,
-    val quantity: Int = 0
+    val quantity: Int = 0,
+    val id: Long? = null,
+    val uuid: String? = null,
+    val type: String? = null
 )
 
 data class CashRegister(
     val id: Long,
-    val name: String
+    val name: String,
+    val isActive: Boolean = true
+)
+
+data class CashMovement(
+    val id: Long,
+    val type: String,
+    val amount: Double,
+    val runningAmount: Double? = null,
+    val reason: String? = null,
+    val reference: String? = null,
+    val happenedAt: String? = null,
+    val createdBy: Long? = null
+)
+
+data class CashRegisterTotals(
+    val openingFloat: Double = 0.0,
+    val cashSales: Double = 0.0,
+    val cashIn: Double = 0.0,
+    val cashOut: Double = 0.0,
+    val safeDrops: Double = 0.0,
+    val refunds: Double = 0.0,
+    val runningTotal: Double = 0.0
+)
+
+data class CashRegisterSummary(
+    val totals: CashRegisterTotals = CashRegisterTotals(),
+    val expectedCash: Double = 0.0,
+    val countedCash: Double = 0.0,
+    val physicalCashCounted: Double? = null,
+    val discrepancy: Double = 0.0,
+    val transactionsCount: Int = 0
 )
 
 data class CashSession(
@@ -282,7 +316,15 @@ data class CashSession(
     val registerId: Long?,
     val status: String,
     val openingAmount: Double? = null,
-    val expectedAmount: Double? = null
+    val expectedAmount: Double? = null,
+    val registerName: String? = null,
+    val openedAt: String? = null,
+    val closedAt: String? = null,
+    val physicalCashCounted: Double? = null,
+    val countedCash: Double? = null,
+    val discrepancy: Double? = null,
+    val closingAttemptId: String? = null,
+    val transactionsCount: Int = 0
 )
 
 data class NativePolicy(

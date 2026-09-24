@@ -108,7 +108,7 @@ data class UiStrings(
 fun strings(language: AppLanguage): UiStrings = when (language) {
     AppLanguage.FR -> UiStrings(
         home="Accueil", pos="Caisse", orders="Commandes", kitchen="Cuisine", delivery="Livraison",
-        cash="Fond de caisse", settings="Réglages", fiscality="Fiscalité", online="En ligne", offline="Hors ligne",
+        cash="Caisse", settings="Réglages", fiscality="Fiscalité", online="En ligne", offline="Hors ligne",
         newOrder="Nouvelle commande", dineIn="Sur place", takeaway="À emporter", deliveryType="Livraison",
         cart="Panier", subtotal="Sous-total", vatIncluded="TVA incluse", total="Total", checkout="Encaisser",
         emptyCart="Panier vide", chooseTable="Table", cashOpening="Ouverture de caisse",
@@ -145,7 +145,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
     )
     AppLanguage.NL -> UiStrings(
         home="Start", pos="Kassa", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
-        cash="Kasgeld", settings="Instellingen", fiscality="Fiscaliteit", online="Online", offline="Offline",
+        cash="Kassa", settings="Instellingen", fiscality="Fiscaliteit", online="Online", offline="Offline",
         newOrder="Nieuwe bestelling", dineIn="Ter plaatse", takeaway="Afhalen", deliveryType="Levering",
         cart="Winkelmand", subtotal="Subtotaal", vatIncluded="Btw inbegrepen", total="Totaal", checkout="Afrekenen",
         emptyCart="Winkelmand leeg", chooseTable="Tafel", cashOpening="Kassa openen",
@@ -182,7 +182,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
     )
     AppLanguage.EN -> UiStrings(
         home="Home", pos="POS", orders="Orders", kitchen="Kitchen", delivery="Delivery",
-        cash="Cash drawer", settings="Settings", fiscality="Fiscality", online="Online", offline="Offline",
+        cash="Cash register", settings="Settings", fiscality="Fiscality", online="Online", offline="Offline",
         newOrder="New order", dineIn="Dine in", takeaway="Takeaway", deliveryType="Delivery",
         cart="Cart", subtotal="Subtotal", vatIncluded="VAT included", total="Total", checkout="Charge",
         emptyCart="Cart is empty", chooseTable="Table", cashOpening="Open cash register",
@@ -219,7 +219,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
     )
     AppLanguage.DE -> UiStrings(
         home="Start", pos="Kasse", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
-        cash="Kassenbestand", settings="Einstellungen", fiscality="Fiskalität", online="Online", offline="Offline",
+        cash="Kasse", settings="Einstellungen", fiscality="Fiskalität", online="Online", offline="Offline",
         newOrder="Neue Bestellung", dineIn="Vor Ort", takeaway="Abholung", deliveryType="Lieferung",
         cart="Warenkorb", subtotal="Zwischensumme", vatIncluded="MwSt. inkl.", total="Gesamt", checkout="Kassieren",
         emptyCart="Warenkorb leer", chooseTable="Tisch", cashOpening="Kasse öffnen",

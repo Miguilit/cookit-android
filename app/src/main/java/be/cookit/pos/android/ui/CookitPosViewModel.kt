@@ -85,6 +85,10 @@ data class PosUiState(
     val cashDenominations: List<CashDenomination> = emptyList(),
     val activeCashSession: CashSession? = null,
     val cashBusy: Boolean = false,
+    val cashSummary: CashRegisterSummary? = null,
+    val cashMovements: List<CashMovement> = emptyList(),
+    val cashActionMessage: String? = null,
+    val cashActionError: String? = null,
     val checkoutBusy: Boolean = false,
     val checkoutMessage: String? = null,
     val checkoutError: String? = null,
@@ -1797,7 +1801,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
 
-        if (state.policy.cashSessionRequired && state.activeCashSession == null) {
+        if (state.policy.cashSessionRequired &&
+            state.activeCashSession?.status?.lowercase() != "open") {
             _ui.update {
                 it.copy(
                     checkoutMessage = "cash_required",
@@ -2193,7 +2198,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
 
-        if (state.policy.cashSessionRequired && state.activeCashSession == null) {
+        if (state.policy.cashSessionRequired &&
+            state.activeCashSession?.status?.lowercase() != "open") {
             _ui.update { it.copy(billingError = "Ouvrez d'abord le fond de caisse.") }
             return
         }
@@ -2415,17 +2421,408 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
 
-    fun openCashSession(openingAmount: Double) {
-        val currentToken = token ?: return
-        val register = _ui.value.cashRegisters.firstOrNull() ?: run {
-            _ui.update { it.copy(error = "Aucune caisse configurée pour cette branche.") }
+    private data class CashRegisterSnapshot(
+        val registers: List<CashRegister>,
+        val denominations: List<CashDenomination>,
+        val session: CashSession?,
+        val summary: CashRegisterSummary?,
+        val movements: List<CashMovement>
+    )
+
+    private suspend fun loadCashRegisterSnapshot(
+        currentToken: String
+    ): CashRegisterSnapshot {
+        val registers =
+            api.cashRegisters(
+                currentToken
+            )
+
+        val denominations =
+            api.cashDenominations(
+                currentToken
+            )
+
+        val session =
+            api.activeCashSession(
+                currentToken
+            )
+
+        val summary =
+            session?.let {
+                api.cashSessionSummary(
+                    currentToken,
+                    it.id
+                )
+            }
+
+        val movements =
+            session?.let {
+                api.cashTransactions(
+                    currentToken,
+                    it.id
+                )
+            } ?: emptyList()
+
+        return CashRegisterSnapshot(
+            registers = registers,
+            denominations = denominations,
+            session = session,
+            summary = summary,
+            movements = movements
+        )
+    }
+
+    private fun applyCashRegisterSnapshot(
+        snapshot: CashRegisterSnapshot,
+        message: String? = null
+    ) {
+        _ui.update {
+            it.copy(
+                cashRegisters =
+                    snapshot.registers,
+                cashDenominations =
+                    snapshot.denominations,
+                activeCashSession =
+                    snapshot.session,
+                cashSummary =
+                    snapshot.summary,
+                cashMovements =
+                    snapshot.movements,
+                cashBusy =
+                    false,
+                cashActionMessage =
+                    message
+                        ?: it.cashActionMessage,
+                cashActionError =
+                    null,
+                online =
+                    true
+            )
+        }
+    }
+
+    fun refreshCashRegister(
+        silent: Boolean = false
+    ) {
+        val currentToken =
+            token
+                ?: return
+
+        viewModelScope.launch {
+            if (! silent) {
+                _ui.update {
+                    it.copy(
+                        cashBusy = true,
+                        cashActionError = null
+                    )
+                }
+            }
+
+            try {
+                applyCashRegisterSnapshot(
+                    loadCashRegisterSnapshot(
+                        currentToken
+                    )
+                )
+            } catch (error: Throwable) {
+                _ui.update {
+                    it.copy(
+                        cashBusy = false,
+                        cashActionError =
+                            readableError(
+                                error
+                            )
+                    )
+                }
+            }
+        }
+    }
+
+    fun openCashSession(
+        openingAmount: Double,
+        registerId: Long? = null
+    ) {
+        val currentToken =
+            token
+                ?: return
+
+        val register =
+            registerId
+                ?.let {
+                    selectedId ->
+                    _ui.value.cashRegisters
+                        .firstOrNull {
+                            it.id == selectedId
+                        }
+                }
+                ?: _ui.value.cashRegisters
+                    .firstOrNull {
+                        it.isActive
+                    }
+
+        if (register == null) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_register_missing"
+                )
+            }
+
             return
         }
+
         viewModelScope.launch {
-            _ui.update { it.copy(cashBusy = true, error = null) }
-            runCatching { api.openCashSession(currentToken, register.id, openingAmount) }
-                .onSuccess { session -> _ui.update { it.copy(cashBusy = false, activeCashSession = session) } }
-                .onFailure { e -> _ui.update { it.copy(cashBusy = false, error = readableError(e)) } }
+            _ui.update {
+                it.copy(
+                    cashBusy = true,
+                    cashActionError = null,
+                    cashActionMessage = null
+                )
+            }
+
+            try {
+                api.openCashSession(
+                    currentToken,
+                    register.id,
+                    openingAmount
+                )
+
+                applyCashRegisterSnapshot(
+                    loadCashRegisterSnapshot(
+                        currentToken
+                    ),
+                    message =
+                        "cash_session_opened"
+                )
+            } catch (error: Throwable) {
+                _ui.update {
+                    it.copy(
+                        cashBusy = false,
+                        cashActionError =
+                            readableError(
+                                error
+                            )
+                    )
+                }
+            }
+        }
+    }
+
+    fun cashIn(
+        amount: Double,
+        reason: String?
+    ) {
+        recordCashMovement(
+            type = "cash_in",
+            amount = amount,
+            reason = reason
+        )
+    }
+
+    fun cashOut(
+        amount: Double,
+        reason: String?
+    ) {
+        recordCashMovement(
+            type = "cash_out",
+            amount = amount,
+            reason = reason
+        )
+    }
+
+    fun safeDrop(
+        amount: Double,
+        reason: String?
+    ) {
+        recordCashMovement(
+            type = "safe_drop",
+            amount = amount,
+            reason = reason
+        )
+    }
+
+    private fun recordCashMovement(
+        type: String,
+        amount: Double,
+        reason: String?
+    ) {
+        val currentToken =
+            token
+                ?: return
+
+        val session =
+            _ui.value.activeCashSession
+
+        if (
+            session == null
+            || ! session.status.equals(
+                "open",
+                ignoreCase = true
+            )
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_session_not_open"
+                )
+            }
+
+            return
+        }
+
+        if (amount <= 0.0) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_amount_invalid"
+                )
+            }
+
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    cashBusy = true,
+                    cashActionError = null,
+                    cashActionMessage = null
+                )
+            }
+
+            try {
+                when (type) {
+                    "cash_in" ->
+                        api.cashIn(
+                            currentToken,
+                            amount,
+                            reason
+                        )
+
+                    "cash_out" ->
+                        api.cashOut(
+                            currentToken,
+                            amount,
+                            reason
+                        )
+
+                    "safe_drop" ->
+                        api.safeDrop(
+                            currentToken,
+                            amount,
+                            reason
+                        )
+
+                    else ->
+                        error(
+                            "Unsupported cash movement."
+                        )
+                }
+
+                applyCashRegisterSnapshot(
+                    loadCashRegisterSnapshot(
+                        currentToken
+                    ),
+                    message =
+                        "cash_movement_saved"
+                )
+            } catch (error: Throwable) {
+                _ui.update {
+                    it.copy(
+                        cashBusy = false,
+                        cashActionError =
+                            readableError(
+                                error
+                            )
+                    )
+                }
+            }
+        }
+    }
+
+    fun submitCashClosing(
+        denominationCounts: Map<Long, Int>,
+        closingNote: String?
+    ) {
+        val currentToken =
+            token
+                ?: return
+
+        val session =
+            _ui.value.activeCashSession
+
+        if (
+            session == null
+            || ! session.status.equals(
+                "open",
+                ignoreCase = true
+            )
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_session_not_open"
+                )
+            }
+
+            return
+        }
+
+        if (denominationCounts.isEmpty()) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_denominations_missing"
+                )
+            }
+
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    cashBusy = true,
+                    cashActionError = null,
+                    cashActionMessage = null
+                )
+            }
+
+            try {
+                api.closeCashSession(
+                    currentToken,
+                    session.id,
+                    denominationCounts,
+                    closingNote
+                )
+
+                applyCashRegisterSnapshot(
+                    loadCashRegisterSnapshot(
+                        currentToken
+                    ),
+                    message =
+                        "cash_closing_submitted"
+                )
+            } catch (error: Throwable) {
+                _ui.update {
+                    it.copy(
+                        cashBusy = false,
+                        cashActionError =
+                            readableError(
+                                error
+                            )
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearCashFeedback() {
+        _ui.update {
+            it.copy(
+                cashActionMessage = null,
+                cashActionError = null
+            )
         }
     }
 

@@ -2074,92 +2074,15 @@ private fun EmptyOperationalState(
 }
 
 @Composable
-private fun CashScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrings) {
-    var quantities by remember(state.cashDenominations) {
-        mutableStateOf(state.cashDenominations.associate { it.label to 0 })
-    }
-    val total = state.cashDenominations.sumOf { d -> d.value * (quantities[d.label] ?: 0) }
-
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (state.activeCashSession == null) t.cashOpening else t.activeSession,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    if (state.activeCashSession == null) t.cashOpeningHelp
-                    else "#${state.activeCashSession.id} • ${state.activeCashSession.status}",
-                    color = CookitMuted
-                )
-            }
-            Surface(shape = RoundedCornerShape(16.dp), color = CookitSoftOrange) {
-                Column(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), horizontalAlignment = Alignment.End) {
-                    Text(t.cashFund, color = CookitOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 24.sp, fontWeight = FontWeight.Black)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(210.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(state.cashDenominations) { denomination ->
-                val qty = quantities[denomination.label] ?: 0
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.dp, CookitLine)
-                ) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(denomination.label, Modifier.weight(1f), fontWeight = FontWeight.Black)
-                        IconButton(onClick = {
-                            quantities = quantities.toMutableMap().also { it[denomination.label] = (qty - 1).coerceAtLeast(0) }
-                        }) { Icon(Icons.Default.RemoveCircleOutline, null) }
-                        Text("$qty", fontWeight = FontWeight.Black)
-                        IconButton(onClick = {
-                            quantities = quantities.toMutableMap().also { it[denomination.label] = qty + 1 }
-                        }) { Icon(Icons.Default.AddCircleOutline, null, tint = CookitOrange) }
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = vm::openDrawer, modifier = Modifier.height(54.dp)) {
-                Icon(Icons.Default.PointOfSale, null)
-                Spacer(Modifier.width(8.dp))
-                Text(t.drawer)
-            }
-            if (state.activeCashSession == null) {
-                Button(
-                    onClick = { vm.openCashSession(total) },
-                    modifier = Modifier.height(54.dp),
-                    enabled = !state.cashBusy && (state.demoMode || state.cashRegisters.isNotEmpty())
-                ) {
-                    if (state.cashBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
-                    else Text(t.startService, fontWeight = FontWeight.Black)
-                }
-            }
-        }
-        state.printerMessage?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (it == "drawer_ok") "✓ ${t.drawer}" else if (it == "failed") t.printerFailed else it,
-                color = if (it == "failed") MaterialTheme.colorScheme.error else CookitGreen,
-                fontSize = 12.sp
-            )
-        }
-        if (!state.error.isNullOrBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-        }
-    }
+private fun CashScreen(
+    state: PosUiState,
+    vm: CookitPosViewModel,
+    t: UiStrings
+) {
+    PremiumCashRegisterScreen(
+        state = state,
+        vm = vm
+    )
 }
 
 @Composable
