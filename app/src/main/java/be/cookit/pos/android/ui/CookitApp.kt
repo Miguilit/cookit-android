@@ -3337,6 +3337,113 @@ private fun FiscalityScreen(
             }
         }
 
+        val posStatusLabel =
+            when (state.posMachineStatus) {
+                "active" ->
+                    fs.posAssigned
+
+                "pending" ->
+                    fs.posPendingApproval
+
+                "declined" ->
+                    fs.posDeclined
+
+                "unassigned" ->
+                    fs.posUnassigned
+
+                else ->
+                    fs.posUnavailable
+            }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(20.dp),
+            border = BorderStroke(1.dp, CookitLine)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement =
+                    Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    fs.androidPosTitle,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
+                )
+
+                Text(
+                    fs.androidPosSubtitle,
+                    color = CookitMuted,
+                    fontSize = 12.sp
+                )
+
+                FiscalStatusTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    label = fs.posAssignmentStatus,
+                    value = posStatusLabel,
+                    good =
+                        state.posMachineStatus ==
+                            "active"
+                )
+
+                state.posDeviceBindingError
+                    ?.takeIf {
+                        it.isNotBlank()
+                    }
+                    ?.let {
+                        Text(
+                            it,
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .error,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                if (
+                    state.policy.canManageSettings
+                    && !state.demoMode
+                ) {
+                    Row(
+                        horizontalArrangement =
+                            Arrangement.spacedBy(10.dp)
+                    ) {
+                        if (
+                            state.posMachineStatus ==
+                                "unassigned"
+                        ) {
+                            Button(
+                                onClick =
+                                    vm::assignCurrentPosDevice,
+                                enabled =
+                                    state.online
+                                        && !state.posDeviceBindingBusy
+                            ) {
+                                Text(
+                                    fs.assignThisPos
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick =
+                                vm::refreshPosDeviceAssignment,
+                            enabled =
+                                state.online
+                                    && !state.posDeviceBindingBusy
+                        ) {
+                            Text(
+                                fs.refreshPosAssignment
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
@@ -3345,6 +3452,7 @@ private fun FiscalityScreen(
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(fs.advanced, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 state.fiscalIdentity?.let { identity ->
+                    FiscalAdvancedRow(fs.posDeviceId, identity.deviceId)
                     FiscalAdvancedRow(fs.runtimeId, identity.runtimeId)
                     FiscalAdvancedRow(fs.terminalId, identity.terminalId)
                 }

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.core.content.FileProvider
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> = try {
     Result.success(block())
@@ -118,6 +120,11 @@ data class PosUiState(
     val billingContext: BillingContext? = null,
     val lastCashChange: Double? = null,
     val fiscalIdentity: FiscalRuntimeIdentity? = null,
+    val posMachineId: Long? = null,
+    val posMachinePublicId: String = "",
+    val posMachineStatus: String = "",
+    val posDeviceBindingBusy: Boolean = false,
+    val posDeviceBindingError: String? = null,
     val fiscalLocalDbError: String? = null,
     val fiscalOutboxHealth: FiscalOutboxHealth = FiscalOutboxHealth(),
     val fiscalSyncMessage: String? = null,
@@ -1322,6 +1329,209 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun refreshPosDeviceAssignment() {
+        val currentToken =
+            token
+                ?: return
+
+        val state =
+            _ui.value
+
+        val branchId =
+            state.user.branchId
+
+        val identity =
+            state.fiscalIdentity
+
+        if (
+            branchId == null
+            || branchId <= 0L
+            || identity == null
+            || identity.deviceId.isBlank()
+        ) {
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    posDeviceBindingBusy = true,
+                    posDeviceBindingError = null
+                )
+            }
+
+            runCatchingPreservingCancellation {
+                api.checkNativePosDevice(
+                    token = currentToken,
+                    branchId = branchId,
+                    deviceId = identity.deviceId
+                )
+            }
+                .onSuccess { checked ->
+                    val machine =
+                        checked.machine
+
+                    _ui.update {
+                        it.copy(
+                            posMachineId =
+                                machine?.id,
+                            posMachinePublicId =
+                                machine?.publicId.orEmpty(),
+                            posMachineStatus =
+                                machine
+                                    ?.status
+                                    ?.takeIf {
+                                        value ->
+                                        value.isNotBlank()
+                                    }
+                                    ?: "unassigned",
+                            posDeviceBindingBusy = false,
+                            posDeviceBindingError = null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update {
+                        it.copy(
+                            posMachineId = null,
+                            posMachinePublicId = "",
+                            posMachineStatus = "unavailable",
+                            posDeviceBindingBusy = false,
+                            posDeviceBindingError =
+                                readableError(error)
+                        )
+                    }
+                }
+        }
+    }
+
+    fun assignCurrentPosDevice() {
+        val state =
+            _ui.value
+
+        if (
+            !state.policy.canManageSettings
+            || state.demoMode
+            || !state.online
+            || state.posMachineStatus != "unassigned"
+        ) {
+            return
+        }
+
+        val currentToken =
+            token
+                ?: return
+
+        val branchId =
+            state.user.branchId
+                ?: return
+
+        val identity =
+            state.fiscalIdentity
+                ?: return
+
+        if (
+            branchId <= 0L
+            || identity.deviceId.isBlank()
+        ) {
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    posDeviceBindingBusy = true,
+                    posDeviceBindingError = null
+                )
+            }
+
+            runCatchingPreservingCancellation {
+                val checked =
+                    api.checkNativePosDevice(
+                        token = currentToken,
+                        branchId = branchId,
+                        deviceId = identity.deviceId
+                    )
+
+                checked.machine
+                    ?: api.registerNativePosDevice(
+                        token = currentToken,
+                        branchId = branchId,
+                        deviceId = identity.deviceId,
+                        runtimeId = identity.runtimeId,
+                        terminalId = identity.terminalId,
+                        alias =
+                            "Cookit Android ${Build.MODEL}"
+                                .take(255),
+                        deviceMetadata =
+                            nativePosDeviceMetadata()
+                    )
+            }
+                .onSuccess { machine ->
+                    _ui.update {
+                        it.copy(
+                            posMachineId = machine.id,
+                            posMachinePublicId = machine.publicId,
+                            posMachineStatus =
+                                machine.status.ifBlank {
+                                    "unavailable"
+                                },
+                            posDeviceBindingBusy = false,
+                            posDeviceBindingError = null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update {
+                        it.copy(
+                            posDeviceBindingBusy = false,
+                            posDeviceBindingError =
+                                readableError(error)
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun nativePosDeviceMetadata(): JSONObject =
+        JSONObject()
+            .put(
+                "manufacturer",
+                Build.MANUFACTURER
+            )
+            .put(
+                "brand",
+                Build.BRAND
+            )
+            .put(
+                "model",
+                Build.MODEL
+            )
+            .put(
+                "device",
+                Build.DEVICE
+            )
+            .put(
+                "sdk_int",
+                Build.VERSION.SDK_INT
+            )
+            .put(
+                "os_release",
+                Build.VERSION.RELEASE
+            )
+            .put(
+                "app_version",
+                BuildConfig.VERSION_NAME
+            )
+            .put(
+                "app_version_code",
+                BuildConfig.VERSION_CODE
+            )
+            .put(
+                "runtime_type",
+                "android_pos"
+            )
+
     fun refresh() {
         val currentToken = token ?: return
         val email = sessionStore.email() ?: "user@cookit.be"
@@ -2520,6 +2730,57 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 branchName = platform.user.branch
             )
         }
+
+        val posDeviceBindingResult =
+            platform.user.branchId
+                ?.takeIf {
+                    it > 0L
+                }
+                ?.let { branchId ->
+                    fiscalIdentityResult
+                        .getOrNull()
+                        ?.let { identity ->
+                            runCatchingPreservingCancellation {
+                                api.checkNativePosDevice(
+                                    token = currentToken,
+                                    branchId = branchId,
+                                    deviceId = identity.deviceId
+                                )
+                            }
+                        }
+                }
+
+        val posDeviceCheck =
+            posDeviceBindingResult
+                ?.getOrNull()
+
+        val posBinding =
+            posDeviceCheck
+                ?.machine
+
+        val posBindingError =
+            posDeviceBindingResult
+                ?.exceptionOrNull()
+
+        val posBindingStatus =
+            when {
+                posDeviceBindingResult == null ->
+                    "unavailable"
+
+                posBindingError != null ->
+                    "unavailable"
+
+                posBinding != null ->
+                    posBinding
+                        .status
+                        .ifBlank {
+                            "unavailable"
+                        }
+
+                else ->
+                    "unassigned"
+            }
+
         val catalog = api.catalog(currentToken)
         val liveOrders = api.orders(currentToken)
         val liveKots = runCatching { api.kots(currentToken) }.getOrDefault(emptyList())
@@ -2573,6 +2834,15 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 user = platform.user,
                 policy = platform.policy,
                 fiscalIdentity = fiscalIdentityResult.getOrNull() ?: it.fiscalIdentity,
+                posMachineId = posBinding?.id,
+                posMachinePublicId = posBinding?.publicId.orEmpty(),
+                posMachineStatus = posBindingStatus,
+                posDeviceBindingBusy = false,
+                posDeviceBindingError =
+                    posBindingError?.let {
+                        error ->
+                        readableError(error)
+                    },
                 fiscalLocalDbError = fiscalIdentityResult.exceptionOrNull()?.message,
                 categories = catalog.categories,
                 products = liveProducts,

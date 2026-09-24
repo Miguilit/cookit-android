@@ -328,6 +328,17 @@ data class FiscalUiStrings(
     val advanced: String,
     val runtimeId: String,
     val terminalId: String,
+    val androidPosTitle: String,
+    val androidPosSubtitle: String,
+    val posAssignmentStatus: String,
+    val posDeviceId: String,
+    val assignThisPos: String,
+    val refreshPosAssignment: String,
+    val posUnassigned: String,
+    val posPendingApproval: String,
+    val posAssigned: String,
+    val posDeclined: String,
+    val posUnavailable: String,
     val localRuntime: String,
     val profileDisabled: String,
     val testMode: String,
@@ -362,7 +373,7 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         exportFailed="Échec de l’export", historyCleared="Historique effacé", deviceResilience="Résilience de l’appareil",
         backgroundExecution="Exécution en arrière-plan", screenOffProtection="Protection écran éteint",
         rebootRecovery="Reprise après redémarrage", durableJournal="Journal FDM durable", enabled="Actif", disabled="Inactif",
-        advanced="Informations avancées", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Runtime fiscal local",
+        advanced="Informations avancées", runtimeId="Runtime ID", terminalId="Terminal ID", androidPosTitle="Caisse Android", androidPosSubtitle="Affectation de cet appareil à la caisse Cookit", posAssignmentStatus="Statut de la caisse", posDeviceId="Identifiant de l’appareil", assignThisPos="Affecter cette caisse", refreshPosAssignment="Actualiser le statut", posUnassigned="Non affectée", posPendingApproval="En attente d’approbation", posAssigned="Affectée", posDeclined="Affectation refusée", posUnavailable="Indisponible", localRuntime="Runtime fiscal local",
         profileDisabled="Profil fiscal cloud désactivé", testMode="Mode test", productionMode="Mode production", retryPolicy="Politique de reprise", retryDisposition="Décision", retryAttempt="Tentative", nextRetry="Prochaine reprise", terminalFailures="Échecs terminaux", lastTerminalJob="Dernier job terminal", manualHoldTitle="Traitement fiscal suspendu", manualHoldMessage="Une intervention administrateur est requise avant de reprendre les jobs fiscaux.", resumeProcessing="Reprendre le traitement"
     )
     AppLanguage.NL -> FiscalUiStrings(
@@ -383,7 +394,7 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         exportFailed="Export mislukt", historyCleared="Geschiedenis gewist", deviceResilience="Apparaatbestendigheid",
         backgroundExecution="Achtergronduitvoering", screenOffProtection="Bescherming bij uitgeschakeld scherm",
         rebootRecovery="Herstel na herstart", durableJournal="Duurzaam FDM-logboek", enabled="Actief", disabled="Inactief",
-        advanced="Geavanceerde informatie", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Lokale fiscale runtime",
+        advanced="Geavanceerde informatie", runtimeId="Runtime ID", terminalId="Terminal ID", androidPosTitle="Android-kassa", androidPosSubtitle="Dit apparaat aan de Cookit-kassa koppelen", posAssignmentStatus="Kassastatus", posDeviceId="Apparaat-ID", assignThisPos="Deze kassa koppelen", refreshPosAssignment="Status vernieuwen", posUnassigned="Niet gekoppeld", posPendingApproval="Wacht op goedkeuring", posAssigned="Gekoppeld", posDeclined="Koppeling geweigerd", posUnavailable="Niet beschikbaar", localRuntime="Lokale fiscale runtime",
         profileDisabled="Cloud fiscaal profiel uitgeschakeld", testMode="Testmodus", productionMode="Productiemodus", retryPolicy="Herstelbeleid", retryDisposition="Beslissing", retryAttempt="Poging", nextRetry="Volgende poging", terminalFailures="Definitieve fouten", lastTerminalJob="Laatste definitieve job", manualHoldTitle="Fiscale verwerking gepauzeerd", manualHoldMessage="Een beheerder moet ingrijpen voordat fiscale jobs worden hervat.", resumeProcessing="Verwerking hervatten"
     )
     AppLanguage.EN -> FiscalUiStrings(
@@ -404,7 +415,7 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         exportFailed="Export failed", historyCleared="History cleared", deviceResilience="Device resilience",
         backgroundExecution="Background execution", screenOffProtection="Screen-off protection",
         rebootRecovery="Reboot recovery", durableJournal="Durable FDM journal", enabled="Enabled", disabled="Disabled",
-        advanced="Advanced information", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Local fiscal runtime",
+        advanced="Advanced information", runtimeId="Runtime ID", terminalId="Terminal ID", androidPosTitle="Android POS", androidPosSubtitle="Assign this device to the Cookit POS", posAssignmentStatus="POS assignment status", posDeviceId="Device ID", assignThisPos="Assign this POS", refreshPosAssignment="Refresh status", posUnassigned="Not assigned", posPendingApproval="Awaiting approval", posAssigned="Assigned", posDeclined="Assignment declined", posUnavailable="Unavailable", localRuntime="Local fiscal runtime",
         profileDisabled="Cloud fiscal profile disabled", testMode="Test mode", productionMode="Production mode", retryPolicy="Retry policy", retryDisposition="Decision", retryAttempt="Attempt", nextRetry="Next retry", terminalFailures="Terminal failures", lastTerminalJob="Last terminal job", manualHoldTitle="Fiscal processing paused", manualHoldMessage="Administrator action is required before fiscal jobs can resume.", resumeProcessing="Resume processing"
     )
     AppLanguage.DE -> FiscalUiStrings(
@@ -425,7 +436,7 @@ fun fiscalStrings(language: AppLanguage): FiscalUiStrings = when (language) {
         exportFailed="Export fehlgeschlagen", historyCleared="Verlauf gelöscht", deviceResilience="Geräteresilienz",
         backgroundExecution="Hintergrundausführung", screenOffProtection="Schutz bei ausgeschaltetem Bildschirm",
         rebootRecovery="Wiederherstellung nach Neustart", durableJournal="Dauerhaftes FDM-Journal", enabled="Aktiv", disabled="Inaktiv",
-        advanced="Erweiterte Informationen", runtimeId="Runtime ID", terminalId="Terminal ID", localRuntime="Lokale Fiskal-Runtime",
+        advanced="Erweiterte Informationen", runtimeId="Runtime ID", terminalId="Terminal ID", androidPosTitle="Android-Kasse", androidPosSubtitle="Dieses Gerät der Cookit-Kasse zuweisen", posAssignmentStatus="Kassenzuweisung", posDeviceId="Geräte-ID", assignThisPos="Diese Kasse zuweisen", refreshPosAssignment="Status aktualisieren", posUnassigned="Nicht zugewiesen", posPendingApproval="Wartet auf Genehmigung", posAssigned="Zugewiesen", posDeclined="Zuweisung abgelehnt", posUnavailable="Nicht verfügbar", localRuntime="Lokale Fiskal-Runtime",
         profileDisabled="Cloud-Fiskalprofil deaktiviert", testMode="Testmodus", productionMode="Produktionsmodus", retryPolicy="Wiederholungsrichtlinie", retryDisposition="Entscheidung", retryAttempt="Versuch", nextRetry="Nächster Versuch", terminalFailures="Endgültige Fehler", lastTerminalJob="Letzter endgültiger Job", manualHoldTitle="Fiskalverarbeitung pausiert", manualHoldMessage="Vor der Fortsetzung fiskaler Jobs ist eine Administratoraktion erforderlich.", resumeProcessing="Verarbeitung fortsetzen"
     )
 }

@@ -5,10 +5,10 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
- * One immutable device/runtime identity per Android installation.
+ * One immutable Cookit installation identity.
  *
- * runtime_id and terminal_id are generated once and are never coupled to the logged-in user.
- * Restaurant/branch binding is mutable metadata so a logout does not destroy the fiscal identity.
+ * device_id, runtime_id and terminal_id are generated once and are never
+ * coupled to the logged-in user. Restaurant/branch binding is mutable.
  */
 @Entity(tableName = "fiscal_runtime_identity")
 data class FiscalRuntimeIdentityEntity(
@@ -19,6 +19,8 @@ data class FiscalRuntimeIdentityEntity(
     val runtimeId: String,
     @ColumnInfo(name = "terminal_id")
     val terminalId: String,
+    @ColumnInfo(name = "device_id", defaultValue = "''")
+    val deviceId: String,
     @ColumnInfo(name = "created_at_epoch_ms")
     val createdAtEpochMs: Long,
     @ColumnInfo(name = "updated_at_epoch_ms")

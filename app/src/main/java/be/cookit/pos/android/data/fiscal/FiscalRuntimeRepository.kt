@@ -10,24 +10,30 @@ class FiscalRuntimeRepository(
 ) {
     private val identityMutex = Mutex()
 
-    suspend fun ensureIdentity(): FiscalRuntimeIdentity = identityMutex.withLock {
-        dao.identity()?.toDomain()?.let { return@withLock it }
+    suspend fun ensureIdentity(): FiscalRuntimeIdentity =
+        identityMutex.withLock {
+            val existing = dao.identity()
 
-        val now = System.currentTimeMillis()
-        val candidate = FiscalRuntimeIdentityEntity(
-            runtimeId = permanentId("andrt"),
-            terminalId = permanentId("term"),
-            createdAtEpochMs = now,
-            updatedAtEpochMs = now
-        )
+            if (existing != null) {
+                return@withLock ensureDeviceId(existing).toDomain()
+            }
 
-        // The singleton PK makes first-run creation race-safe. If another coroutine/process
-        // wins the insert, read back the canonical row instead of regenerating identifiers.
-        dao.insertIdentity(candidate)
-        val persisted = dao.identity()
-            ?: error("Unable to persist Cookit fiscal runtime identity")
-        persisted.toDomain()
-    }
+            val now = System.currentTimeMillis()
+            val candidate = FiscalRuntimeIdentityEntity(
+                runtimeId = permanentId("andrt"),
+                terminalId = permanentId("term"),
+                deviceId = permanentId("adev"),
+                createdAtEpochMs = now,
+                updatedAtEpochMs = now
+            )
+
+            dao.insertIdentity(candidate)
+
+            val persisted = dao.identity()
+                ?: error("Unable to persist Cookit fiscal runtime identity")
+
+            ensureDeviceId(persisted).toDomain()
+        }
 
     suspend fun bindScope(
         restaurantId: Long?,
@@ -36,29 +42,66 @@ class FiscalRuntimeRepository(
         branchName: String?
     ): FiscalRuntimeIdentity {
         ensureIdentity()
+
         dao.bindScope(
             restaurantId = restaurantId,
             branchId = branchId,
-            restaurantName = restaurantName?.takeIf { it.isNotBlank() },
-            branchName = branchName?.takeIf { it.isNotBlank() },
+            restaurantName =
+                restaurantName?.takeIf { it.isNotBlank() },
+            branchName =
+                branchName?.takeIf { it.isNotBlank() },
             updatedAtEpochMs = System.currentTimeMillis()
         )
-        return dao.identity()?.toDomain()
-            ?: error("Cookit fiscal runtime identity disappeared after scope binding")
+
+        return identityMutex.withLock {
+            val persisted = dao.identity()
+                ?: error(
+                    "Cookit fiscal runtime identity disappeared after scope binding"
+                )
+
+            ensureDeviceId(persisted).toDomain()
+        }
     }
 
-    suspend fun currentIdentity(): FiscalRuntimeIdentity? = dao.identity()?.toDomain()
+    suspend fun currentIdentity(): FiscalRuntimeIdentity? =
+        identityMutex.withLock {
+            val persisted =
+                dao.identity()
+                    ?: return@withLock null
+
+            ensureDeviceId(persisted).toDomain()
+        }
+
+    private suspend fun ensureDeviceId(
+        identity: FiscalRuntimeIdentityEntity
+    ): FiscalRuntimeIdentityEntity {
+        if (identity.deviceId.isNotBlank()) {
+            return identity
+        }
+
+        dao.bindDeviceIdIfMissing(
+            deviceId = permanentId("adev"),
+            updatedAtEpochMs = System.currentTimeMillis()
+        )
+
+        return dao.identity()
+            ?: error(
+                "Cookit fiscal runtime identity disappeared during device enrollment"
+            )
+    }
 
     private fun permanentId(prefix: String): String =
         "${prefix}_${UUID.randomUUID().toString().replace("-", "").lowercase()}"
 
-    private fun FiscalRuntimeIdentityEntity.toDomain() = FiscalRuntimeIdentity(
-        runtimeId = runtimeId,
-        terminalId = terminalId,
-        createdAtEpochMs = createdAtEpochMs,
-        restaurantId = boundRestaurantId,
-        branchId = boundBranchId,
-        restaurantName = boundRestaurantName,
-        branchName = boundBranchName
-    )
+    private fun FiscalRuntimeIdentityEntity.toDomain() =
+        FiscalRuntimeIdentity(
+            runtimeId = runtimeId,
+            terminalId = terminalId,
+            deviceId = deviceId,
+            createdAtEpochMs = createdAtEpochMs,
+            restaurantId = boundRestaurantId,
+            branchId = boundBranchId,
+            restaurantName = boundRestaurantName,
+            branchName = boundBranchName
+        )
 }

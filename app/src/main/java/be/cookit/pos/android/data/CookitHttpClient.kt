@@ -12,6 +12,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.LocalDateTime
@@ -35,6 +36,23 @@ data class CatalogSnapshot(
 data class PlatformSnapshot(
     val user: UserSession,
     val policy: NativePolicy
+)
+
+
+data class NativePosMachineBinding(
+    val id: Long,
+    val branchId: Long,
+    val publicId: String,
+    val status: String,
+    val deviceId: String,
+    val platform: String?,
+    val runtimeId: String?,
+    val terminalId: String?
+)
+
+data class NativePosDeviceCheck(
+    val needsRegistration: Boolean,
+    val machine: NativePosMachineBinding?
 )
 
 class CookitHttpClient {
@@ -103,6 +121,147 @@ class CookitHttpClient {
                 branchId = branchId
             ),
             policy = defaultPolicy(role)
+        )
+    }
+
+    suspend fun checkNativePosDevice(
+        token: String,
+        branchId: Long,
+        deviceId: String
+    ): NativePosDeviceCheck = withContext(Dispatchers.IO) {
+        val encodedDeviceId =
+            URLEncoder.encode(
+                deviceId,
+                StandardCharsets.UTF_8.name()
+            )
+
+        val json = request(
+            "pos/multi-pos/check" +
+                "?device_id=$encodedDeviceId" +
+                "&branch_id=$branchId",
+            token = token
+        )
+
+        NativePosDeviceCheck(
+            needsRegistration =
+                json.optBoolean(
+                    "needs_registration",
+                    false
+                ),
+            machine =
+                parseNativePosMachine(
+                    json.optJSONObject("data")
+                )
+        )
+    }
+
+    suspend fun registerNativePosDevice(
+        token: String,
+        branchId: Long,
+        deviceId: String,
+        runtimeId: String,
+        terminalId: String,
+        alias: String,
+        deviceMetadata: JSONObject
+    ): NativePosMachineBinding = withContext(Dispatchers.IO) {
+        val body =
+            JSONObject()
+                .put("branch_id", branchId)
+                .put("alias", alias)
+                .put("device_id", deviceId)
+                .put("platform", "android")
+                .put("runtime_id", runtimeId)
+                .put("terminal_id", terminalId)
+                .put(
+                    "device_metadata",
+                    deviceMetadata
+                )
+
+        val json = request(
+            "pos/multi-pos/register",
+            method = "POST",
+            token = token,
+            body = body
+        )
+
+        parseNativePosMachine(
+            json.optJSONObject("data")
+        ) ?: throw CookitApiException(
+            200,
+            "Cookit MultiPOS registration returned no machine"
+        )
+    }
+
+    private fun parseNativePosMachine(
+        obj: JSONObject?
+    ): NativePosMachineBinding? {
+        if (obj == null) {
+            return null
+        }
+
+        val id =
+            obj.optLong(
+                "id",
+                0L
+            )
+
+        val branchId =
+            obj.optLong(
+                "branch_id",
+                0L
+            )
+
+        val deviceId =
+            obj.optString(
+                "device_id"
+            ).trim()
+
+        if (
+            id <= 0L
+            || branchId <= 0L
+            || deviceId.isBlank()
+        ) {
+            return null
+        }
+
+        return NativePosMachineBinding(
+            id = id,
+            branchId = branchId,
+            publicId =
+                obj.optString(
+                    "public_id"
+                ).trim(),
+            status =
+                obj.optString(
+                    "status"
+                )
+                    .trim()
+                    .lowercase(Locale.ROOT),
+            deviceId = deviceId,
+            platform =
+                obj.optString(
+                    "platform"
+                )
+                    .trim()
+                    .takeIf {
+                        it.isNotBlank()
+                    },
+            runtimeId =
+                obj.optString(
+                    "runtime_id"
+                )
+                    .trim()
+                    .takeIf {
+                        it.isNotBlank()
+                    },
+            terminalId =
+                obj.optString(
+                    "terminal_id"
+                )
+                    .trim()
+                    .takeIf {
+                        it.isNotBlank()
+                    }
         )
     }
 

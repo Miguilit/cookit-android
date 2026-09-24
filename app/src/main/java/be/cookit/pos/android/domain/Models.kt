@@ -38,6 +38,7 @@ data class UserSession(
 data class FiscalRuntimeIdentity(
     val runtimeId: String,
     val terminalId: String,
+    val deviceId: String,
     val createdAtEpochMs: Long,
     val restaurantId: Long? = null,
     val branchId: Long? = null,

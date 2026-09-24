@@ -16,6 +16,20 @@ interface FiscalRuntimeDao {
     @Query(
         """
         UPDATE fiscal_runtime_identity
+        SET device_id = :deviceId,
+            updated_at_epoch_ms = :updatedAtEpochMs
+        WHERE singleton_id = 1
+          AND TRIM(device_id) = ''
+        """
+    )
+    suspend fun bindDeviceIdIfMissing(
+        deviceId: String,
+        updatedAtEpochMs: Long
+    ): Int
+
+    @Query(
+        """
+        UPDATE fiscal_runtime_identity
         SET bound_restaurant_id = :restaurantId,
             bound_branch_id = :branchId,
             bound_restaurant_name = :restaurantName,
