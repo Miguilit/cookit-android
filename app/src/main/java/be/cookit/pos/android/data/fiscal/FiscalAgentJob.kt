@@ -72,9 +72,18 @@ data class FiscalAgentJob(
                 "Prepared fiscal snapshot job contract missing for transaction $id"
             )
 
-        if (job.optString("operation") != "signSale") {
+        val operation = job.optString("operation")
+
+        val supportedPreparedOperations = setOf(
+            "signSale",
+            "signOrder",
+            "signCostCenterChange",
+            "signPreBill"
+        )
+
+        if (operation !in supportedPreparedOperations) {
             throw FiscalAgentIntegrityException(
-                "Prepared fiscal operation is not signSale for transaction $id"
+                "Unsupported prepared fiscal operation '$operation' for transaction $id"
             )
         }
 
@@ -147,6 +156,21 @@ data class FiscalAgentJob(
                 "Prepared fiscal GraphQL query missing for transaction $id"
             )
 
+        /*
+         * The operation advertised by the immutable job envelope must be the
+         * actual top-level GraphQL mutation contained in the canonical body.
+         *
+         * Android still does not rebuild provider input.
+         */
+        val operationField =
+            Regex("(?m)^\\s*${Regex.escape(operation)}\\s*\\(")
+
+        if (!operationField.containsMatchIn(query)) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal operation/query mismatch for transaction $id"
+            )
+        }
+
         val storedRequest = snapshot.optJSONObject("request")
             ?: throw FiscalAgentIntegrityException(
                 "Prepared fiscal request object missing for transaction $id"
@@ -179,7 +203,7 @@ data class FiscalAgentJob(
 
         val data = variables.optJSONObject("data")
             ?: throw FiscalAgentIntegrityException(
-                "Prepared fiscal SaleInput missing for transaction $id"
+                "Prepared fiscal input data missing for transaction $id"
             )
 
         val ticketNumber = data.optInt("posFiscalTicketNo", 0)

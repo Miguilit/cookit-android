@@ -126,11 +126,15 @@ class Module2StatusClient(private val context: Context) {
         val MODULE2_BELGIUM_ZONE: ZoneId = ZoneId.of("Europe/Brussels")
     }
     /**
-     * A15.0F8.2 cloud-prepared signSale transport.
+     * Cloud-prepared fiscal mutation transport.
      *
      * The canonical GraphQL body was built and hashed by Cookit Cloud.
      * It is written byte-for-byte to the Module2 HTTPS connection.
-     * Do not rebuild it with JSONObject and do not add operationName.
+     * Android may validate the mutation name and response node, but MUST NOT
+     * rebuild the body with JSONObject or add operationName.
+     *
+     * The historical method name is intentionally retained to avoid changing
+     * the proven fiscal runner path during CERT-D1.1.
      */
     suspend fun executePreparedSignSale(
         settings: FiscalFdmSettings,
@@ -159,11 +163,30 @@ class Module2StatusClient(private val context: Context) {
             )
         }
 
-        if (request.optString("query").isBlank()) {
+        val query = request.optString("query")
+
+        if (query.isBlank()) {
             throw FiscalAgentIntegrityException(
                 "Prepared Module2 GraphQL query is missing"
             )
         }
+
+        val supportedPreparedOperations = listOf(
+            "signSale",
+            "signOrder",
+            "signCostCenterChange",
+            "signPreBill"
+        )
+
+        val preparedOperation =
+            supportedPreparedOperations.singleOrNull { operation ->
+                Regex(
+                    "(?m)^\\s*${Regex.escape(operation)}\\s*\\("
+                ).containsMatchIn(query)
+            }
+                ?: throw FiscalAgentIntegrityException(
+                    "Unsupported or ambiguous prepared Module2 fiscal operation"
+                )
 
         val endpoint = settings.endpoint
             ?: error("Module2 endpoint unavailable")
@@ -203,9 +226,14 @@ class Module2StatusClient(private val context: Context) {
             )
         }
 
-        if (envelope.optJSONObject("data")?.optJSONObject("signSale") == null) {
+        if (
+            envelope
+                .optJSONObject("data")
+                ?.optJSONObject(preparedOperation) == null
+        ) {
             throw FdmGraphqlException(
-                message = "Module2 response does not contain data.signSale",
+                message =
+                    "Module2 response does not contain data.$preparedOperation",
                 responseBody = response.body,
                 httpStatus = response.status
             )

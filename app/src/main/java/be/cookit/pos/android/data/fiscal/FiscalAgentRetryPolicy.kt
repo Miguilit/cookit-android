@@ -248,7 +248,7 @@ class FiscalAgentRetryPolicy {
 
         val ambiguous =
             normalized.contains("malformed json") ||
-                normalized.contains("does not contain data.signsale") ||
+                normalized.contains("does not contain data.") ||
                 normalized.contains("receipt number missing") ||
                 failure.providerResponseReceived
 
