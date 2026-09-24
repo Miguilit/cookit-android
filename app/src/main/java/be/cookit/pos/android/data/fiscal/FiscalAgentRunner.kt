@@ -249,11 +249,24 @@ class FiscalAgentRunner(
                     headers = mockHeaders
                 )
 
+                val responseOperation =
+                    if (settings.isModule2) {
+                        preparedSale?.operation
+                            ?: throw FiscalAgentIntegrityException(
+                                "Prepared Module2 fiscal operation missing"
+                            )
+                    } else {
+                        /*
+                         * Existing Cookit Mock contract remains signSale.
+                         */
+                        "signSale"
+                    }
+
                 val sale = envelope
                     .optJSONObject("data")
-                    ?.optJSONObject("signSale")
+                    ?.optJSONObject(responseOperation)
                     ?: throw FdmGraphqlException(
-                        "FDM response does not contain data.signSale",
+                        "FDM response does not contain data.$responseOperation",
                         envelope.toString()
                     )
 
@@ -647,10 +660,38 @@ class FiscalAgentRunner(
                 JSONObject(rawResponseJson)
             }.getOrNull()
 
-        val sale =
+        val providerData =
             providerEnvelope
                 ?.optJSONObject("data")
-                ?.optJSONObject("signSale")
+
+        val supportedResponseOperations =
+            listOf(
+                "signSale",
+                "signOrder",
+                "signCostCenterChange",
+                "signPreBill"
+            )
+
+        /*
+         * The durable Room outcome predates multi-operation support and does
+         * not store the operation as a dedicated column.
+         *
+         * Reconstruct it exclusively from the immutable raw provider
+         * response. No Room migration and no provider recall are required.
+         */
+        val responseOperation =
+            supportedResponseOperations
+                .singleOrNull { operation ->
+                    providerData
+                        ?.optJSONObject(operation) != null
+                }
+
+        val sale =
+            responseOperation
+                ?.let { operation ->
+                    providerData
+                        ?.optJSONObject(operation)
+                }
 
         val fdmRef =
             sale

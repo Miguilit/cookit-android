@@ -53,12 +53,17 @@ class FiscalFdmRuntime(
         if (settings.isModule2) {
             val prepared = preparedSale
                 ?: throw FiscalAgentIntegrityException(
-                    "Module2 requires a cloud-prepared canonical signSale request"
+                    "Module2 requires a cloud-prepared canonical fiscal request"
                 )
 
-            if (!prepared.training) {
+            if (
+                prepared.mode !in setOf(
+                    "training",
+                    "certification"
+                )
+            ) {
                 throw FiscalAgentIntegrityException(
-                    "A15.0F8.2 Module2 transport accepts TRAINING jobs only"
+                    "Android Module2 LIVE fiscalization is not enabled"
                 )
             }
 

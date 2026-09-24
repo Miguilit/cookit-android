@@ -16,6 +16,8 @@ class FiscalAgentIntegrityException(message: String) : IllegalStateException(mes
  * but MUST NOT rebuild or reserialize it before Module2 submission.
  */
 data class PreparedFiscalSignSale(
+    val operation: String,
+    val mode: String,
     val requestCanonicalJson: String,
     val requestSha256: String,
     val sequenceNumber: Int,
@@ -96,14 +98,67 @@ data class FiscalAgentJob(
         }
 
         /*
-         * F8.2 deliberately opens only the remote Module2 TRAINING path.
-         * Production sale activation requires a separate recovery design for
-         * the ambiguous case where the FDM accepts a request but the HTTP
-         * response is lost before Android can journal the outcome.
+         * CERT-D1.4
+         *
+         * Historical snapshots did not carry job.mode. Preserve their
+         * deterministic interpretation:
+         *
+         *   training=true  -> training
+         *   training=false -> live
+         *
+         * New certification snapshots explicitly carry mode=certification.
          */
-        if (!jobTraining) {
+        val mode =
+            job.optString("mode")
+                .trim()
+                .lowercase()
+                .ifBlank {
+                    if (jobTraining) "training" else "live"
+                }
+
+        if (
+            mode !in setOf(
+                "training",
+                "certification",
+                "live"
+            )
+        ) {
             throw FiscalAgentIntegrityException(
-                "A15.0F8.2 Module2 transport accepts TRAINING jobs only"
+                "Unsupported prepared fiscal mode '$mode' for transaction $id"
+            )
+        }
+
+        val modeTrainingConsistent =
+            when (mode) {
+                "training" ->
+                    jobTraining
+
+                "certification",
+                "live" ->
+                    !jobTraining
+
+                else ->
+                    false
+            }
+
+        if (!modeTrainingConsistent) {
+            throw FiscalAgentIntegrityException(
+                "Prepared fiscal mode/training mismatch for transaction $id"
+            )
+        }
+
+        /*
+         * Android CERT-D1.4 intentionally opens only:
+         *
+         *   training
+         *   certification
+         *
+         * Production LIVE remains fail-closed in the APK independently of
+         * the Cloud production kill-switches.
+         */
+        if (mode == "live") {
+            throw FiscalAgentIntegrityException(
+                "Android Module2 LIVE fiscalization is not enabled"
             )
         }
 
@@ -195,7 +250,7 @@ data class FiscalAgentJob(
             )
         }
 
-        if (!requestTraining || requestTraining != jobTraining) {
+        if (requestTraining != jobTraining) {
             throw FiscalAgentIntegrityException(
                 "Prepared fiscal training contract mismatch for transaction $id"
             )
@@ -238,10 +293,12 @@ data class FiscalAgentJob(
         }
 
         return PreparedFiscalSignSale(
+            operation = operation,
+            mode = mode,
             requestCanonicalJson = requestCanonicalJson,
             requestSha256 = actualSha,
             sequenceNumber = sequence,
-            training = true
+            training = jobTraining
         )
     }
 
