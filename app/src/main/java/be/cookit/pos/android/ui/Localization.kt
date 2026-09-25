@@ -139,8 +139,7 @@ data class UiStrings(
     val pointsApplied: String,
     val pointsRemoved: String,
     val rewardApplied: String,
-    val sessionExpired: String,
-    val retrySameAction: String
+    val sessionExpired: String
 )
 
 fun strings(language: AppLanguage): UiStrings = when (language) {
@@ -191,8 +190,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Fidélité indisponible pour cette commande.", refreshBenefits="Actualiser les avantages", close="Fermer",
         orderPrepared="Commande préparée sur Cookit.", discountApplied="Remise appliquée.", discountCleared="Remise supprimée.", tipApplied="Pourboire mis à jour.",
         pointsApplied="Points appliqués.", pointsRemoved="Points restaurés.", rewardApplied="Récompense appliquée.",
-        sessionExpired="Session Cookit expirée. Reconnectez-vous.",
-        retrySameAction="En cas de coupure réseau, réessayez la même action : Cookit réutilise la même opération."
+        sessionExpired="Session Cookit expirée. Reconnectez-vous."
     )
     AppLanguage.NL -> UiStrings(
         home="Start", pos="POS", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
@@ -241,8 +239,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Loyaliteit is niet beschikbaar voor deze bestelling.", refreshBenefits="Voordelen vernieuwen", close="Sluiten",
         orderPrepared="Bestelling voorbereid in Cookit.", discountApplied="Korting toegepast.", discountCleared="Korting verwijderd.", tipApplied="Fooi bijgewerkt.",
         pointsApplied="Punten toegepast.", pointsRemoved="Punten hersteld.", rewardApplied="Beloning toegepast.",
-        sessionExpired="De Cookit-sessie is verlopen. Meld u opnieuw aan.",
-        retrySameAction="Probeer bij een netwerkonderbreking dezelfde actie opnieuw: Cookit gebruikt dezelfde bewerking."
+        sessionExpired="De Cookit-sessie is verlopen. Meld u opnieuw aan."
     )
     AppLanguage.EN -> UiStrings(
         home="Home", pos="POS", orders="Orders", kitchen="Kitchen", delivery="Delivery",
@@ -291,8 +288,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Loyalty is unavailable for this order.", refreshBenefits="Refresh benefits", close="Close",
         orderPrepared="Order prepared in Cookit.", discountApplied="Discount applied.", discountCleared="Discount removed.", tipApplied="Tip updated.",
         pointsApplied="Points applied.", pointsRemoved="Points restored.", rewardApplied="Reward applied.",
-        sessionExpired="Your Cookit session has expired. Sign in again.",
-        retrySameAction="If the network drops, retry the same action: Cookit reuses the same operation."
+        sessionExpired="Your Cookit session has expired. Sign in again."
     )
     AppLanguage.DE -> UiStrings(
         home="Start", pos="POS", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
@@ -341,8 +337,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Treuevorteile sind für diese Bestellung nicht verfügbar.", refreshBenefits="Vorteile aktualisieren", close="Schließen",
         orderPrepared="Bestellung in Cookit vorbereitet.", discountApplied="Rabatt angewendet.", discountCleared="Rabatt entfernt.", tipApplied="Trinkgeld aktualisiert.",
         pointsApplied="Punkte angewendet.", pointsRemoved="Punkte wiederhergestellt.", rewardApplied="Belohnung angewendet.",
-        sessionExpired="Die Cookit-Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
-        retrySameAction="Bei einer Netzwerkunterbrechung dieselbe Aktion erneut versuchen: Cookit verwendet denselben Vorgang."
+        sessionExpired="Die Cookit-Sitzung ist abgelaufen. Bitte melden Sie sich erneut an."
     )
 }
 

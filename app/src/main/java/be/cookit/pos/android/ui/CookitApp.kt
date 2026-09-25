@@ -2048,7 +2048,6 @@ private fun CommercialToolsDialog(
                             }
                         }
 
-                        Text(t.retrySameAction, color = CookitMuted, fontSize = 11.sp)
                     }
                 }
 
