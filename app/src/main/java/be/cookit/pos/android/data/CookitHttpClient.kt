@@ -1305,25 +1305,46 @@ class CookitHttpClient {
                         ) ?: 0.0
                 ),
             expectedCash =
-                data.doubleAny(
+                totals.doubleAny(
                     "expected_cash",
                     "expected_amount"
-                ) ?: 0.0,
+                )
+                    ?: data.doubleAny(
+                        "expected_cash",
+                        "expected_amount"
+                    )
+                    ?: 0.0,
             countedCash =
-                data.doubleAny(
+                totals.doubleAny(
                     "counted_cash"
-                ) ?: 0.0,
+                )
+                    ?: data.doubleAny(
+                        "counted_cash"
+                    )
+                    ?: 0.0,
             physicalCashCounted =
-                data.doubleAny(
+                totals.doubleAny(
                     "physical_cash_counted"
-                ),
+                )
+                    ?: data.doubleAny(
+                        "physical_cash_counted"
+                    ),
             discrepancy =
-                data.doubleAny(
+                totals.doubleAny(
                     "discrepancy"
-                ) ?: 0.0,
+                )
+                    ?: data.doubleAny(
+                        "discrepancy"
+                    )
+                    ?: 0.0,
             transactionsCount =
-                data.longAny(
-                    "transactions_count"
+                (
+                    totals.longAny(
+                        "transactions_count"
+                    )
+                        ?: data.longAny(
+                            "transactions_count"
+                        )
                 )?.toInt() ?: 0
         )
     }

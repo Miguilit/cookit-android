@@ -107,7 +107,7 @@ data class UiStrings(
 
 fun strings(language: AppLanguage): UiStrings = when (language) {
     AppLanguage.FR -> UiStrings(
-        home="Accueil", pos="Caisse", orders="Commandes", kitchen="Cuisine", delivery="Livraison",
+        home="Accueil", pos="POS", orders="Commandes", kitchen="Cuisine", delivery="Livraison",
         cash="Caisse", settings="Réglages", fiscality="Fiscalité", online="En ligne", offline="Hors ligne",
         newOrder="Nouvelle commande", dineIn="Sur place", takeaway="À emporter", deliveryType="Livraison",
         cart="Panier", subtotal="Sous-total", vatIncluded="TVA incluse", total="Total", checkout="Encaisser",
@@ -144,7 +144,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         statusPlaced="Reçue", statusConfirmed="Confirmée", statusCancelled="Annulée", statusBilled="Facturée"
     )
     AppLanguage.NL -> UiStrings(
-        home="Start", pos="Kassa", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
+        home="Start", pos="POS", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
         cash="Kassa", settings="Instellingen", fiscality="Fiscaliteit", online="Online", offline="Offline",
         newOrder="Nieuwe bestelling", dineIn="Ter plaatse", takeaway="Afhalen", deliveryType="Levering",
         cart="Winkelmand", subtotal="Subtotaal", vatIncluded="Btw inbegrepen", total="Totaal", checkout="Afrekenen",
@@ -218,7 +218,7 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         statusPlaced="Received", statusConfirmed="Confirmed", statusCancelled="Cancelled", statusBilled="Billed"
     )
     AppLanguage.DE -> UiStrings(
-        home="Start", pos="Kasse", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
+        home="Start", pos="POS", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
         cash="Kasse", settings="Einstellungen", fiscality="Fiskalität", online="Online", offline="Offline",
         newOrder="Neue Bestellung", dineIn="Vor Ort", takeaway="Abholung", deliveryType="Lieferung",
         cart="Warenkorb", subtotal="Zwischensumme", vatIncluded="MwSt. inkl.", total="Gesamt", checkout="Kassieren",

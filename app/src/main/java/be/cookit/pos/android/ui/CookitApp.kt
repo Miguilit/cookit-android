@@ -47,11 +47,11 @@ import kotlinx.coroutines.withContext
 
 private enum class Screen(val label: String) {
     DASHBOARD("Accueil"),
-    POS("Caisse"),
+    POS("POS"),
     ORDERS("Commandes"),
     KDS("Cuisine"),
     DELIVERY("Livraison"),
-    CASH("Fond de caisse"),
+    CASH("Caisse"),
     FISCALITY("Fiscality"),
     SETTINGS("Réglages")
 }
