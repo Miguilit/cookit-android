@@ -620,6 +620,58 @@ fun PremiumCashRegisterScreen(
             state.language
         )
 
+    val hardwareStrings =
+        hardwareSimulationStrings(
+            state.language
+        )
+
+    var hardwarePreviewOpen by
+        remember {
+            mutableStateOf(
+                false
+            )
+        }
+
+    LaunchedEffect(
+        state.cashReportPrintMessage,
+        state.hardwareSimulationPreview
+    ) {
+        if (
+            state.hardwareMode ==
+                be.cookit.pos.android.domain.HardwareMode.SIMULATED
+            && state.cashReportPrintMessage ==
+                "cash_report_printed_simulated"
+            && ! state.hardwareSimulationPreview
+                .isNullOrBlank()
+        ) {
+            hardwarePreviewOpen =
+                true
+        }
+    }
+
+    if (
+        hardwarePreviewOpen
+    ) {
+        state.hardwareSimulationPreview
+            ?.takeIf {
+                it.isNotBlank()
+            }
+            ?.let {
+                preview ->
+
+                HardwareSimulationPreviewDialog(
+                    preview =
+                        preview,
+                    strings =
+                        hardwareStrings,
+                    onDismiss = {
+                        hardwarePreviewOpen =
+                            false
+                    }
+                )
+            }
+    }
+
     var movementAction by
         remember {
             mutableStateOf<MovementAction?>(
@@ -682,6 +734,31 @@ fun PremiumCashRegisterScreen(
                 vm = vm,
                 s = s
             )
+
+            if (
+                state.hardwareMode ==
+                be.cookit.pos.android.domain.HardwareMode.SIMULATED
+            ) {
+                HardwareSimulationBadge(
+                    modifier =
+                        Modifier
+                            .align(
+                                Alignment.TopEnd
+                            )
+                            .padding(
+                                20.dp
+                            ),
+                    strings =
+                        hardwareStrings,
+                    previewAvailable =
+                        ! state.hardwareSimulationPreview
+                            .isNullOrBlank(),
+                    onPreview = {
+                        hardwarePreviewOpen =
+                            true
+                    }
+                )
+            }
 
             val lastClosedSession =
                 state.lastClosedCashSession
@@ -811,6 +888,8 @@ fun PremiumCashRegisterScreen(
                         report,
                     strings =
                         managerStrings,
+                    hardwareStrings =
+                        hardwareStrings,
                     printMessage =
                         state.cashReportPrintMessage,
                     reportError =
@@ -991,6 +1070,27 @@ fun PremiumCashRegisterScreen(
                         }
                     }
                 }
+            }
+        }
+
+        if (
+            state.hardwareMode ==
+            be.cookit.pos.android.domain.HardwareMode.SIMULATED
+        ) {
+            item {
+                HardwareSimulationBadge(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    strings =
+                        hardwareStrings,
+                    previewAvailable =
+                        ! state.hardwareSimulationPreview
+                            .isNullOrBlank(),
+                    onPreview = {
+                        hardwarePreviewOpen =
+                            true
+                    }
+                )
             }
         }
 
@@ -1909,6 +2009,8 @@ fun PremiumCashRegisterScreen(
                     report,
                 strings =
                     managerStrings,
+                hardwareStrings =
+                    hardwareStrings,
                 printMessage =
                     state.cashReportPrintMessage,
                 reportError =
@@ -1924,9 +2026,221 @@ fun PremiumCashRegisterScreen(
 
 
 @Composable
+private fun HardwareSimulationBadge(
+    modifier: Modifier = Modifier,
+    strings: HardwareSimulationStrings,
+    previewAvailable: Boolean,
+    onPreview: () -> Unit
+) {
+    Surface(
+        modifier =
+            modifier,
+        shape =
+            RoundedCornerShape(
+                16.dp
+            ),
+        color =
+            CashOrangeSoft,
+        border =
+            BorderStroke(
+                1.dp,
+                CashOrange
+            )
+    ) {
+        Row(
+            modifier =
+                Modifier.padding(
+                    horizontal = 14.dp,
+                    vertical = 10.dp
+                ),
+            verticalAlignment =
+                Alignment.CenterVertically,
+            horizontalArrangement =
+                Arrangement.spacedBy(
+                    10.dp
+                )
+        ) {
+            Icon(
+                Icons.Default.ReceiptLong,
+                null,
+                tint =
+                    CashOrange
+            )
+
+            Column(
+                modifier =
+                    Modifier.weight(
+                        1f
+                    )
+            ) {
+                Text(
+                    strings.simulationBadge,
+                    color =
+                        CashOrange,
+                    fontWeight =
+                        FontWeight.Black,
+                    fontSize =
+                        12.sp
+                )
+
+                Text(
+                    strings.simulationHelp,
+                    color =
+                        CashMuted,
+                    fontSize =
+                        11.sp
+                )
+            }
+
+            if (
+                previewAvailable
+            ) {
+                OutlinedButton(
+                    onClick =
+                        onPreview
+                ) {
+                    Text(
+                        strings.viewPreview
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HardwareSimulationPreviewDialog(
+    preview: String,
+    strings: HardwareSimulationStrings,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest =
+            onDismiss
+    ) {
+        Surface(
+            modifier =
+                Modifier.fillMaxWidth(),
+            shape =
+                RoundedCornerShape(
+                    24.dp
+                ),
+            color =
+                CashCanvas
+        ) {
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            20.dp
+                        ),
+                verticalArrangement =
+                    Arrangement.spacedBy(
+                        14.dp
+                    )
+            ) {
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    verticalAlignment =
+                        Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.ReceiptLong,
+                        null,
+                        tint =
+                            CashOrange
+                    )
+
+                    Spacer(
+                        Modifier.width(
+                            10.dp
+                        )
+                    )
+
+                    Column(
+                        modifier =
+                            Modifier.weight(
+                                1f
+                            )
+                    ) {
+                        Text(
+                            strings.previewTitle,
+                            fontWeight =
+                                FontWeight.Black,
+                            fontSize =
+                                21.sp
+                        )
+
+                        Text(
+                            strings.simulationBadge,
+                            color =
+                                CashOrange,
+                            fontWeight =
+                                FontWeight.Bold,
+                            fontSize =
+                                11.sp
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    shape =
+                        RoundedCornerShape(
+                            14.dp
+                        ),
+                    color =
+                        Color.White,
+                    border =
+                        BorderStroke(
+                            1.dp,
+                            CashLine
+                        )
+                ) {
+                    Text(
+                        text =
+                            preview,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(
+                                    rememberScrollState()
+                                )
+                                .padding(
+                                    16.dp
+                                ),
+                        fontFamily =
+                            androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontSize =
+                            13.sp,
+                        lineHeight =
+                            18.sp
+                    )
+                }
+
+                Button(
+                    onClick =
+                        onDismiss,
+                    modifier =
+                        Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        strings.close
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CashReportDialog(
     report: be.cookit.pos.android.domain.CashRegisterReport,
     strings: CashManagerStrings,
+    hardwareStrings: HardwareSimulationStrings,
     printMessage: String?,
     reportError: String?,
     onPrint: () -> Unit,
@@ -2283,6 +2597,9 @@ private fun CashReportDialog(
                                 "cash_report_printed" ->
                                     strings.printed
 
+                                "cash_report_printed_simulated" ->
+                                    hardwareStrings.virtualPrintReady
+
                                 "cash_report_print_failed",
                                 "cash_report_print_missing",
                                 "cash_report_print_forbidden" ->
@@ -2295,7 +2612,8 @@ private fun CashReportDialog(
                                 when (
                                     marker
                                 ) {
-                                    "cash_report_printed" ->
+                                    "cash_report_printed",
+                                    "cash_report_printed_simulated" ->
                                         CashGreen
 
                                     "cash_report_printing" ->

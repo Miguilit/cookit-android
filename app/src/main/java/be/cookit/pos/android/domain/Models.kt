@@ -24,6 +24,11 @@ enum class PrinterProviderType { ESC_POS, STAR }
 
 enum class StarInterfaceType { LAN, BLUETOOTH, BLUETOOTH_LE, USB }
 
+enum class HardwareMode {
+    REAL,
+    SIMULATED
+}
+
 data class UserSession(
     val id: Long,
     val name: String,
@@ -264,6 +269,13 @@ data class BillingContext(
 data class DiscoveredPrinter(
     val identifier: String,
     val interfaceType: StarInterfaceType
+)
+
+data class HardwareSimulationEvent(
+    val timestampEpochMs: Long,
+    val action: String,
+    val result: String,
+    val detail: String? = null
 )
 
 data class CashDenomination(

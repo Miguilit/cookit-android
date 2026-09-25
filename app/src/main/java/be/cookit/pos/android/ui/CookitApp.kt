@@ -2388,6 +2388,122 @@ private fun SettingsScreen(
                 }
 
                 if (state.policy.canManagePrinters || state.demoMode) {
+                    val hardwareUi =
+                        hardwareSimulationStrings(
+                            state.language
+                        )
+
+                    Text(
+                        hardwareUi.hardwareMode,
+                        fontWeight =
+                            FontWeight.Bold,
+                        fontSize =
+                            12.sp
+                    )
+
+                    Row(
+                        horizontalArrangement =
+                            Arrangement.spacedBy(
+                                8.dp
+                            )
+                    ) {
+                        FilterChip(
+                            selected =
+                                state.hardwareMode ==
+                                    be.cookit.pos.android.domain.HardwareMode.REAL,
+                            onClick = {
+                                vm.setHardwareMode(
+                                    be.cookit.pos.android.domain.HardwareMode.REAL
+                                )
+                            },
+                            label = {
+                                Text(
+                                    hardwareUi.realHardware
+                                )
+                            }
+                        )
+
+                        FilterChip(
+                            selected =
+                                state.hardwareMode ==
+                                    be.cookit.pos.android.domain.HardwareMode.SIMULATED,
+                            onClick = {
+                                vm.setHardwareMode(
+                                    be.cookit.pos.android.domain.HardwareMode.SIMULATED
+                                )
+                            },
+                            label = {
+                                Text(
+                                    hardwareUi.simulation
+                                )
+                            }
+                        )
+                    }
+
+                    Surface(
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        shape =
+                            RoundedCornerShape(
+                                12.dp
+                            ),
+                        color =
+                            if (
+                                state.hardwareMode ==
+                                be.cookit.pos.android.domain.HardwareMode.SIMULATED
+                            ) {
+                                CookitSoftOrange
+                            } else {
+                                CookitCanvas
+                            },
+                        border =
+                            BorderStroke(
+                                1.dp,
+                                CookitLine
+                            )
+                    ) {
+                        Column(
+                            modifier =
+                                Modifier.padding(
+                                    12.dp
+                                ),
+                            verticalArrangement =
+                                Arrangement.spacedBy(
+                                    4.dp
+                                )
+                        ) {
+                            if (
+                                state.hardwareMode ==
+                                be.cookit.pos.android.domain.HardwareMode.SIMULATED
+                            ) {
+                                Text(
+                                    hardwareUi.simulationBadge,
+                                    color =
+                                        CookitOrange,
+                                    fontWeight =
+                                        FontWeight.Black,
+                                    fontSize =
+                                        12.sp
+                                )
+                            }
+
+                            Text(
+                                if (
+                                    state.hardwareMode ==
+                                    be.cookit.pos.android.domain.HardwareMode.SIMULATED
+                                ) {
+                                    hardwareUi.simulationHelp
+                                } else {
+                                    hardwareUi.realHelp
+                                },
+                                color =
+                                    CookitMuted,
+                                fontSize =
+                                    12.sp
+                            )
+                        }
+                    }
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
                             selected = state.printerProvider == PrinterProviderType.ESC_POS,
@@ -2457,8 +2573,21 @@ private fun SettingsScreen(
                             }
                             OutlinedButton(
                                 onClick = {
-                                    runWithPrinterPermissions(starInterface) {
-                                        vm.discoverStarPrinters(starInterface)
+                                    if (
+                                        state.hardwareMode ==
+                                        be.cookit.pos.android.domain.HardwareMode.SIMULATED
+                                    ) {
+                                        vm.discoverStarPrinters(
+                                            starInterface
+                                        )
+                                    } else {
+                                        runWithPrinterPermissions(
+                                            starInterface
+                                        ) {
+                                            vm.discoverStarPrinters(
+                                                starInterface
+                                            )
+                                        }
                                     }
                                 },
                                 enabled = !state.printerDiscoveryBusy
@@ -2507,8 +2636,23 @@ private fun SettingsScreen(
                                 vm.savePrinter(printerHost, printerPort)
                                 vm.testPrinter()
                             } else {
-                                vm.saveStarPrinter(starIdentifier, starInterface)
-                                runWithPrinterPermissions(starInterface) { vm.testPrinter() }
+                                vm.saveStarPrinter(
+                                    starIdentifier,
+                                    starInterface
+                                )
+
+                                if (
+                                    state.hardwareMode ==
+                                    be.cookit.pos.android.domain.HardwareMode.SIMULATED
+                                ) {
+                                    vm.testPrinter()
+                                } else {
+                                    runWithPrinterPermissions(
+                                        starInterface
+                                    ) {
+                                        vm.testPrinter()
+                                    }
+                                }
                             }
                         }) {
                             Text(
@@ -2518,8 +2662,22 @@ private fun SettingsScreen(
                             )
                         }
                         OutlinedButton(onClick = {
-                            if (state.printerProvider == PrinterProviderType.STAR) {
-                                runWithPrinterPermissions(starInterface) { vm.openDrawer() }
+                            if (
+                                state.printerProvider ==
+                                PrinterProviderType.STAR
+                            ) {
+                                if (
+                                    state.hardwareMode ==
+                                    be.cookit.pos.android.domain.HardwareMode.SIMULATED
+                                ) {
+                                    vm.openDrawer()
+                                } else {
+                                    runWithPrinterPermissions(
+                                        starInterface
+                                    ) {
+                                        vm.openDrawer()
+                                    }
+                                }
                             } else {
                                 vm.openDrawer()
                             }
@@ -2530,17 +2688,217 @@ private fun SettingsScreen(
                         }
                     }
 
-                    state.printerMessage?.let { result ->
+                    state.printerMessage
+                        ?.let {
+                            result ->
+
+                            Text(
+                                when (
+                                    result
+                                ) {
+                                    "ok",
+                                    "drawer_ok",
+                                    "selected" ->
+                                        t.printerReady
+
+                                    "discovery_ok" ->
+                                        "Imprimante(s) détectée(s)"
+
+                                    "discovery_empty" ->
+                                        "Aucune imprimante Star détectée"
+
+                                    "simulation_enabled" ->
+                                        hardwareUi.simulationEnabled
+
+                                    "real_hardware_enabled" ->
+                                        hardwareUi.realEnabled
+
+                                    "simulated_discovery" ->
+                                        hardwareUi.simulatedDiscovery
+
+                                    "simulated_printer_ok" ->
+                                        hardwareUi.simulatedPrinterOk
+
+                                    "simulated_drawer_ok" ->
+                                        hardwareUi.simulatedDrawerOk
+
+                                    else ->
+                                        t.printerFailed
+                                },
+                                color =
+                                    if (
+                                        result == "failed"
+                                    ) {
+                                        MaterialTheme
+                                            .colorScheme
+                                            .error
+                                    } else {
+                                        CookitGreen
+                                    },
+                                fontSize =
+                                    12.sp
+                            )
+                        }
+
+                    if (
+                        state.hardwareSimulationPreview
+                            != null
+                    ) {
+                        Row(
+                            horizontalArrangement =
+                                Arrangement.spacedBy(
+                                    8.dp
+                                )
+                        ) {
+                            Text(
+                                hardwareUi.previewTitle,
+                                modifier =
+                                    Modifier.weight(
+                                        1f
+                                    ),
+                                fontWeight =
+                                    FontWeight.Bold,
+                                fontSize =
+                                    12.sp
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    vm.clearHardwareSimulationPreview()
+                                }
+                            ) {
+                                Text(
+                                    hardwareUi.clearPreview
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    Row(
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        verticalAlignment =
+                            Alignment.CenterVertically
+                    ) {
                         Text(
-                            when (result) {
-                                "ok", "drawer_ok", "selected" -> t.printerReady
-                                "discovery_ok" -> "Imprimante(s) détectée(s)"
-                                "discovery_empty" -> "Aucune imprimante Star détectée"
-                                else -> t.printerFailed
-                            },
-                            color = if (result == "failed") MaterialTheme.colorScheme.error else CookitGreen,
-                            fontSize = 12.sp
+                            hardwareUi.historyTitle,
+                            modifier =
+                                Modifier.weight(
+                                    1f
+                                ),
+                            fontWeight =
+                                FontWeight.Bold,
+                            fontSize =
+                                13.sp
                         )
+
+                        if (
+                            state.hardwareSimulationEvents
+                                .isNotEmpty()
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    vm.clearHardwareSimulationHistory()
+                                }
+                            ) {
+                                Text(
+                                    hardwareUi.clearHistory
+                                )
+                            }
+                        }
+                    }
+
+                    if (
+                        state.hardwareSimulationEvents
+                            .isEmpty()
+                    ) {
+                        Text(
+                            hardwareUi.historyEmpty,
+                            color =
+                                CookitMuted,
+                            fontSize =
+                                12.sp
+                        )
+                    } else {
+                        state.hardwareSimulationEvents
+                            .takeLast(
+                                10
+                            )
+                            .asReversed()
+                            .forEach {
+                                event ->
+
+                                Surface(
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    shape =
+                                        RoundedCornerShape(
+                                            10.dp
+                                        ),
+                                    color =
+                                        CookitCanvas
+                                ) {
+                                    Row(
+                                        modifier =
+                                            Modifier.padding(
+                                                10.dp
+                                            ),
+                                        verticalAlignment =
+                                            Alignment.CenterVertically
+                                    ) {
+                                        Column(
+                                            modifier =
+                                                Modifier.weight(
+                                                    1f
+                                                )
+                                        ) {
+                                            Text(
+                                                hardwareSimulationEventLabel(
+                                                    event,
+                                                    hardwareUi
+                                                ),
+                                                fontWeight =
+                                                    FontWeight.SemiBold,
+                                                fontSize =
+                                                    12.sp
+                                            )
+
+                                            hardwareSimulationEventDetail(
+                                                event,
+                                                hardwareUi
+                                            )
+                                                ?.let {
+                                                    detail ->
+
+                                                    Text(
+                                                        detail,
+                                                        color =
+                                                            CookitMuted,
+                                                        fontSize =
+                                                            10.sp
+                                                    )
+                                                }
+                                        }
+
+                                        Text(
+                                            java.text.SimpleDateFormat(
+                                                "HH:mm:ss",
+                                                java.util.Locale.getDefault()
+                                            ).format(
+                                                java.util.Date(
+                                                    event.timestampEpochMs
+                                                )
+                                            ),
+                                            color =
+                                                CookitMuted,
+                                            fontSize =
+                                                10.sp
+                                        )
+                                    }
+                                }
+                            }
                     }
                 }
             }
@@ -2561,6 +2919,261 @@ private fun SettingsScreen(
         if (!state.error.isNullOrBlank()) {
             Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
         }
+    }
+}
+
+internal data class HardwareSimulationStrings(
+    val hardwareMode: String,
+    val realHardware: String,
+    val simulation: String,
+    val simulationBadge: String,
+    val simulationHelp: String,
+    val realHelp: String,
+    val simulationEnabled: String,
+    val realEnabled: String,
+    val simulatedPrinterOk: String,
+    val simulatedDrawerOk: String,
+    val simulatedDiscovery: String,
+    val historyTitle: String,
+    val historyEmpty: String,
+    val clearHistory: String,
+    val previewTitle: String,
+    val clearPreview: String,
+    val viewPreview: String,
+    val close: String,
+    val virtualPrintReady: String,
+    val eventMode: String,
+    val eventPrinterTest: String,
+    val eventDiscovery: String,
+    val eventDrawer: String,
+    val eventPrint: String,
+    val simulatedResult: String
+)
+
+internal fun hardwareSimulationStrings(
+    language: AppLanguage
+): HardwareSimulationStrings =
+    when (
+        language
+    ) {
+        AppLanguage.NL ->
+            HardwareSimulationStrings(
+                hardwareMode = "Hardwaremodus",
+                realHardware = "Echte hardware",
+                simulation = "Simulatie",
+                simulationBadge = "HARDWARE GESIMULEERD",
+                simulationHelp = "Alleen printer en kassalade worden gesimuleerd. Kassa, rapporten en fiscale verwerking blijven echt.",
+                realHelp = "Cookit communiceert rechtstreeks met de geconfigureerde printer en kassalade.",
+                simulationEnabled = "Hardwaresimulatie geactiveerd.",
+                realEnabled = "Echte hardware geactiveerd.",
+                simulatedPrinterOk = "Virtuele printer reageert correct.",
+                simulatedDrawerOk = "Virtuele kassalade geopend.",
+                simulatedDiscovery = "Virtuele printerdetectie uitgevoerd.",
+                historyTitle = "Simulatiegeschiedenis",
+                historyEmpty = "Nog geen gesimuleerde hardwareactie.",
+                clearHistory = "Geschiedenis wissen",
+                previewTitle = "Virtueel afdrukvoorbeeld",
+                clearPreview = "Voorbeeld wissen",
+                viewPreview = "Voorbeeld bekijken",
+                close = "Sluiten",
+                virtualPrintReady = "Virtuele afdruk aangemaakt.",
+                eventMode = "Hardwaremodus",
+                eventPrinterTest = "Printertest",
+                eventDiscovery = "Printerdetectie",
+                eventDrawer = "Kassalade geopend",
+                eventPrint = "Rapport afgedrukt",
+                simulatedResult = "Gesimuleerd"
+            )
+
+        AppLanguage.EN ->
+            HardwareSimulationStrings(
+                hardwareMode = "Hardware mode",
+                realHardware = "Real hardware",
+                simulation = "Simulation",
+                simulationBadge = "HARDWARE SIMULATED",
+                simulationHelp = "Only the printer and cash drawer are simulated. Cash register, reports and fiscal processing remain real.",
+                realHelp = "Cookit communicates directly with the configured printer and cash drawer.",
+                simulationEnabled = "Hardware simulation enabled.",
+                realEnabled = "Real hardware enabled.",
+                simulatedPrinterOk = "Virtual printer responded successfully.",
+                simulatedDrawerOk = "Virtual cash drawer opened.",
+                simulatedDiscovery = "Virtual printer discovery completed.",
+                historyTitle = "Simulation history",
+                historyEmpty = "No simulated hardware action yet.",
+                clearHistory = "Clear history",
+                previewTitle = "Virtual print preview",
+                clearPreview = "Clear preview",
+                viewPreview = "View preview",
+                close = "Close",
+                virtualPrintReady = "Virtual print created.",
+                eventMode = "Hardware mode",
+                eventPrinterTest = "Printer test",
+                eventDiscovery = "Printer discovery",
+                eventDrawer = "Cash drawer opened",
+                eventPrint = "Report printed",
+                simulatedResult = "Simulated"
+            )
+
+        AppLanguage.DE ->
+            HardwareSimulationStrings(
+                hardwareMode = "Hardwaremodus",
+                realHardware = "Echte Hardware",
+                simulation = "Simulation",
+                simulationBadge = "HARDWARE SIMULIERT",
+                simulationHelp = "Nur Drucker und Kassenschublade werden simuliert. Kasse, Berichte und fiskalische Verarbeitung bleiben real.",
+                realHelp = "Cookit kommuniziert direkt mit dem konfigurierten Drucker und der Kassenschublade.",
+                simulationEnabled = "Hardwaresimulation aktiviert.",
+                realEnabled = "Echte Hardware aktiviert.",
+                simulatedPrinterOk = "Virtueller Drucker erfolgreich getestet.",
+                simulatedDrawerOk = "Virtuelle Kassenschublade geöffnet.",
+                simulatedDiscovery = "Virtuelle Druckersuche abgeschlossen.",
+                historyTitle = "Simulationsverlauf",
+                historyEmpty = "Noch keine simulierte Hardwareaktion.",
+                clearHistory = "Verlauf löschen",
+                previewTitle = "Virtuelle Druckvorschau",
+                clearPreview = "Vorschau löschen",
+                viewPreview = "Vorschau anzeigen",
+                close = "Schließen",
+                virtualPrintReady = "Virtueller Ausdruck erstellt.",
+                eventMode = "Hardwaremodus",
+                eventPrinterTest = "Druckertest",
+                eventDiscovery = "Druckersuche",
+                eventDrawer = "Kassenschublade geöffnet",
+                eventPrint = "Bericht gedruckt",
+                simulatedResult = "Simuliert"
+            )
+
+        else ->
+            HardwareSimulationStrings(
+                hardwareMode = "Mode matériel",
+                realHardware = "Matériel réel",
+                simulation = "Simulation",
+                simulationBadge = "MATÉRIEL SIMULÉ",
+                simulationHelp = "Seuls l’imprimante et le tiroir-caisse sont simulés. La caisse, les rapports et le traitement fiscal restent réels.",
+                realHelp = "Cookit communique directement avec l’imprimante et le tiroir-caisse configurés.",
+                simulationEnabled = "Simulation matérielle activée.",
+                realEnabled = "Matériel réel activé.",
+                simulatedPrinterOk = "Imprimante virtuelle opérationnelle.",
+                simulatedDrawerOk = "Tiroir-caisse virtuel ouvert.",
+                simulatedDiscovery = "Recherche virtuelle d’imprimante terminée.",
+                historyTitle = "Historique de simulation",
+                historyEmpty = "Aucune action matérielle simulée pour le moment.",
+                clearHistory = "Effacer l’historique",
+                previewTitle = "Aperçu d’impression virtuelle",
+                clearPreview = "Effacer l’aperçu",
+                viewPreview = "Voir l’aperçu",
+                close = "Fermer",
+                virtualPrintReady = "Impression virtuelle générée.",
+                eventMode = "Mode matériel",
+                eventPrinterTest = "Test imprimante",
+                eventDiscovery = "Recherche imprimante",
+                eventDrawer = "Ouverture du tiroir",
+                eventPrint = "Impression rapport",
+                simulatedResult = "Simulé"
+            )
+    }
+
+internal fun hardwareSimulationEventLabel(
+    event: be.cookit.pos.android.domain.HardwareSimulationEvent,
+    strings: HardwareSimulationStrings
+): String =
+    when (
+        event.action
+    ) {
+        "hardware_mode" ->
+            strings.eventMode
+
+        "printer_test" ->
+            strings.eventPrinterTest
+
+        "printer_discovery" ->
+            strings.eventDiscovery
+
+        "drawer_open" ->
+            strings.eventDrawer
+
+        "report_print" ->
+            strings.eventPrint
+
+        else ->
+            strings.simulatedResult
+    }
+
+internal fun hardwareSimulationEventDetail(
+    event: be.cookit.pos.android.domain.HardwareSimulationEvent,
+    strings: HardwareSimulationStrings
+): String? {
+    val detail =
+        event.detail
+            ?.trim()
+            ?.takeIf {
+                it.isNotBlank()
+            }
+            ?: return null
+
+    return when (
+        event.action
+    ) {
+        "hardware_mode" ->
+            when (
+                detail
+            ) {
+                "SIMULATED" ->
+                    strings.simulation
+
+                "REAL" ->
+                    strings.realHardware
+
+                else ->
+                    null
+            }
+
+        "printer_test",
+        "drawer_open" ->
+            when (
+                detail
+            ) {
+                "ESC_POS" ->
+                    "ESC/POS"
+
+                "STAR" ->
+                    "Star Micronics"
+
+                else ->
+                    null
+            }
+
+        "printer_discovery" ->
+            detail
+                .removePrefix(
+                    "STAR:"
+                )
+                .replace(
+                    '_',
+                    ' '
+                )
+                .takeIf {
+                    it.isNotBlank()
+                }
+
+        "report_print" -> {
+            val parts =
+                detail.split(
+                    ":",
+                    limit = 2
+                )
+
+            if (
+                parts.size == 2
+            ) {
+                "${parts[0]} · #${parts[1]}"
+            } else {
+                null
+            }
+        }
+
+        else ->
+            null
     }
 }
 

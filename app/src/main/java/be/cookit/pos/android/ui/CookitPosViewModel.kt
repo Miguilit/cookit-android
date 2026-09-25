@@ -193,7 +193,10 @@ data class PosUiState(
     val starInterface: StarInterfaceType = StarInterfaceType.LAN,
     val discoveredPrinters: List<DiscoveredPrinter> = emptyList(),
     val printerDiscoveryBusy: Boolean = false,
-    val printerMessage: String? = null
+    val printerMessage: String? = null,
+    val hardwareMode: HardwareMode = HardwareMode.REAL,
+    val hardwareSimulationEvents: List<HardwareSimulationEvent> = emptyList(),
+    val hardwareSimulationPreview: String? = null
 )
 
 class CookitPosViewModel(application: Application) : AndroidViewModel(application) {
@@ -292,7 +295,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             printerHost = printerStore.host(),
             printerPort = printerStore.port(),
             starIdentifier = printerStore.starIdentifier(),
-            starInterface = printerStore.starInterface()
+            starInterface = printerStore.starInterface(),
+            hardwareMode = printerStore.hardwareMode(),
+            hardwareSimulationEvents =
+                printerStore.simulationEvents(),
+            hardwareSimulationPreview =
+                printerStore.lastSimulationPreview()
         )
     )
     val ui: StateFlow<PosUiState> = _ui.asStateFlow()
@@ -372,7 +380,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 printerHost = it.printerHost,
                 printerPort = it.printerPort,
                 starIdentifier = it.starIdentifier,
-                starInterface = it.starInterface
+                starInterface = it.starInterface,
+                hardwareMode = it.hardwareMode,
+                hardwareSimulationEvents =
+                    it.hardwareSimulationEvents,
+                hardwareSimulationPreview =
+                    it.hardwareSimulationPreview
             )
         }
     }
@@ -1265,6 +1278,83 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
+    private fun refreshHardwareSimulationState() {
+        _ui.update {
+            it.copy(
+                hardwareMode =
+                    printerStore.hardwareMode(),
+                hardwareSimulationEvents =
+                    printerStore.simulationEvents(),
+                hardwareSimulationPreview =
+                    printerStore.lastSimulationPreview()
+            )
+        }
+    }
+
+    private fun recordHardwareSimulationEvent(
+        action: String,
+        detail: String? = null,
+        previewText: String? = null
+    ) {
+        printerStore.appendSimulationEvent(
+            action =
+                action,
+            result =
+                "simulated",
+            detail =
+                detail,
+            previewText =
+                previewText
+        )
+
+        refreshHardwareSimulationState()
+    }
+
+    fun setHardwareMode(
+        mode: HardwareMode
+    ) {
+        printerStore.saveHardwareMode(
+            mode
+        )
+
+        printerStore.appendSimulationEvent(
+            action =
+                "hardware_mode",
+            result =
+                "changed",
+            detail =
+                mode.name
+        )
+
+        refreshHardwareSimulationState()
+
+        _ui.update {
+            it.copy(
+                printerMessage =
+                    if (
+                        mode ==
+                        HardwareMode.SIMULATED
+                    ) {
+                        "simulation_enabled"
+                    } else {
+                        "real_hardware_enabled"
+                    }
+            )
+        }
+    }
+
+    fun clearHardwareSimulationHistory() {
+        printerStore.clearSimulationHistory()
+
+        refreshHardwareSimulationState()
+    }
+
+    fun clearHardwareSimulationPreview() {
+        printerStore.clearSimulationPreview()
+
+        refreshHardwareSimulationState()
+    }
+
     fun setPrinterProvider(provider: PrinterProviderType) {
         printerStore.saveProvider(provider)
         _ui.update { it.copy(printerProvider = provider, printerMessage = null) }
@@ -1288,6 +1378,34 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun discoverStarPrinters(interfaceType: StarInterfaceType) {
+        val state =
+            _ui.value
+
+        if (
+            state.hardwareMode ==
+            HardwareMode.SIMULATED
+        ) {
+            recordHardwareSimulationEvent(
+                action =
+                    "printer_discovery",
+                detail =
+                    "STAR:${interfaceType.name}"
+            )
+
+            _ui.update {
+                it.copy(
+                    printerDiscoveryBusy =
+                        false,
+                    discoveredPrinters =
+                        emptyList(),
+                    printerMessage =
+                        "simulated_discovery"
+                )
+            }
+
+            return
+        }
+
         viewModelScope.launch {
             _ui.update { it.copy(printerDiscoveryBusy = true, discoveredPrinters = emptyList(), printerMessage = null) }
             runCatching { starDiscoveryService.discover(interfaceType) }
@@ -1312,30 +1430,134 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun testPrinter() {
-        val state = _ui.value
-        viewModelScope.launch {
-            val ok = when (state.printerProvider) {
-                PrinterProviderType.ESC_POS ->
-                    runCatching { printerService.test(state.printerHost, state.printerPort) }.getOrDefault(false)
+        val state =
+            _ui.value
 
-                PrinterProviderType.STAR ->
-                    runCatching { starPrinterService.test(state.starIdentifier, state.starInterface) }.getOrDefault(false)
+        if (
+            state.hardwareMode ==
+            HardwareMode.SIMULATED
+        ) {
+            recordHardwareSimulationEvent(
+                action =
+                    "printer_test",
+                detail =
+                    state.printerProvider.name
+            )
+
+            _ui.update {
+                it.copy(
+                    printerMessage =
+                        "simulated_printer_ok"
+                )
             }
-            _ui.update { it.copy(printerMessage = if (ok) "ok" else "failed") }
+
+            return
+        }
+
+        viewModelScope.launch {
+            val ok =
+                when (
+                    state.printerProvider
+                ) {
+                    PrinterProviderType.ESC_POS ->
+                        runCatching {
+                            printerService.test(
+                                state.printerHost,
+                                state.printerPort
+                            )
+                        }.getOrDefault(
+                            false
+                        )
+
+                    PrinterProviderType.STAR ->
+                        runCatching {
+                            starPrinterService.test(
+                                state.starIdentifier,
+                                state.starInterface
+                            )
+                        }.getOrDefault(
+                            false
+                        )
+                }
+
+            _ui.update {
+                it.copy(
+                    printerMessage =
+                        if (
+                            ok
+                        ) {
+                            "ok"
+                        } else {
+                            "failed"
+                        }
+                )
+            }
         }
     }
 
     fun openDrawer() {
-        val state = _ui.value
-        viewModelScope.launch {
-            val ok = when (state.printerProvider) {
-                PrinterProviderType.ESC_POS ->
-                    runCatching { printerService.pulseDrawer(state.printerHost, state.printerPort) }.getOrDefault(false)
+        val state =
+            _ui.value
 
-                PrinterProviderType.STAR ->
-                    runCatching { starPrinterService.pulseDrawer(state.starIdentifier, state.starInterface) }.getOrDefault(false)
+        if (
+            state.hardwareMode ==
+            HardwareMode.SIMULATED
+        ) {
+            recordHardwareSimulationEvent(
+                action =
+                    "drawer_open",
+                detail =
+                    state.printerProvider.name
+            )
+
+            _ui.update {
+                it.copy(
+                    printerMessage =
+                        "simulated_drawer_ok"
+                )
             }
-            _ui.update { it.copy(printerMessage = if (ok) "drawer_ok" else "failed") }
+
+            return
+        }
+
+        viewModelScope.launch {
+            val ok =
+                when (
+                    state.printerProvider
+                ) {
+                    PrinterProviderType.ESC_POS ->
+                        runCatching {
+                            printerService.pulseDrawer(
+                                state.printerHost,
+                                state.printerPort
+                            )
+                        }.getOrDefault(
+                            false
+                        )
+
+                    PrinterProviderType.STAR ->
+                        runCatching {
+                            starPrinterService.pulseDrawer(
+                                state.starIdentifier,
+                                state.starInterface
+                            )
+                        }.getOrDefault(
+                            false
+                        )
+                }
+
+            _ui.update {
+                it.copy(
+                    printerMessage =
+                        if (
+                            ok
+                        ) {
+                            "drawer_ok"
+                        } else {
+                            "failed"
+                        }
+                )
+            }
         }
     }
 
@@ -3365,6 +3587,30 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 report,
                 state.language
             )
+
+        if (
+            state.hardwareMode ==
+            HardwareMode.SIMULATED
+        ) {
+            recordHardwareSimulationEvent(
+                action =
+                    "report_print",
+                detail =
+                    "${report.reportType.uppercase()}:" +
+                        report.sessionId,
+                previewText =
+                    text
+            )
+
+            _ui.update {
+                it.copy(
+                    cashReportPrintMessage =
+                        "cash_report_printed_simulated"
+                )
+            }
+
+            return
+        }
 
         viewModelScope.launch {
             _ui.update {
