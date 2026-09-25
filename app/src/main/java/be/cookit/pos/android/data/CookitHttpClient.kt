@@ -57,8 +57,26 @@ data class NativePosDeviceCheck(
 
 class CookitHttpClient {
     var languageCode: String = "fr"
+
+    /*
+     * Native CashRegister endpoints are POS/device scoped by the backend.
+     *
+     * This value is the permanent Android device identity owned by
+     * FiscalRuntimeRepository. It is transport metadata only; it never
+     * participates in fiscal payload construction.
+     */
+    var nativeDeviceId: String = ""
+        private set
+
     private val baseUrl = BuildConfig.COOKIT_API_BASE_URL.trimEnd('/') + "/"
     private val originUrl = baseUrl.substringBefore("/api/application-integration/").trimEnd('/') + "/"
+
+    fun bindNativeDeviceId(deviceId: String?) {
+        nativeDeviceId =
+            deviceId
+                ?.trim()
+                .orEmpty()
+    }
 
     suspend fun login(email: String, password: String): String = withContext(Dispatchers.IO) {
         val body = JSONObject()
@@ -109,6 +127,72 @@ class CookitHttpClient {
 
         val role = mapRole(roleText)
 
+        /*
+         * Role-derived policy remains useful for the existing native UX,
+         * but CashRegister manager/report authority must come from the
+         * real Cloud permissions exposed by Spatie.
+         *
+         * Failure is deliberately fail-closed for the two sensitive
+         * CashRegister capabilities.
+         */
+        val permissionJson =
+            runCatching {
+                request(
+                    "platform/permissions",
+                    token = token
+                )
+            }.getOrNull()
+
+        val cloudPermissions =
+            mutableSetOf<String>()
+
+        permissionJson
+            ?.optJSONArray(
+                "permissions"
+            )
+            ?.let {
+                array ->
+
+                for (
+                    index in 0 until array.length()
+                ) {
+                    val permission =
+                        array.optString(
+                            index
+                        ).trim()
+
+                    if (
+                        permission.isNotBlank()
+                    ) {
+                        cloudPermissions +=
+                            permission
+                    }
+                }
+            }
+
+        val basePolicy =
+            defaultPolicy(
+                role
+            )
+
+        val canApproveCashRegister =
+            cloudPermissions.any {
+                permission ->
+                permission.equals(
+                    "Approve Cash Register",
+                    ignoreCase = true
+                )
+            }
+
+        val canViewCashRegisterReports =
+            cloudPermissions.any {
+                permission ->
+                permission.equals(
+                    "View Cash Register Reports",
+                    ignoreCase = true
+                )
+            }
+
         PlatformSnapshot(
             user = UserSession(
                 id = userObj?.optLong("id", 0L) ?: 0L,
@@ -120,7 +204,13 @@ class CookitHttpClient {
                 restaurantId = restaurantId,
                 branchId = branchId
             ),
-            policy = defaultPolicy(role)
+            policy =
+                basePolicy.copy(
+                    canApproveCashRegister =
+                        canApproveCashRegister,
+                    canViewCashRegisterReports =
+                        canViewCashRegisterReports
+                )
         )
     }
 
@@ -1421,6 +1511,339 @@ class CookitHttpClient {
             )
     }
 
+    suspend fun approveCashSession(
+        token: String,
+        sessionId: Long
+    ): CashSession =
+        mutateCashClosingApproval(
+            token = token,
+            sessionId = sessionId,
+            action = "approve"
+        )
+
+    suspend fun rejectCashSession(
+        token: String,
+        sessionId: Long
+    ): CashSession =
+        mutateCashClosingApproval(
+            token = token,
+            sessionId = sessionId,
+            action = "reject"
+        )
+
+    private suspend fun mutateCashClosingApproval(
+        token: String,
+        sessionId: Long,
+        action: String
+    ): CashSession = withContext(Dispatchers.IO) {
+        val normalizedAction =
+            action
+                .trim()
+                .lowercase(
+                    Locale.ROOT
+                )
+
+        if (
+            normalizedAction !in
+            setOf(
+                "approve",
+                "reject"
+            )
+        ) {
+            throw IllegalArgumentException(
+                "Unsupported CashRegister manager action."
+            )
+        }
+
+        val json =
+            request(
+                "pos/cash-register/sessions/" +
+                    "$sessionId/$normalizedAction",
+                method = "POST",
+                token = token,
+                body = JSONObject()
+            )
+
+        val obj =
+            findObjectDeep(
+                json,
+                setOf(
+                    "session",
+                    "data"
+                )
+            ) ?: json
+
+        parseCashSession(
+            obj
+        ) ?: throw CookitApiException(
+            200,
+            "Cash-register manager response is incomplete."
+        )
+    }
+
+    suspend fun cashRegisterReport(
+        token: String,
+        sessionId: Long,
+        reportType: String
+    ): CashRegisterReport =
+        withContext(
+            Dispatchers.IO
+        ) {
+            val normalizedType =
+                reportType
+                    .trim()
+                    .lowercase(
+                        Locale.ROOT
+                    )
+
+            if (
+                normalizedType !in
+                setOf(
+                    "x",
+                    "z"
+                )
+            ) {
+                throw IllegalArgumentException(
+                    "Cash-register report type must be X or Z."
+                )
+            }
+
+            val json =
+                request(
+                    "pos/cash-register/sessions/" +
+                        "$sessionId/reports/$normalizedType",
+                    token = token
+                )
+
+            val obj =
+                json.optJSONObject(
+                    "data"
+                ) ?: json
+
+            parseCashRegisterReport(
+                obj
+            ) ?: throw CookitApiException(
+                200,
+                "Cash-register report payload is incomplete."
+            )
+        }
+
+    private fun parseCashRegisterReport(
+        obj: JSONObject
+    ): CashRegisterReport? {
+        val reportType =
+            obj.optText(
+                "report_type"
+            )
+                ?.trim()
+                ?.lowercase(
+                    Locale.ROOT
+                )
+                ?: return null
+
+        if (
+            reportType !in
+            setOf(
+                "x",
+                "z"
+            )
+        ) {
+            return null
+        }
+
+        val session =
+            obj.optJSONObject(
+                "session"
+            ) ?: return null
+
+        val sessionId =
+            session.longAny(
+                "id",
+                "session_id"
+            ) ?: return null
+
+        val register =
+            session.optJSONObject(
+                "register"
+            )
+
+        val cashier =
+            session.optJSONObject(
+                "cashier"
+            )
+
+        val paymentMethodTotals =
+            linkedMapOf<String, Double>()
+
+        obj.optJSONObject(
+            "payment_method_totals"
+        )
+            ?.let {
+                methods ->
+
+                val keys =
+                    methods.keys()
+
+                while (
+                    keys.hasNext()
+                ) {
+                    val key =
+                        keys.next()
+
+                    val amount =
+                        methods.optDouble(
+                            key,
+                            Double.NaN
+                        )
+
+                    if (
+                        ! amount.isNaN()
+                    ) {
+                        paymentMethodTotals[
+                            key
+                        ] = amount
+                    }
+                }
+            }
+
+        val denominations =
+            mutableListOf<CashReportDenomination>()
+
+        val denominationArray =
+            obj.optJSONArray(
+                "denominations"
+            ) ?: JSONArray()
+
+        for (
+            index in 0 until denominationArray.length()
+        ) {
+            val denomination =
+                denominationArray.optJSONObject(
+                    index
+                ) ?: continue
+
+            val value =
+                denomination.doubleAny(
+                    "value"
+                ) ?: 0.0
+
+            val count =
+                denomination.longAny(
+                    "count"
+                )
+                    ?.toInt()
+                    ?: 0
+
+            val subtotal =
+                denomination.doubleAny(
+                    "subtotal"
+                )
+                    ?: (
+                        value *
+                            count.toDouble()
+                    )
+
+            val label =
+                denomination.optText(
+                    "label"
+                )
+                    ?: String.format(
+                        Locale.FRANCE,
+                        "%.2f €",
+                        value
+                    )
+
+            denominations +=
+                CashReportDenomination(
+                    label = label,
+                    value = value,
+                    count = count,
+                    subtotal = subtotal
+                )
+        }
+
+        return CashRegisterReport(
+            reportType = reportType,
+            sessionId = sessionId,
+            sessionStatus =
+                session.optText(
+                    "status"
+                ) ?: "",
+            registerName =
+                register?.optText(
+                    "name"
+                ),
+            cashierName =
+                cashier?.optText(
+                    "name"
+                ),
+            openedAt =
+                session.optText(
+                    "opened_at"
+                ),
+            closedAt =
+                session.optText(
+                    "closed_at"
+                ),
+            generatedAt =
+                obj.optText(
+                    "generated_at"
+                ),
+            openingFloat =
+                obj.doubleAny(
+                    "opening_float"
+                ) ?: 0.0,
+            cashSales =
+                obj.doubleAny(
+                    "cash_sales"
+                ) ?: 0.0,
+            paymentMethodTotals =
+                paymentMethodTotals,
+            totalPayments =
+                obj.doubleAny(
+                    "total_payments"
+                ) ?: 0.0,
+            changeGiven =
+                obj.doubleAny(
+                    "change_given"
+                ) ?: 0.0,
+            cashIn =
+                obj.doubleAny(
+                    "cash_in"
+                ) ?: 0.0,
+            cashOut =
+                obj.doubleAny(
+                    "cash_out"
+                ) ?: 0.0,
+            safeDrops =
+                obj.doubleAny(
+                    "safe_drops"
+                ) ?: 0.0,
+            refunds =
+                obj.doubleAny(
+                    "refunds"
+                ) ?: 0.0,
+            expectedCash =
+                obj.doubleAny(
+                    "expected_cash"
+                ) ?: 0.0,
+            countedCash =
+                obj.doubleAny(
+                    "counted_cash"
+                ),
+            physicalCashCounted =
+                obj.doubleAny(
+                    "physical_cash_counted"
+                ),
+            discrepancy =
+                obj.doubleAny(
+                    "discrepancy"
+                ),
+            denominations =
+                denominations
+        )
+    }
+
     private fun parseCashSession(
         obj: JSONObject
     ): CashSession? {
@@ -1616,6 +2039,16 @@ class CookitHttpClient {
             setRequestProperty("Accept-Language", languageCode)
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("X-Requested-With", "XMLHttpRequest")
+
+            if (
+                nativeDeviceId.isNotBlank()
+            ) {
+                setRequestProperty(
+                    "X-COOKIT-DEVICE-ID",
+                    nativeDeviceId.trim()
+                )
+            }
+
             if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
             if (body != null) doOutput = true
         }

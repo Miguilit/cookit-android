@@ -2,6 +2,7 @@ package be.cookit.pos.android.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -69,6 +70,300 @@ private val CashBlueSoft = Color(0xFFEAF3FF)
 private val CashCanvas = Color(0xFFF7F8FA)
 private val CashLine = Color(0xFFE6E8EC)
 private val CashMuted = Color(0xFF68707C)
+
+private data class CashManagerStrings(
+    val managerTitle: String,
+    val managerHelp: String,
+    val approve: String,
+    val reject: String,
+    val approveTitle: String,
+    val approveMessage: String,
+    val rejectTitle: String,
+    val rejectMessage: String,
+    val cancel: String,
+    val reportsTitle: String,
+    val reportsHelp: String,
+    val xReport: String,
+    val zReport: String,
+    val reportTitleX: String,
+    val reportTitleZ: String,
+    val print: String,
+    val close: String,
+    val session: String,
+    val register: String,
+    val cashier: String,
+    val opened: String,
+    val closed: String,
+    val generated: String,
+    val opening: String,
+    val cashSales: String,
+    val totalPayments: String,
+    val changeGiven: String,
+    val cashIn: String,
+    val cashOut: String,
+    val safeDrop: String,
+    val refunds: String,
+    val expected: String,
+    val physical: String,
+    val counted: String,
+    val discrepancy: String,
+    val paymentMethods: String,
+    val denominations: String,
+    val approved: String,
+    val rejected: String,
+    val approvalForbidden: String,
+    val sessionNotPending: String,
+    val reportForbidden: String,
+    val reportSessionMissing: String,
+    val deviceMissing: String,
+    val printing: String,
+    val printed: String,
+    val printFailed: String,
+    val reportLoading: String,
+    val reportUnavailable: String
+)
+
+private fun cashManagerStrings(
+    language: AppLanguage
+): CashManagerStrings =
+    when (
+        language
+    ) {
+        AppLanguage.NL ->
+            CashManagerStrings(
+                managerTitle = "Managergoedkeuring",
+                managerHelp = "De kassasluiting wacht op controle door een bevoegde manager.",
+                approve = "Sluiting goedkeuren",
+                reject = "Terugsturen",
+                approveTitle = "Kassasluiting goedkeuren?",
+                approveMessage = "Dit sluit de fiscale shift definitief en laat de backend de ladeverklaring voorbereiden.",
+                rejectTitle = "Sluiting terugsturen?",
+                rejectMessage = "De kassasessie wordt opnieuw geopend. De ingediende telling wordt verwijderd.",
+                cancel = "Annuleren",
+                reportsTitle = "Kassarapporten",
+                reportsHelp = "X is een momentopname van een open shift. Z is alleen beschikbaar na een bevoegde sluiting.",
+                xReport = "X-rapport",
+                zReport = "Z-rapport",
+                reportTitleX = "X-rapport",
+                reportTitleZ = "Z-rapport",
+                print = "Afdrukken",
+                close = "Sluiten",
+                session = "Sessie",
+                register = "Kassa",
+                cashier = "Kassier",
+                opened = "Geopend",
+                closed = "Gesloten",
+                generated = "Gegenereerd",
+                opening = "Beginfonds",
+                cashSales = "Contante verkopen",
+                totalPayments = "Totale betalingen",
+                changeGiven = "Wisselgeld",
+                cashIn = "Kas in",
+                cashOut = "Kas uit",
+                safeDrop = "Veilige afstorting",
+                refunds = "Terugbetalingen",
+                expected = "Verwachte kas",
+                physical = "Fysiek geteld",
+                counted = "Geteld totaal",
+                discrepancy = "Verschil",
+                paymentMethods = "Betaalmethoden",
+                denominations = "Coupures",
+                approved = "Kassasluiting goedgekeurd.",
+                rejected = "Sluiting teruggestuurd naar de kassier.",
+                approvalForbidden = "Je hebt geen toestemming om kassasluitingen goed te keuren.",
+                sessionNotPending = "Deze sessie wacht niet meer op goedkeuring.",
+                reportForbidden = "Je hebt geen toestemming om kassarapporten te bekijken.",
+                reportSessionMissing = "Geen geschikte kassasessie beschikbaar voor dit rapport.",
+                deviceMissing = "De permanente identiteit van dit Android POS ontbreekt.",
+                printing = "Rapport wordt afgedrukt…",
+                printed = "Rapport afgedrukt.",
+                printFailed = "Afdrukken van het rapport is mislukt.",
+                reportLoading = "Rapport wordt geladen…",
+                reportUnavailable = "Het kassarapport is momenteel niet beschikbaar."
+            )
+
+        AppLanguage.EN ->
+            CashManagerStrings(
+                managerTitle = "Manager approval",
+                managerHelp = "This register closing is waiting for review by an authorised manager.",
+                approve = "Approve closing",
+                reject = "Send back",
+                approveTitle = "Approve register closing?",
+                approveMessage = "This definitively closes the fiscal shift and allows the backend to prepare the drawer declaration.",
+                rejectTitle = "Send closing back?",
+                rejectMessage = "The cash session will reopen and the submitted physical count will be discarded.",
+                cancel = "Cancel",
+                reportsTitle = "Cash reports",
+                reportsHelp = "X is a read-only snapshot of an open shift. Z is available only after an authoritative close.",
+                xReport = "X report",
+                zReport = "Z report",
+                reportTitleX = "X report",
+                reportTitleZ = "Z report",
+                print = "Print",
+                close = "Close",
+                session = "Session",
+                register = "Register",
+                cashier = "Cashier",
+                opened = "Opened",
+                closed = "Closed",
+                generated = "Generated",
+                opening = "Opening float",
+                cashSales = "Cash sales",
+                totalPayments = "Total payments",
+                changeGiven = "Change given",
+                cashIn = "Cash in",
+                cashOut = "Cash out",
+                safeDrop = "Safe drop",
+                refunds = "Refunds",
+                expected = "Expected cash",
+                physical = "Physical cash",
+                counted = "Counted total",
+                discrepancy = "Discrepancy",
+                paymentMethods = "Payment methods",
+                denominations = "Denominations",
+                approved = "Register closing approved.",
+                rejected = "Closing sent back to the cashier.",
+                approvalForbidden = "You do not have permission to approve cash-register closings.",
+                sessionNotPending = "This session is no longer awaiting approval.",
+                reportForbidden = "You do not have permission to view cash-register reports.",
+                reportSessionMissing = "No eligible cash-register session is available for this report.",
+                deviceMissing = "The permanent identity of this Android POS is unavailable.",
+                printing = "Printing report…",
+                printed = "Report printed.",
+                printFailed = "Report printing failed.",
+                reportLoading = "Loading report…",
+                reportUnavailable = "The cash-register report is currently unavailable."
+            )
+
+        AppLanguage.DE ->
+            CashManagerStrings(
+                managerTitle = "Managerfreigabe",
+                managerHelp = "Dieser Kassenabschluss wartet auf die Prüfung durch einen berechtigten Manager.",
+                approve = "Abschluss freigeben",
+                reject = "Zurückgeben",
+                approveTitle = "Kassenabschluss freigeben?",
+                approveMessage = "Dadurch wird die Fiskalschicht endgültig geschlossen und das Backend kann die Kassenschubladendeklaration vorbereiten.",
+                rejectTitle = "Abschluss zurückgeben?",
+                rejectMessage = "Die Kassensitzung wird wieder geöffnet und die eingereichte physische Zählung wird verworfen.",
+                cancel = "Abbrechen",
+                reportsTitle = "Kassenberichte",
+                reportsHelp = "X ist eine schreibgeschützte Momentaufnahme einer offenen Schicht. Z ist erst nach einem autoritativen Abschluss verfügbar.",
+                xReport = "X-Bericht",
+                zReport = "Z-Bericht",
+                reportTitleX = "X-Bericht",
+                reportTitleZ = "Z-Bericht",
+                print = "Drucken",
+                close = "Schließen",
+                session = "Sitzung",
+                register = "Kasse",
+                cashier = "Kassierer",
+                opened = "Geöffnet",
+                closed = "Geschlossen",
+                generated = "Erstellt",
+                opening = "Anfangsbestand",
+                cashSales = "Barverkäufe",
+                totalPayments = "Zahlungen gesamt",
+                changeGiven = "Wechselgeld",
+                cashIn = "Einzahlung",
+                cashOut = "Auszahlung",
+                safeDrop = "Tresoreinwurf",
+                refunds = "Rückerstattungen",
+                expected = "Erwarteter Bargeldbestand",
+                physical = "Physisch gezählt",
+                counted = "Gezählter Gesamtbetrag",
+                discrepancy = "Differenz",
+                paymentMethods = "Zahlungsarten",
+                denominations = "Stückelungen",
+                approved = "Kassenabschluss freigegeben.",
+                rejected = "Abschluss an den Kassierer zurückgegeben.",
+                approvalForbidden = "Du hast keine Berechtigung, Kassenabschlüsse freizugeben.",
+                sessionNotPending = "Diese Sitzung wartet nicht mehr auf eine Freigabe.",
+                reportForbidden = "Du hast keine Berechtigung, Kassenberichte anzuzeigen.",
+                reportSessionMissing = "Für diesen Bericht ist keine geeignete Kassensitzung verfügbar.",
+                deviceMissing = "Die permanente Identität dieses Android-POS ist nicht verfügbar.",
+                printing = "Bericht wird gedruckt…",
+                printed = "Bericht gedruckt.",
+                printFailed = "Drucken des Berichts fehlgeschlagen.",
+                reportLoading = "Bericht wird geladen…",
+                reportUnavailable = "Der Kassenbericht ist derzeit nicht verfügbar."
+            )
+
+        else ->
+            CashManagerStrings(
+                managerTitle = "Validation manager",
+                managerHelp = "Cette clôture de caisse attend le contrôle d’un manager autorisé.",
+                approve = "Approuver la clôture",
+                reject = "Renvoyer au caissier",
+                approveTitle = "Approuver la clôture de caisse ?",
+                approveMessage = "Cette action ferme définitivement le shift fiscal et autorise le backend à préparer la déclaration de tiroir.",
+                rejectTitle = "Renvoyer cette clôture ?",
+                rejectMessage = "La session de caisse sera rouverte et le comptage physique soumis sera supprimé.",
+                cancel = "Annuler",
+                reportsTitle = "Rapports de caisse",
+                reportsHelp = "X est une photographie en lecture seule du shift ouvert. Z n’est disponible qu’après une clôture autoritative.",
+                xReport = "Rapport X",
+                zReport = "Rapport Z",
+                reportTitleX = "Rapport X",
+                reportTitleZ = "Rapport Z",
+                print = "Imprimer",
+                close = "Fermer",
+                session = "Session",
+                register = "Caisse",
+                cashier = "Caissier",
+                opened = "Ouverte",
+                closed = "Fermée",
+                generated = "Généré",
+                opening = "Fond de caisse",
+                cashSales = "Ventes espèces",
+                totalPayments = "Paiements totaux",
+                changeGiven = "Monnaie rendue",
+                cashIn = "Entrée espèces",
+                cashOut = "Sortie espèces",
+                safeDrop = "Dépôt coffre",
+                refunds = "Remboursements",
+                expected = "Espèces attendues",
+                physical = "Espèces physiques",
+                counted = "Total compté",
+                discrepancy = "Écart",
+                paymentMethods = "Moyens de paiement",
+                denominations = "Coupures",
+                approved = "Clôture de caisse approuvée.",
+                rejected = "Clôture renvoyée au caissier.",
+                approvalForbidden = "Vous n’avez pas la permission d’approuver les clôtures de caisse.",
+                sessionNotPending = "Cette session n’attend plus de validation.",
+                reportForbidden = "Vous n’avez pas la permission de consulter les rapports de caisse.",
+                reportSessionMissing = "Aucune session de caisse éligible n’est disponible pour ce rapport.",
+                deviceMissing = "L’identité permanente de cette caisse Android est indisponible.",
+                printing = "Impression du rapport…",
+                printed = "Rapport imprimé.",
+                printFailed = "Échec de l’impression du rapport.",
+                reportLoading = "Chargement du rapport…",
+                reportUnavailable = "Le rapport de caisse est momentanément indisponible."
+            )
+    }
+
+private fun cashReportErrorText(
+    value: String,
+    strings: CashManagerStrings
+): String =
+    when (
+        value
+    ) {
+        "cash_report_forbidden" ->
+            strings.reportForbidden
+
+        "cash_report_session_missing" ->
+            strings.reportSessionMissing
+
+        "cash_device_identity_missing" ->
+            strings.deviceMissing
+
+        "cash_report_type_invalid" ->
+            strings.reportUnavailable
+
+        else ->
+            strings.reportUnavailable
+    }
 
 private data class CashRegisterStrings(
     val title: String,
@@ -320,6 +615,11 @@ fun PremiumCashRegisterScreen(
             state.language
         )
 
+    val managerStrings =
+        cashManagerStrings(
+            state.language
+        )
+
     var movementAction by
         remember {
             mutableStateOf<MovementAction?>(
@@ -328,6 +628,20 @@ fun PremiumCashRegisterScreen(
         }
 
     var closeOpen by
+        remember {
+            mutableStateOf(
+                false
+            )
+        }
+
+    var approveConfirmOpen by
+        remember {
+            mutableStateOf(
+                false
+            )
+        }
+
+    var rejectConfirmOpen by
         remember {
             mutableStateOf(
                 false
@@ -359,11 +673,154 @@ fun PremiumCashRegisterScreen(
         state.activeCashSession
 
     if (session == null) {
-        CashRegisterOpening(
-            state = state,
-            vm = vm,
-            s = s
-        )
+        Box(
+            modifier =
+                Modifier.fillMaxSize()
+        ) {
+            CashRegisterOpening(
+                state = state,
+                vm = vm,
+                s = s
+            )
+
+            val lastClosedSession =
+                state.lastClosedCashSession
+
+            if (
+                state.policy.canViewCashRegisterReports
+                && lastClosedSession != null
+            ) {
+                Surface(
+                    modifier =
+                        Modifier
+                            .align(
+                                Alignment.BottomEnd
+                            )
+                            .padding(
+                                20.dp
+                            ),
+                    shape =
+                        RoundedCornerShape(
+                            20.dp
+                        ),
+                    color =
+                        Color.White,
+                    border =
+                        BorderStroke(
+                            1.dp,
+                            CashLine
+                        )
+                ) {
+                    Column(
+                        modifier =
+                            Modifier.padding(
+                                16.dp
+                            ),
+                        verticalArrangement =
+                            Arrangement.spacedBy(
+                                10.dp
+                            )
+                    ) {
+                        Text(
+                            managerStrings.reportTitleZ,
+                            fontWeight =
+                                FontWeight.Black,
+                            fontSize =
+                                18.sp
+                        )
+
+                        Text(
+                            "${managerStrings.session} #${lastClosedSession.id}",
+                            color =
+                                CashMuted
+                        )
+
+                        if (
+                            state.cashActionMessage
+                                == "cash_closing_approved"
+                        ) {
+                            Text(
+                                managerStrings.approved,
+                                color =
+                                    CashGreen,
+                                fontWeight =
+                                    FontWeight.SemiBold
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                vm.loadCashReport(
+                                    "z",
+                                    lastClosedSession.id
+                                )
+                            },
+                            enabled =
+                                ! state.cashReportBusy
+                        ) {
+                            if (
+                                state.cashReportBusy
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier =
+                                        Modifier.size(
+                                            18.dp
+                                        )
+                                )
+
+                                Spacer(
+                                    Modifier.width(
+                                        8.dp
+                                    )
+                                )
+                            }
+
+                            Text(
+                                managerStrings.zReport
+                            )
+                        }
+
+                        state.cashReportError
+                            ?.let {
+                                error ->
+
+                                Text(
+                                    cashReportErrorText(
+                                        error,
+                                        managerStrings
+                                    ),
+                                    color =
+                                        MaterialTheme
+                                            .colorScheme
+                                            .error,
+                                    fontSize =
+                                        13.sp
+                                )
+                            }
+                    }
+                }
+            }
+        }
+
+        state.cashReport
+            ?.let {
+                report ->
+
+                CashReportDialog(
+                    report =
+                        report,
+                    strings =
+                        managerStrings,
+                    printMessage =
+                        state.cashReportPrintMessage,
+                    reportError =
+                        state.cashReportError,
+                    onPrint =
+                        vm::printCashReport,
+                    onDismiss =
+                        vm::clearCashReport
+                )
+            }
 
         return
     }
@@ -530,6 +987,131 @@ fun PremiumCashRegisterScreen(
                                 s.pendingHelp,
                                 color = CashMuted,
                                 fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (
+            pending
+            && state.policy.canApproveCashRegister
+        ) {
+            item {
+                Card(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    colors =
+                        CardDefaults.cardColors(
+                            containerColor =
+                                CashBlueSoft
+                        ),
+                    border =
+                        BorderStroke(
+                            1.dp,
+                            CashLine
+                        ),
+                    shape =
+                        RoundedCornerShape(
+                            22.dp
+                        )
+                ) {
+                    Column(
+                        modifier =
+                            Modifier.padding(
+                                18.dp
+                            ),
+                        verticalArrangement =
+                            Arrangement.spacedBy(
+                                12.dp
+                            )
+                    ) {
+                        Row(
+                            verticalAlignment =
+                                Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                null
+                            )
+
+                            Spacer(
+                                Modifier.width(
+                                    10.dp
+                                )
+                            )
+
+                            Column {
+                                Text(
+                                    managerStrings.managerTitle,
+                                    fontWeight =
+                                        FontWeight.Black,
+                                    fontSize =
+                                        18.sp
+                                )
+
+                                Text(
+                                    managerStrings.managerHelp,
+                                    color =
+                                        CashMuted,
+                                    fontSize =
+                                        13.sp
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            horizontalArrangement =
+                                Arrangement.spacedBy(
+                                    10.dp
+                                )
+                        ) {
+                            Button(
+                                onClick = {
+                                    approveConfirmOpen =
+                                        true
+                                },
+                                enabled =
+                                    ! state.cashManagerBusy,
+                                modifier =
+                                    Modifier.weight(
+                                        1f
+                                    )
+                            ) {
+                                Text(
+                                    managerStrings.approve
+                                )
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    rejectConfirmOpen =
+                                        true
+                                },
+                                enabled =
+                                    ! state.cashManagerBusy,
+                                modifier =
+                                    Modifier.weight(
+                                        1f
+                                    )
+                            ) {
+                                Text(
+                                    managerStrings.reject
+                                )
+                            }
+                        }
+
+                        if (
+                            state.cashManagerBusy
+                        ) {
+                            CircularProgressIndicator(
+                                modifier =
+                                    Modifier.size(
+                                        22.dp
+                                    )
                             )
                         }
                     }
@@ -776,6 +1358,193 @@ fun PremiumCashRegisterScreen(
             }
         }
 
+        if (
+            state.policy.canViewCashRegisterReports
+        ) {
+            item {
+                Card(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    colors =
+                        CardDefaults.cardColors(
+                            containerColor =
+                                Color.White
+                        ),
+                    border =
+                        BorderStroke(
+                            1.dp,
+                            CashLine
+                        ),
+                    shape =
+                        RoundedCornerShape(
+                            22.dp
+                        )
+                ) {
+                    Column(
+                        modifier =
+                            Modifier.padding(
+                                18.dp
+                            ),
+                        verticalArrangement =
+                            Arrangement.spacedBy(
+                                12.dp
+                            )
+                    ) {
+                        Row(
+                            verticalAlignment =
+                                Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.ReceiptLong,
+                                null
+                            )
+
+                            Spacer(
+                                Modifier.width(
+                                    10.dp
+                                )
+                            )
+
+                            Column {
+                                Text(
+                                    managerStrings.reportsTitle,
+                                    fontWeight =
+                                        FontWeight.Black,
+                                    fontSize =
+                                        18.sp
+                                )
+
+                                Text(
+                                    managerStrings.reportsHelp,
+                                    color =
+                                        CashMuted,
+                                    fontSize =
+                                        13.sp
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier =
+                                Modifier.fillMaxWidth(),
+                            horizontalArrangement =
+                                Arrangement.spacedBy(
+                                    10.dp
+                                )
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    vm.loadCashReport(
+                                        "x",
+                                        session.id
+                                    )
+                                },
+                                enabled =
+                                    (
+                                        open
+                                        || pending
+                                    )
+                                    && ! state.cashReportBusy,
+                                modifier =
+                                    Modifier.weight(
+                                        1f
+                                    )
+                            ) {
+                                Text(
+                                    managerStrings.xReport
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    vm.loadCashReport(
+                                        "z"
+                                    )
+                                },
+                                enabled =
+                                    state.lastClosedCashSession
+                                        != null
+                                    && ! state.cashReportBusy,
+                                modifier =
+                                    Modifier.weight(
+                                        1f
+                                    )
+                            ) {
+                                Text(
+                                    managerStrings.zReport
+                                )
+                            }
+                        }
+
+                        if (
+                            state.cashReportBusy
+                        ) {
+                            Row(
+                                verticalAlignment =
+                                    Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier =
+                                        Modifier.size(
+                                            20.dp
+                                        )
+                                )
+
+                                Spacer(
+                                    Modifier.width(
+                                        10.dp
+                                    )
+                                )
+
+                                Text(
+                                    managerStrings.reportLoading,
+                                    color =
+                                        CashMuted
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        state.cashReportError
+            ?.let {
+                error ->
+
+                item {
+                    Surface(
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .errorContainer,
+                        shape =
+                            RoundedCornerShape(
+                                14.dp
+                            )
+                    ) {
+                        Text(
+                            cashReportErrorText(
+                                error,
+                                managerStrings
+                            ),
+                            modifier =
+                                Modifier.padding(
+                                    14.dp
+                                ),
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .onErrorContainer,
+                            fontWeight =
+                                FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
         state.cashActionMessage
             ?.let {
                 marker ->
@@ -790,6 +1559,12 @@ fun PremiumCashRegisterScreen(
 
                             "cash_closing_submitted" ->
                                 s.closingSubmitted
+
+                            "cash_closing_approved" ->
+                                managerStrings.approved
+
+                            "cash_closing_rejected" ->
+                                managerStrings.rejected
 
                             else ->
                                 marker
@@ -837,6 +1612,21 @@ fun PremiumCashRegisterScreen(
 
                             "cash_denominations_missing" ->
                                 s.denominationsMissing
+
+                            "cash_approval_forbidden" ->
+                                managerStrings.approvalForbidden
+
+                            "cash_session_not_pending" ->
+                                managerStrings.sessionNotPending
+
+                            "cash_report_forbidden" ->
+                                managerStrings.reportForbidden
+
+                            "cash_report_session_missing" ->
+                                managerStrings.reportSessionMissing
+
+                            "cash_device_identity_missing" ->
+                                managerStrings.deviceMissing
 
                             else ->
                                 marker
@@ -996,7 +1786,634 @@ fun PremiumCashRegisterScreen(
             }
         )
     }
+    if (
+        approveConfirmOpen
+    ) {
+        AlertDialog(
+            onDismissRequest = {
+                if (
+                    ! state.cashManagerBusy
+                ) {
+                    approveConfirmOpen =
+                        false
+                }
+            },
+            title = {
+                Text(
+                    managerStrings.approveTitle,
+                    fontWeight =
+                        FontWeight.Black
+                )
+            },
+            text = {
+                Text(
+                    managerStrings.approveMessage
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        approveConfirmOpen =
+                            false
+
+                        vm.approveCashClosing()
+                    },
+                    enabled =
+                        ! state.cashManagerBusy
+                ) {
+                    Text(
+                        managerStrings.approve
+                    )
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        approveConfirmOpen =
+                            false
+                    },
+                    enabled =
+                        ! state.cashManagerBusy
+                ) {
+                    Text(
+                        managerStrings.cancel
+                    )
+                }
+            }
+        )
+    }
+
+    if (
+        rejectConfirmOpen
+    ) {
+        AlertDialog(
+            onDismissRequest = {
+                if (
+                    ! state.cashManagerBusy
+                ) {
+                    rejectConfirmOpen =
+                        false
+                }
+            },
+            title = {
+                Text(
+                    managerStrings.rejectTitle,
+                    fontWeight =
+                        FontWeight.Black
+                )
+            },
+            text = {
+                Text(
+                    managerStrings.rejectMessage
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        rejectConfirmOpen =
+                            false
+
+                        vm.rejectCashClosing()
+                    },
+                    enabled =
+                        ! state.cashManagerBusy
+                ) {
+                    Text(
+                        managerStrings.reject
+                    )
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        rejectConfirmOpen =
+                            false
+                    },
+                    enabled =
+                        ! state.cashManagerBusy
+                ) {
+                    Text(
+                        managerStrings.cancel
+                    )
+                }
+            }
+        )
+    }
+
+    state.cashReport
+        ?.let {
+            report ->
+
+            CashReportDialog(
+                report =
+                    report,
+                strings =
+                    managerStrings,
+                printMessage =
+                    state.cashReportPrintMessage,
+                reportError =
+                    state.cashReportError,
+                onPrint =
+                    vm::printCashReport,
+                onDismiss =
+                    vm::clearCashReport
+            )
+        }
+
 }
+
+
+@Composable
+private fun CashReportDialog(
+    report: be.cookit.pos.android.domain.CashRegisterReport,
+    strings: CashManagerStrings,
+    printMessage: String?,
+    reportError: String?,
+    onPrint: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    fun money(
+        value: Double
+    ): String =
+        String.format(
+            Locale.FRANCE,
+            "%.2f €",
+            value
+        )
+
+    Dialog(
+        onDismissRequest =
+            onDismiss
+    ) {
+        Surface(
+            modifier =
+                Modifier.fillMaxWidth(),
+            shape =
+                RoundedCornerShape(
+                    24.dp
+                ),
+            color =
+                CashCanvas
+        ) {
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(
+                            rememberScrollState()
+                        )
+                        .padding(
+                            20.dp
+                        ),
+                verticalArrangement =
+                    Arrangement.spacedBy(
+                        12.dp
+                    )
+            ) {
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    verticalAlignment =
+                        Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.ReceiptLong,
+                        null
+                    )
+
+                    Spacer(
+                        Modifier.width(
+                            10.dp
+                        )
+                    )
+
+                    Column(
+                        modifier =
+                            Modifier.weight(
+                                1f
+                            )
+                    ) {
+                        Text(
+                            if (
+                                report.reportType.equals(
+                                    "z",
+                                    ignoreCase = true
+                                )
+                            ) {
+                                strings.reportTitleZ
+                            } else {
+                                strings.reportTitleX
+                            },
+                            fontWeight =
+                                FontWeight.Black,
+                            fontSize =
+                                24.sp
+                        )
+
+                        Text(
+                            "${strings.session} #${report.sessionId}",
+                            color =
+                                CashMuted
+                        )
+                    }
+
+                    IconButton(
+                        onClick =
+                            onDismiss
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            strings.close
+                        )
+                    }
+                }
+
+                HorizontalDivider()
+
+                CashReportInfoRow(
+                    label =
+                        strings.register,
+                    value =
+                        report.registerName
+                            ?: "—"
+                )
+
+                CashReportInfoRow(
+                    label =
+                        strings.cashier,
+                    value =
+                        report.cashierName
+                            ?: "—"
+                )
+
+                report.openedAt
+                    ?.let {
+                        CashReportInfoRow(
+                            label =
+                                strings.opened,
+                            value =
+                                it
+                        )
+                    }
+
+                report.closedAt
+                    ?.let {
+                        CashReportInfoRow(
+                            label =
+                                strings.closed,
+                            value =
+                                it
+                        )
+                    }
+
+                report.generatedAt
+                    ?.let {
+                        CashReportInfoRow(
+                            label =
+                                strings.generated,
+                            value =
+                                it
+                        )
+                    }
+
+                HorizontalDivider()
+
+                CashReportMoneyRow(
+                    strings.opening,
+                    report.openingFloat,
+                    ::money
+                )
+
+                CashReportMoneyRow(
+                    strings.cashSales,
+                    report.cashSales,
+                    ::money
+                )
+
+                CashReportMoneyRow(
+                    strings.totalPayments,
+                    report.totalPayments,
+                    ::money
+                )
+
+                CashReportMoneyRow(
+                    strings.changeGiven,
+                    report.changeGiven,
+                    ::money
+                )
+
+                CashReportMoneyRow(
+                    strings.cashIn,
+                    report.cashIn,
+                    ::money
+                )
+
+                CashReportMoneyRow(
+                    strings.cashOut,
+                    report.cashOut,
+                    ::money
+                )
+
+                CashReportMoneyRow(
+                    strings.safeDrop,
+                    report.safeDrops,
+                    ::money
+                )
+
+                CashReportMoneyRow(
+                    strings.refunds,
+                    report.refunds,
+                    ::money
+                )
+
+                Surface(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    shape =
+                        RoundedCornerShape(
+                            16.dp
+                        ),
+                    color =
+                        CashOrangeSoft
+                ) {
+                    Row(
+                        modifier =
+                            Modifier.padding(
+                                14.dp
+                            )
+                            .fillMaxWidth(),
+                        horizontalArrangement =
+                            Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            strings.expected,
+                            fontWeight =
+                                FontWeight.Black
+                        )
+
+                        Text(
+                            money(
+                                report.expectedCash
+                            ),
+                            fontWeight =
+                                FontWeight.Black
+                        )
+                    }
+                }
+
+                report.physicalCashCounted
+                    ?.let {
+                        CashReportMoneyRow(
+                            strings.physical,
+                            it,
+                            ::money
+                        )
+                    }
+
+                report.countedCash
+                    ?.let {
+                        CashReportMoneyRow(
+                            strings.counted,
+                            it,
+                            ::money
+                        )
+                    }
+
+                report.discrepancy
+                    ?.let {
+                        CashReportMoneyRow(
+                            strings.discrepancy,
+                            it,
+                            ::money
+                        )
+                    }
+
+                if (
+                    report.paymentMethodTotals
+                        .isNotEmpty()
+                ) {
+                    HorizontalDivider()
+
+                    Text(
+                        strings.paymentMethods,
+                        fontWeight =
+                            FontWeight.Black,
+                        fontSize =
+                            17.sp
+                    )
+
+                    report.paymentMethodTotals
+                        .toSortedMap()
+                        .forEach {
+                            (method, amount) ->
+
+                            CashReportInfoRow(
+                                label =
+                                    method,
+                                value =
+                                    money(
+                                        amount
+                                    )
+                            )
+                        }
+                }
+
+                if (
+                    report.denominations
+                        .isNotEmpty()
+                ) {
+                    HorizontalDivider()
+
+                    Text(
+                        strings.denominations,
+                        fontWeight =
+                            FontWeight.Black,
+                        fontSize =
+                            17.sp
+                    )
+
+                    report.denominations
+                        .forEach {
+                            denomination ->
+
+                            CashReportInfoRow(
+                                label =
+                                    "${denomination.count} × " +
+                                    money(
+                                        denomination.value
+                                    ),
+                                value =
+                                    money(
+                                        denomination.subtotal
+                                    )
+                            )
+                        }
+                }
+
+                reportError
+                    ?.takeIf {
+                        it.isNotBlank()
+                    }
+                    ?.let {
+                        error ->
+
+                        Text(
+                            cashReportErrorText(
+                                error,
+                                strings
+                            ),
+                            color =
+                                MaterialTheme
+                                    .colorScheme
+                                    .error
+                        )
+                    }
+
+                printMessage
+                    ?.let {
+                        marker ->
+
+                        Text(
+                            when (
+                                marker
+                            ) {
+                                "cash_report_printing" ->
+                                    strings.printing
+
+                                "cash_report_printed" ->
+                                    strings.printed
+
+                                "cash_report_print_failed",
+                                "cash_report_print_missing",
+                                "cash_report_print_forbidden" ->
+                                    strings.printFailed
+
+                                else ->
+                                    marker
+                            },
+                            color =
+                                when (
+                                    marker
+                                ) {
+                                    "cash_report_printed" ->
+                                        CashGreen
+
+                                    "cash_report_printing" ->
+                                        CashMuted
+
+                                    else ->
+                                        MaterialTheme
+                                            .colorScheme
+                                            .error
+                                },
+                            fontWeight =
+                                FontWeight.SemiBold
+                        )
+                    }
+
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        Arrangement.spacedBy(
+                            10.dp
+                        )
+                ) {
+                    Button(
+                        onClick =
+                            onPrint,
+                        modifier =
+                            Modifier.weight(
+                                1f
+                            )
+                    ) {
+                        Icon(
+                            Icons.Default.ReceiptLong,
+                            null
+                        )
+
+                        Spacer(
+                            Modifier.width(
+                                8.dp
+                            )
+                        )
+
+                        Text(
+                            strings.print
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick =
+                            onDismiss,
+                        modifier =
+                            Modifier.weight(
+                                1f
+                            )
+                    ) {
+                        Text(
+                            strings.close
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CashReportInfoRow(
+    label: String,
+    value: String
+) {
+    Row(
+        modifier =
+            Modifier.fillMaxWidth(),
+        horizontalArrangement =
+            Arrangement.SpaceBetween,
+        verticalAlignment =
+            Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            color =
+                CashMuted,
+            modifier =
+                Modifier.weight(
+                    1f
+                )
+        )
+
+        Spacer(
+            Modifier.width(
+                12.dp
+            )
+        )
+
+        Text(
+            value,
+            fontWeight =
+                FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun CashReportMoneyRow(
+    label: String,
+    value: Double,
+    formatter: (Double) -> String
+) {
+    CashReportInfoRow(
+        label =
+            label,
+        value =
+            formatter(
+                value
+            )
+    )
+}
+
 
 @Composable
 private fun CashRegisterOpening(

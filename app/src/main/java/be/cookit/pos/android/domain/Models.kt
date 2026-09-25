@@ -327,6 +327,38 @@ data class CashSession(
     val transactionsCount: Int = 0
 )
 
+data class CashReportDenomination(
+    val label: String,
+    val value: Double,
+    val count: Int,
+    val subtotal: Double
+)
+
+data class CashRegisterReport(
+    val reportType: String,
+    val sessionId: Long,
+    val sessionStatus: String,
+    val registerName: String? = null,
+    val cashierName: String? = null,
+    val openedAt: String? = null,
+    val closedAt: String? = null,
+    val generatedAt: String? = null,
+    val openingFloat: Double = 0.0,
+    val cashSales: Double = 0.0,
+    val paymentMethodTotals: Map<String, Double> = emptyMap(),
+    val totalPayments: Double = 0.0,
+    val changeGiven: Double = 0.0,
+    val cashIn: Double = 0.0,
+    val cashOut: Double = 0.0,
+    val safeDrops: Double = 0.0,
+    val refunds: Double = 0.0,
+    val expectedCash: Double = 0.0,
+    val countedCash: Double? = null,
+    val physicalCashCounted: Double? = null,
+    val discrepancy: Double? = null,
+    val denominations: List<CashReportDenomination> = emptyList()
+)
+
 data class NativePolicy(
     val profile: PosRole,
     val cashSessionRequired: Boolean,
@@ -334,5 +366,7 @@ data class NativePolicy(
     val canManagePrinters: Boolean,
     val canUsePos: Boolean,
     val canViewKds: Boolean,
-    val canViewDelivery: Boolean
+    val canViewDelivery: Boolean,
+    val canApproveCashRegister: Boolean = false,
+    val canViewCashRegisterReports: Boolean = false
 )

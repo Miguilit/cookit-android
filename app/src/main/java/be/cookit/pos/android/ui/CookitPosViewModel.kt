@@ -89,6 +89,12 @@ data class PosUiState(
     val cashMovements: List<CashMovement> = emptyList(),
     val cashActionMessage: String? = null,
     val cashActionError: String? = null,
+    val cashManagerBusy: Boolean = false,
+    val cashReportBusy: Boolean = false,
+    val cashReport: CashRegisterReport? = null,
+    val cashReportError: String? = null,
+    val cashReportPrintMessage: String? = null,
+    val lastClosedCashSession: CashSession? = null,
     val checkoutBusy: Boolean = false,
     val checkoutMessage: String? = null,
     val checkoutError: String? = null,
@@ -2432,6 +2438,25 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun loadCashRegisterSnapshot(
         currentToken: String
     ): CashRegisterSnapshot {
+        val nativeDeviceId =
+            _ui.value
+                .fiscalIdentity
+                ?.deviceId
+                ?.trim()
+                .orEmpty()
+
+        if (
+            nativeDeviceId.isBlank()
+        ) {
+            throw IllegalStateException(
+                "Native POS device identity is unavailable."
+            )
+        }
+
+        api.bindNativeDeviceId(
+            nativeDeviceId
+        )
+
         val registers =
             api.cashRegisters(
                 currentToken
@@ -2817,6 +2842,912 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun approveCashClosing() {
+        val currentToken =
+            token
+                ?: return
+
+        val state =
+            _ui.value
+
+        if (
+            ! state.policy.canApproveCashRegister
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_approval_forbidden"
+                )
+            }
+
+            return
+        }
+
+        val session =
+            state.activeCashSession
+
+        if (
+            session == null
+            || ! session.status.equals(
+                "pending_approval",
+                ignoreCase = true
+            )
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_session_not_pending"
+                )
+            }
+
+            return
+        }
+
+        val deviceId =
+            state.fiscalIdentity
+                ?.deviceId
+                ?.trim()
+                .orEmpty()
+
+        if (
+            deviceId.isBlank()
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_device_identity_missing"
+                )
+            }
+
+            return
+        }
+
+        api.bindNativeDeviceId(
+            deviceId
+        )
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    cashManagerBusy = true,
+                    cashActionError = null,
+                    cashActionMessage = null,
+                    cashReportError = null
+                )
+            }
+
+            try {
+                /*
+                 * This POST is never retried automatically here.
+                 *
+                 * The backend owns the atomic approval + FiscalShift close +
+                 * M133 queue transaction. Android does not prepare or submit
+                 * any fiscal provider payload.
+                 */
+                val approved =
+                    api.approveCashSession(
+                        currentToken,
+                        session.id
+                    )
+
+                val reportResult =
+                    if (
+                        _ui.value
+                            .policy
+                            .canViewCashRegisterReports
+                    ) {
+                        runCatchingPreservingCancellation {
+                            api.cashRegisterReport(
+                                currentToken,
+                                approved.id,
+                                "z"
+                            )
+                        }
+                    } else {
+                        null
+                    }
+
+                val snapshotResult =
+                    runCatchingPreservingCancellation {
+                        loadCashRegisterSnapshot(
+                            currentToken
+                        )
+                    }
+
+                snapshotResult
+                    .getOrNull()
+                    ?.let {
+                        snapshot ->
+                        applyCashRegisterSnapshot(
+                            snapshot
+                        )
+                    }
+
+                _ui.update {
+                    it.copy(
+                        cashManagerBusy = false,
+                        lastClosedCashSession =
+                            approved,
+                        cashReport =
+                            reportResult
+                                ?.getOrNull(),
+                        cashReportError =
+                            reportResult
+                                ?.exceptionOrNull()
+                                ?.let {
+                                    error ->
+                                    readableError(
+                                        error
+                                    )
+                                },
+                        cashActionMessage =
+                            "cash_closing_approved",
+                        cashActionError =
+                            snapshotResult
+                                .exceptionOrNull()
+                                ?.let {
+                                    error ->
+                                    readableError(
+                                        error
+                                    )
+                                }
+                    )
+                }
+            } catch (
+                error: Throwable
+            ) {
+                if (
+                    error is CancellationException
+                ) {
+                    throw error
+                }
+
+                _ui.update {
+                    it.copy(
+                        cashManagerBusy = false,
+                        cashActionError =
+                            readableError(
+                                error
+                            )
+                    )
+                }
+            }
+        }
+    }
+
+    fun rejectCashClosing() {
+        val currentToken =
+            token
+                ?: return
+
+        val state =
+            _ui.value
+
+        if (
+            ! state.policy.canApproveCashRegister
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_approval_forbidden"
+                )
+            }
+
+            return
+        }
+
+        val session =
+            state.activeCashSession
+
+        if (
+            session == null
+            || ! session.status.equals(
+                "pending_approval",
+                ignoreCase = true
+            )
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_session_not_pending"
+                )
+            }
+
+            return
+        }
+
+        val deviceId =
+            state.fiscalIdentity
+                ?.deviceId
+                ?.trim()
+                .orEmpty()
+
+        if (
+            deviceId.isBlank()
+        ) {
+            _ui.update {
+                it.copy(
+                    cashActionError =
+                        "cash_device_identity_missing"
+                )
+            }
+
+            return
+        }
+
+        api.bindNativeDeviceId(
+            deviceId
+        )
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    cashManagerBusy = true,
+                    cashActionError = null,
+                    cashActionMessage = null
+                )
+            }
+
+            try {
+                /*
+                 * Rejection is a Cloud CashRegister operation only.
+                 * It must not create any fiscal operation.
+                 */
+                val reopened =
+                    api.rejectCashSession(
+                        currentToken,
+                        session.id
+                    )
+
+                val snapshotResult =
+                    runCatchingPreservingCancellation {
+                        loadCashRegisterSnapshot(
+                            currentToken
+                        )
+                    }
+
+                snapshotResult
+                    .getOrNull()
+                    ?.let {
+                        snapshot ->
+                        applyCashRegisterSnapshot(
+                            snapshot
+                        )
+                    }
+
+                _ui.update {
+                    it.copy(
+                        cashManagerBusy = false,
+                        activeCashSession =
+                            snapshotResult
+                                .getOrNull()
+                                ?.session
+                                ?: reopened,
+                        lastClosedCashSession =
+                            null,
+                        cashReport =
+                            null,
+                        cashReportError =
+                            null,
+                        cashReportPrintMessage =
+                            null,
+                        cashActionMessage =
+                            "cash_closing_rejected",
+                        cashActionError =
+                            snapshotResult
+                                .exceptionOrNull()
+                                ?.let {
+                                    error ->
+                                    readableError(
+                                        error
+                                    )
+                                }
+                    )
+                }
+            } catch (
+                error: Throwable
+            ) {
+                if (
+                    error is CancellationException
+                ) {
+                    throw error
+                }
+
+                _ui.update {
+                    it.copy(
+                        cashManagerBusy = false,
+                        cashActionError =
+                            readableError(
+                                error
+                            )
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadCashReport(
+        reportType: String,
+        sessionId: Long? = null
+    ) {
+        val currentToken =
+            token
+                ?: return
+
+        val state =
+            _ui.value
+
+        if (
+            ! state.policy
+                .canViewCashRegisterReports
+        ) {
+            _ui.update {
+                it.copy(
+                    cashReportError =
+                        "cash_report_forbidden"
+                )
+            }
+
+            return
+        }
+
+        val normalizedType =
+            reportType
+                .trim()
+                .lowercase()
+
+        if (
+            normalizedType !in
+            setOf(
+                "x",
+                "z"
+            )
+        ) {
+            _ui.update {
+                it.copy(
+                    cashReportError =
+                        "cash_report_type_invalid"
+                )
+            }
+
+            return
+        }
+
+        val targetSessionId =
+            sessionId
+                ?: if (
+                    normalizedType == "z"
+                ) {
+                    state.lastClosedCashSession
+                        ?.id
+                        ?: state.cashReport
+                            ?.takeIf {
+                                it.reportType.equals(
+                                    "z",
+                                    ignoreCase = true
+                                )
+                            }
+                            ?.sessionId
+                } else {
+                    state.activeCashSession
+                        ?.id
+                }
+
+        if (
+            targetSessionId == null
+            || targetSessionId <= 0L
+        ) {
+            _ui.update {
+                it.copy(
+                    cashReportError =
+                        "cash_report_session_missing"
+                )
+            }
+
+            return
+        }
+
+        val deviceId =
+            state.fiscalIdentity
+                ?.deviceId
+                ?.trim()
+                .orEmpty()
+
+        if (
+            deviceId.isBlank()
+        ) {
+            _ui.update {
+                it.copy(
+                    cashReportError =
+                        "cash_device_identity_missing"
+                )
+            }
+
+            return
+        }
+
+        api.bindNativeDeviceId(
+            deviceId
+        )
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    cashReportBusy = true,
+                    cashReportError = null,
+                    cashReportPrintMessage = null
+                )
+            }
+
+            runCatchingPreservingCancellation {
+                api.cashRegisterReport(
+                    currentToken,
+                    targetSessionId,
+                    normalizedType
+                )
+            }
+                .onSuccess {
+                    report ->
+                    _ui.update {
+                        it.copy(
+                            cashReportBusy = false,
+                            cashReport =
+                                report,
+                            cashReportError =
+                                null
+                        )
+                    }
+                }
+                .onFailure {
+                    error ->
+                    _ui.update {
+                        it.copy(
+                            cashReportBusy = false,
+                            cashReportError =
+                                readableError(
+                                    error
+                                )
+                        )
+                    }
+                }
+        }
+    }
+
+    fun clearCashReport() {
+        _ui.update {
+            it.copy(
+                cashReport =
+                    null,
+                cashReportError =
+                    null,
+                cashReportPrintMessage =
+                    null
+            )
+        }
+    }
+
+    fun printCashReport() {
+        val state =
+            _ui.value
+
+        if (
+            ! state.policy
+                .canViewCashRegisterReports
+        ) {
+            _ui.update {
+                it.copy(
+                    cashReportPrintMessage =
+                        "cash_report_print_forbidden"
+                )
+            }
+
+            return
+        }
+
+        val report =
+            state.cashReport
+
+        if (
+            report == null
+        ) {
+            _ui.update {
+                it.copy(
+                    cashReportPrintMessage =
+                        "cash_report_print_missing"
+                )
+            }
+
+            return
+        }
+
+        val text =
+            buildCashReportPrintText(
+                report,
+                state.language
+            )
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    cashReportPrintMessage =
+                        "cash_report_printing"
+                )
+            }
+
+            val ok =
+                when (
+                    state.printerProvider
+                ) {
+                    PrinterProviderType.ESC_POS ->
+                        runCatchingPreservingCancellation {
+                            printerService.printText(
+                                host =
+                                    state.printerHost,
+                                port =
+                                    state.printerPort,
+                                text =
+                                    text,
+                                cut =
+                                    true
+                            )
+                        }.getOrDefault(
+                            false
+                        )
+
+                    PrinterProviderType.STAR ->
+                        runCatchingPreservingCancellation {
+                            starPrinterService.printText(
+                                identifier =
+                                    state.starIdentifier,
+                                interfaceType =
+                                    state.starInterface,
+                                text =
+                                    text,
+                                cut =
+                                    true
+                            )
+                        }.getOrDefault(
+                            false
+                        )
+                }
+
+            _ui.update {
+                it.copy(
+                    cashReportPrintMessage =
+                        if (
+                            ok
+                        ) {
+                            "cash_report_printed"
+                        } else {
+                            "cash_report_print_failed"
+                        }
+                )
+            }
+        }
+    }
+
+    private fun buildCashReportPrintText(
+        report: CashRegisterReport,
+        language: AppLanguage
+    ): String {
+        val labels =
+            cashReportPrintLabels(
+                language
+            )
+
+        fun money(
+            value: Double
+        ): String =
+            java.lang.String.format(
+                java.util.Locale.US,
+                "%.2f",
+                value
+            )
+
+        val lines =
+            mutableListOf<String>()
+
+        lines +=
+            "COOKIT"
+
+        lines +=
+            if (
+                report.reportType.equals(
+                    "z",
+                    ignoreCase = true
+                )
+            ) {
+                labels.zTitle
+            } else {
+                labels.xTitle
+            }
+
+        lines +=
+            "--------------------------------"
+
+        lines +=
+            "${labels.session}: #${report.sessionId}"
+
+        report.registerName
+            ?.takeIf {
+                it.isNotBlank()
+            }
+            ?.let {
+                lines +=
+                    "${labels.register}: $it"
+            }
+
+        report.cashierName
+            ?.takeIf {
+                it.isNotBlank()
+            }
+            ?.let {
+                lines +=
+                    "${labels.cashier}: $it"
+            }
+
+        report.openedAt
+            ?.takeIf {
+                it.isNotBlank()
+            }
+            ?.let {
+                lines +=
+                    "${labels.opened}: $it"
+            }
+
+        report.closedAt
+            ?.takeIf {
+                it.isNotBlank()
+            }
+            ?.let {
+                lines +=
+                    "${labels.closed}: $it"
+            }
+
+        report.generatedAt
+            ?.takeIf {
+                it.isNotBlank()
+            }
+            ?.let {
+                lines +=
+                    "${labels.generated}: $it"
+            }
+
+        lines +=
+            "--------------------------------"
+
+        lines +=
+            "${labels.opening}: ${money(report.openingFloat)}"
+
+        lines +=
+            "${labels.cashSales}: ${money(report.cashSales)}"
+
+        lines +=
+            "${labels.totalPayments}: ${money(report.totalPayments)}"
+
+        lines +=
+            "${labels.changeGiven}: ${money(report.changeGiven)}"
+
+        lines +=
+            "${labels.cashIn}: ${money(report.cashIn)}"
+
+        lines +=
+            "${labels.cashOut}: ${money(report.cashOut)}"
+
+        lines +=
+            "${labels.safeDrop}: ${money(report.safeDrops)}"
+
+        lines +=
+            "${labels.refunds}: ${money(report.refunds)}"
+
+        lines +=
+            "${labels.expected}: ${money(report.expectedCash)}"
+
+        report.physicalCashCounted
+            ?.let {
+                lines +=
+                    "${labels.physical}: ${money(it)}"
+            }
+
+        report.countedCash
+            ?.let {
+                lines +=
+                    "${labels.counted}: ${money(it)}"
+            }
+
+        report.discrepancy
+            ?.let {
+                lines +=
+                    "${labels.discrepancy}: ${money(it)}"
+            }
+
+        if (
+            report.paymentMethodTotals
+                .isNotEmpty()
+        ) {
+            lines +=
+                "--------------------------------"
+
+            lines +=
+                labels.paymentMethods
+
+            report.paymentMethodTotals
+                .toSortedMap()
+                .forEach {
+                    (method, amount) ->
+
+                    lines +=
+                        "$method: ${money(amount)}"
+                }
+        }
+
+        if (
+            report.denominations
+                .isNotEmpty()
+        ) {
+            lines +=
+                "--------------------------------"
+
+            lines +=
+                labels.denominations
+
+            report.denominations
+                .forEach {
+                    denomination ->
+
+                    lines +=
+                        "${denomination.count} x " +
+                        "${money(denomination.value)} = " +
+                        money(
+                            denomination.subtotal
+                        )
+                }
+        }
+
+        lines +=
+            "--------------------------------"
+
+        return lines.joinToString(
+            "\n"
+        )
+    }
+
+    private data class CashReportPrintLabels(
+        val xTitle: String,
+        val zTitle: String,
+        val session: String,
+        val register: String,
+        val cashier: String,
+        val opened: String,
+        val closed: String,
+        val generated: String,
+        val opening: String,
+        val cashSales: String,
+        val totalPayments: String,
+        val changeGiven: String,
+        val cashIn: String,
+        val cashOut: String,
+        val safeDrop: String,
+        val refunds: String,
+        val expected: String,
+        val physical: String,
+        val counted: String,
+        val discrepancy: String,
+        val paymentMethods: String,
+        val denominations: String
+    )
+
+    private fun cashReportPrintLabels(
+        language: AppLanguage
+    ): CashReportPrintLabels =
+        when (
+            language
+        ) {
+            AppLanguage.NL ->
+                CashReportPrintLabels(
+                    xTitle = "X-RAPPORT",
+                    zTitle = "Z-RAPPORT",
+                    session = "Sessie",
+                    register = "Kassa",
+                    cashier = "Kassier",
+                    opened = "Geopend",
+                    closed = "Gesloten",
+                    generated = "Gegenereerd",
+                    opening = "Beginfonds",
+                    cashSales = "Contante verkopen",
+                    totalPayments = "Totale betalingen",
+                    changeGiven = "Wisselgeld",
+                    cashIn = "Kas in",
+                    cashOut = "Kas uit",
+                    safeDrop = "Veilige afstorting",
+                    refunds = "Terugbetalingen",
+                    expected = "Verwachte kas",
+                    physical = "Fysiek geteld",
+                    counted = "Geteld totaal",
+                    discrepancy = "Verschil",
+                    paymentMethods = "Betaalmethoden",
+                    denominations = "Coupures"
+                )
+
+            AppLanguage.EN ->
+                CashReportPrintLabels(
+                    xTitle = "X REPORT",
+                    zTitle = "Z REPORT",
+                    session = "Session",
+                    register = "Register",
+                    cashier = "Cashier",
+                    opened = "Opened",
+                    closed = "Closed",
+                    generated = "Generated",
+                    opening = "Opening float",
+                    cashSales = "Cash sales",
+                    totalPayments = "Total payments",
+                    changeGiven = "Change given",
+                    cashIn = "Cash in",
+                    cashOut = "Cash out",
+                    safeDrop = "Safe drop",
+                    refunds = "Refunds",
+                    expected = "Expected cash",
+                    physical = "Physical cash",
+                    counted = "Counted total",
+                    discrepancy = "Discrepancy",
+                    paymentMethods = "Payment methods",
+                    denominations = "Denominations"
+                )
+
+            AppLanguage.DE ->
+                CashReportPrintLabels(
+                    xTitle = "X-BERICHT",
+                    zTitle = "Z-BERICHT",
+                    session = "Sitzung",
+                    register = "Kasse",
+                    cashier = "Kassierer",
+                    opened = "Geöffnet",
+                    closed = "Geschlossen",
+                    generated = "Erstellt",
+                    opening = "Anfangsbestand",
+                    cashSales = "Barverkäufe",
+                    totalPayments = "Zahlungen gesamt",
+                    changeGiven = "Wechselgeld",
+                    cashIn = "Einzahlung",
+                    cashOut = "Auszahlung",
+                    safeDrop = "Tresoreinwurf",
+                    refunds = "Rückerstattungen",
+                    expected = "Erwarteter Bargeldbestand",
+                    physical = "Physisch gezählt",
+                    counted = "Gezählter Gesamtbetrag",
+                    discrepancy = "Differenz",
+                    paymentMethods = "Zahlungsarten",
+                    denominations = "Stückelungen"
+                )
+
+            else ->
+                CashReportPrintLabels(
+                    xTitle = "RAPPORT X",
+                    zTitle = "RAPPORT Z",
+                    session = "Session",
+                    register = "Caisse",
+                    cashier = "Caissier",
+                    opened = "Ouverte",
+                    closed = "Fermée",
+                    generated = "Généré",
+                    opening = "Fond de caisse",
+                    cashSales = "Ventes espèces",
+                    totalPayments = "Paiements totaux",
+                    changeGiven = "Monnaie rendue",
+                    cashIn = "Entrée espèces",
+                    cashOut = "Sortie espèces",
+                    safeDrop = "Dépôt coffre",
+                    refunds = "Remboursements",
+                    expected = "Espèces attendues",
+                    physical = "Espèces physiques",
+                    counted = "Total compté",
+                    discrepancy = "Écart",
+                    paymentMethods = "Moyens de paiement",
+                    denominations = "Coupures"
+                )
+        }
+
     fun clearCashFeedback() {
         _ui.update {
             it.copy(
@@ -3012,7 +3943,17 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private suspend fun initializeFiscalRuntime() {
         runCatchingPreservingCancellation { fiscalRuntimeRepository.ensureIdentity() }
             .onSuccess { identity ->
-                _ui.update { it.copy(fiscalIdentity = identity, fiscalLocalDbError = null) }
+                api.bindNativeDeviceId(
+                    identity.deviceId
+                )
+
+                _ui.update {
+                    it.copy(
+                        fiscalIdentity = identity,
+                        fiscalLocalDbError = null
+                    )
+                }
+
                 refreshFiscalHealth()
                 maybeResumeFiscalAgentAuto()
             }

@@ -96,6 +96,8 @@ class OfflineBootstrapStore(context: Context) {
         .put("can_use_pos", policy.canUsePos)
         .put("can_view_kds", policy.canViewKds)
         .put("can_view_delivery", policy.canViewDelivery)
+        .put("can_approve_cash_register", policy.canApproveCashRegister)
+        .put("can_view_cash_register_reports", policy.canViewCashRegisterReports)
 
     private fun decodePolicy(json: JSONObject) = NativePolicy(
         profile = runCatching { PosRole.valueOf(json.optString("profile")) }.getOrDefault(PosRole.CASHIER),
@@ -104,7 +106,9 @@ class OfflineBootstrapStore(context: Context) {
         canManagePrinters = json.optBoolean("can_manage_printers", false),
         canUsePos = json.optBoolean("can_use_pos", false),
         canViewKds = json.optBoolean("can_view_kds", false),
-        canViewDelivery = json.optBoolean("can_view_delivery", false)
+        canViewDelivery = json.optBoolean("can_view_delivery", false),
+        canApproveCashRegister = json.optBoolean("can_approve_cash_register", false),
+        canViewCashRegisterReports = json.optBoolean("can_view_cash_register_reports", false)
     )
 
     private fun encodeCategory(category: Category) = JSONObject()
