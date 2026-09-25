@@ -63,7 +63,32 @@ data class Product(
     val available: Boolean = true,
     val imageUrl: String? = null,
     val vatRate: Double? = null,
-    val vatLabel: String? = null
+    val vatLabel: String? = null,
+    val hasModifiers: Boolean = false
+)
+
+data class NativeModifierOption(
+    val id: Long,
+    val groupId: Long,
+    val name: String,
+    val price: Double,
+    val available: Boolean = true,
+    val preselected: Boolean = false
+)
+
+data class NativeModifierGroup(
+    val id: Long,
+    val name: String,
+    val required: Boolean,
+    val allowMultiple: Boolean,
+    val options: List<NativeModifierOption>
+)
+
+data class SelectedModifier(
+    val id: Long,
+    val groupId: Long,
+    val name: String,
+    val price: Double
 )
 
 data class CartLine(
@@ -71,10 +96,17 @@ data class CartLine(
     val quantity: Int,
     val remoteLineId: Long? = null,
     val amountOverride: Double? = null,
-    val freeItem: Boolean = false
+    val freeItem: Boolean = false,
+    val modifiers: List<SelectedModifier> = emptyList()
 ) {
-    val total: Double get() = amountOverride ?: product.price * quantity
-    val stableKey: String get() = remoteLineId?.let { "remote:$it" } ?: "product:${product.id}"
+    val modifierUnitTotal: Double get() = modifiers.sumOf { it.price }
+    val configuredUnitPrice: Double get() = product.price + modifierUnitTotal
+    val total: Double get() = amountOverride ?: configuredUnitPrice * quantity
+    val modifierKey: String
+        get() = modifiers.map { it.id }.sorted().joinToString("-")
+    val stableKey: String
+        get() = remoteLineId?.let { "remote:$it" }
+            ?: "product:${product.id}:mods:$modifierKey"
 }
 
 data class PosOrder(
@@ -164,7 +196,8 @@ data class RemoteOrderLine(
     val vatLabel: String? = null,
     val orderItemId: Long? = null,
     val amount: Double? = null,
-    val freeItem: Boolean = false
+    val freeItem: Boolean = false,
+    val modifiers: List<SelectedModifier> = emptyList()
 )
 
 data class CommercialDiscountState(

@@ -419,7 +419,23 @@ class CookitHttpClient {
                 val imageUrl = normalizeMediaUrl(extractMediaCandidate(obj))
                 val vatRate = extractVatRate(obj)
                 val vatLabel = extractVatLabel(obj)
-                add(Product(id, categoryId, name, description, price, emojiForProduct(name), available, imageUrl, vatRate, vatLabel))
+                val hasModifiers = (obj.longAny("modifier_groups_count") ?: 0L) > 0L ||
+                    ((obj.optJSONArray("modifier_groups")?.length() ?: 0) > 0)
+                add(
+                    Product(
+                        id = id,
+                        categoryId = categoryId,
+                        name = name,
+                        description = description,
+                        price = price,
+                        emoji = emojiForProduct(name),
+                        available = available,
+                        imageUrl = imageUrl,
+                        vatRate = vatRate,
+                        vatLabel = vatLabel,
+                        hasModifiers = hasModifiers
+                    )
+                )
             }
         }.distinctBy { it.id }
 
@@ -430,6 +446,114 @@ class CookitHttpClient {
         }
 
         CatalogSnapshot(normalizedCategories, products)
+    }
+
+    suspend fun modifierGroups(
+        token: String,
+        productId: Long,
+        orderType: OrderType
+    ): List<NativeModifierGroup> = withContext(Dispatchers.IO) {
+        val orderTypeId = orderTypeId(token, orderType)
+        val query = buildString {
+            append("pos/items/")
+            append(productId)
+            append("/modifier-groups")
+            orderTypeId?.let { append("?order_type_id=").append(it) }
+        }
+        val json = request(query, token = token)
+        val array = findArrayDeep(json, setOf("data", "modifier_groups", "groups")) ?: JSONArray()
+
+        buildList {
+            for (index in 0 until array.length()) {
+                val groupJson = array.optJSONObject(index) ?: continue
+                val groupId = groupJson.longAny("id", "modifier_group_id") ?: continue
+                val pivot = groupJson.optJSONObject("pivot") ?: JSONObject()
+
+                // Android currently has no variation selector. Variation-only modifier
+                // groups therefore stay fail-closed until that UI exists.
+                val variationId = pivot.longAny("menu_item_variation_id", "variation_id")
+                if (variationId != null && variationId > 0L) continue
+
+                val required = pivot.boolAny("is_required", "required") ?: false
+                val allowMultiple = pivot.boolAny("allow_multiple_selection", "allow_multiple", "multiple") ?: false
+                val groupName = localizedModifierText(groupJson.opt("name"), "Options")
+                val optionsJson = groupJson.optJSONArray("options") ?: JSONArray()
+                val options = buildList {
+                    for (optionIndex in 0 until optionsJson.length()) {
+                        val optionJson = optionsJson.optJSONObject(optionIndex) ?: continue
+                        val optionId = optionJson.longAny("id", "modifier_option_id") ?: continue
+                        val available = optionJson.boolAny("is_available", "available") ?: true
+                        if (!available) continue
+                        val price = (optionJson.doubleAny("price", "final_price", "calculated_price") ?: 0.0)
+                            .takeIf { it.isFinite() && it >= 0.0 }
+                            ?: 0.0
+                        add(
+                            NativeModifierOption(
+                                id = optionId,
+                                groupId = groupId,
+                                name = localizedModifierText(optionJson.opt("name"), "Option $optionId"),
+                                price = price,
+                                available = true,
+                                preselected = optionJson.boolAny("is_preselected", "preselected") ?: false
+                            )
+                        )
+                    }
+                }
+                add(
+                    NativeModifierGroup(
+                        id = groupId,
+                        name = groupName,
+                        required = required,
+                        allowMultiple = allowMultiple,
+                        options = options
+                    )
+                )
+            }
+        }
+    }
+
+    private suspend fun orderTypeId(token: String, type: OrderType): Long? {
+        val json = request("pos/order-types", token = token)
+        val array = findArrayDeep(json, setOf("data", "order_types")) ?: JSONArray()
+        val accepted = when (type) {
+            OrderType.DINE_IN -> setOf("dine_in", "dine-in", "dinein")
+            OrderType.TAKEAWAY -> setOf("pickup", "takeaway", "take_away", "takeout")
+            OrderType.DELIVERY -> setOf("delivery")
+        }
+        for (index in 0 until array.length()) {
+            val row = array.optJSONObject(index) ?: continue
+            val slug = (row.optText("slug", "type") ?: "")
+                .trim()
+                .lowercase(Locale.ROOT)
+            if (slug in accepted) return row.longAny("id", "order_type_id")
+        }
+        return null
+    }
+
+    private fun localizedModifierText(value: Any?, fallback: String): String {
+        fun fromObject(obj: JSONObject): String? {
+            val preferred = listOf(languageCode, "fr", "en", "nl", "de")
+            preferred.forEach { code ->
+                obj.optString(code, "").trim().takeIf { it.isNotEmpty() }?.let { return it }
+            }
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                obj.optString(keys.next(), "").trim().takeIf { it.isNotEmpty() }?.let { return it }
+            }
+            return null
+        }
+
+        val resolved = when (value) {
+            is JSONObject -> fromObject(value)
+            is String -> {
+                val trimmed = value.trim()
+                if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                    runCatching { fromObject(JSONObject(trimmed)) }.getOrNull() ?: trimmed
+                } else trimmed
+            }
+            else -> value?.toString()?.trim().orEmpty()
+        }
+        return resolved?.takeIf { it.isNotEmpty() } ?: fallback
     }
 
     suspend fun orders(token: String, branchId: Long? = null): List<PosOrder> = withContext(Dispatchers.IO) {
@@ -545,6 +669,26 @@ class CookitHttpClient {
                 val explicitFree = item.boolAny("is_free_item_from_stamp", "free_item")
                 val freeItem = explicitFree
                     ?: (amount != null && kotlin.math.abs(amount) < 0.0001 && price > 0.0)
+                val modifiersJson = item.optJSONArray("modifiers") ?: JSONArray()
+                val modifiers = buildList {
+                    for (modifierIndex in 0 until modifiersJson.length()) {
+                        val modifier = modifiersJson.optJSONObject(modifierIndex) ?: continue
+                        val modifierId = modifier.longAny("id", "modifier_option_id") ?: continue
+                        add(
+                            SelectedModifier(
+                                id = modifierId,
+                                groupId = modifier.longAny("modifier_group_id", "group_id") ?: 0L,
+                                name = localizedModifierText(
+                                    modifier.opt("name") ?: modifier.opt("modifier_option_name"),
+                                    "Option $modifierId"
+                                ),
+                                price = (modifier.doubleAny("price", "modifier_option_price") ?: 0.0)
+                                    .takeIf { it.isFinite() && it >= 0.0 }
+                                    ?: 0.0
+                            )
+                        )
+                    }
+                }
                 add(
                     RemoteOrderLine(
                         menuItemId = menuItemId,
@@ -556,7 +700,8 @@ class CookitHttpClient {
                         vatLabel = vatLabel,
                         orderItemId = orderItemId,
                         amount = amount,
-                        freeItem = freeItem
+                        freeItem = freeItem,
+                        modifiers = modifiers
                     )
                 )
             }
@@ -567,7 +712,9 @@ class CookitHttpClient {
         val effectiveTotal = obj.doubleAny("grand_total", "total", "total_amount")
             ?: financials?.doubleAny("total", "grand_total")
             ?: cartSummary?.doubleAny("grand_total", "total")
-            ?: lines.sumOf { it.price * it.quantity }
+            ?: lines.sumOf { line ->
+                (line.price + line.modifiers.sumOf { it.price }) * line.quantity
+            }
 
         val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
         val customerObj = obj.optJSONObject("customer")
@@ -795,14 +942,28 @@ class CookitHttpClient {
         if (lines.isEmpty()) throw CookitApiException(422, "Panier vide")
         val items = JSONArray()
         lines.forEach { line ->
-            items.put(
-                JSONObject()
-                    .put("id", line.product.id)
-                    .put("menu_item_id", line.product.id)
-                    .put("quantity", line.quantity)
-                    .put("price", line.product.price)
-                    .put("amount", line.total)
-            )
+            val item = JSONObject()
+                .put("id", line.product.id)
+                .put("menu_item_id", line.product.id)
+                .put("quantity", line.quantity)
+
+            if (line.modifiers.isNotEmpty()) {
+                val modifiers = JSONArray()
+                line.modifiers
+                    .map { it.id }
+                    .distinct()
+                    .forEach { modifierId ->
+                        modifiers.put(
+                            JSONObject()
+                                .put("id", modifierId)
+                        )
+                    }
+                item.put("modifiers", modifiers)
+            }
+
+            // Product/modifier prices are deliberately not authoritative on Android.
+            // The backend resolves the item price and every selected modifier by ID.
+            items.put(item)
         }
         val body = JSONObject()
             .put("order_type", when (type) {

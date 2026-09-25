@@ -5,7 +5,18 @@ import be.cookit.pos.android.domain.OrderType
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class DraftEntry(val productId: Long, val quantity: Int)
+data class DraftModifier(
+    val id: Long,
+    val groupId: Long,
+    val name: String,
+    val price: Double
+)
+
+data class DraftEntry(
+    val productId: Long,
+    val quantity: Int,
+    val modifiers: List<DraftModifier> = emptyList()
+)
 
 data class PersistedDraft(
     val entries: List<DraftEntry> = emptyList(),
@@ -27,7 +38,26 @@ class DraftOrderStore(context: Context) {
                     val item = array.optJSONObject(i) ?: continue
                     val id = item.optLong("product_id", -1L)
                     val qty = item.optInt("quantity", 0)
-                    if (id > 0 && qty > 0) add(DraftEntry(id, qty))
+                    if (id <= 0 || qty <= 0) continue
+
+                    val modifiers = buildList {
+                        val modifierArray = item.optJSONArray("modifiers") ?: JSONArray()
+                        for (index in 0 until modifierArray.length()) {
+                            val modifier = modifierArray.optJSONObject(index) ?: continue
+                            val modifierId = modifier.optLong("id", -1L)
+                            if (modifierId <= 0) continue
+                            add(
+                                DraftModifier(
+                                    id = modifierId,
+                                    groupId = modifier.optLong("group_id", 0L).coerceAtLeast(0L),
+                                    name = modifier.optString("name", "").trim(),
+                                    price = modifier.optDouble("price", 0.0).takeIf { it.isFinite() && it >= 0.0 } ?: 0.0
+                                )
+                            )
+                        }
+                    }
+
+                    add(DraftEntry(id, qty, modifiers))
                 }
             }
             val orderType = runCatching {
@@ -46,8 +76,23 @@ class DraftOrderStore(context: Context) {
 
     fun save(draft: PersistedDraft) {
         val items = JSONArray()
-        draft.entries.forEach {
-            items.put(JSONObject().put("product_id", it.productId).put("quantity", it.quantity))
+        draft.entries.forEach { entry ->
+            val modifiers = JSONArray()
+            entry.modifiers.forEach { modifier ->
+                modifiers.put(
+                    JSONObject()
+                        .put("id", modifier.id)
+                        .put("group_id", modifier.groupId)
+                        .put("name", modifier.name)
+                        .put("price", modifier.price)
+                )
+            }
+            items.put(
+                JSONObject()
+                    .put("product_id", entry.productId)
+                    .put("quantity", entry.quantity)
+                    .put("modifiers", modifiers)
+            )
         }
         val json = JSONObject()
             .put("items", items)

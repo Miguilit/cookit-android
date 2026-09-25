@@ -110,6 +110,12 @@ data class PosUiState(
     val orderLoadBusy: Boolean = false,
     val orderLoadError: String? = null,
     val certificationCapabilities: NativeCertificationCapabilities = NativeCertificationCapabilities(),
+    val modifierDialogOpen: Boolean = false,
+    val modifierBusy: Boolean = false,
+    val modifierError: String? = null,
+    val modifierProduct: Product? = null,
+    val modifierGroups: List<NativeModifierGroup> = emptyList(),
+    val selectedModifierIds: Set<Long> = emptySet(),
     val commercialSheetOpen: Boolean = false,
     val commercialBusy: Boolean = false,
     val commercialError: String? = null,
@@ -213,6 +219,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val draftStore = DraftOrderStore(application)
     private val printerStore = PrinterSettingsStore(application)
     private val nativeMutationOperationStore = NativeMutationOperationStore(application)
+    private val modifierGroupCache = mutableMapOf<String, List<NativeModifierGroup>>()
     private val localDatabase = CookitLocalDatabase.get(application)
     private val fiscalRuntimeRepository = FiscalRuntimeRepository(localDatabase.fiscalRuntimeDao())
     private val fiscalOutboxRepository = FiscalOutboxRepository(localDatabase.fiscalOutboxDao())
@@ -401,6 +408,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun setLanguage(language: AppLanguage) {
         sessionStore.saveLanguage(language)
         api.languageCode = language.code
+        modifierGroupCache.clear()
         _ui.update { it.copy(language = language) }
         if (token != null) refresh()
     }
@@ -1788,22 +1796,183 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun addProduct(product: Product) {
         if (guardPendingOrderEdit()) return
-        val next = addToDraft(_ui.value.draftCart, product)
-        updateDraft(cart = next)
+
+        val state = _ui.value
+        if (!state.certificationCapabilities.modifiers || !product.hasModifiers) {
+            addConfiguredProduct(product, emptyList())
+            return
+        }
+
+        val currentToken = token ?: run {
+            _ui.update {
+                it.copy(
+                    modifierDialogOpen = true,
+                    modifierBusy = false,
+                    modifierError = "session_expired",
+                    modifierProduct = product,
+                    modifierGroups = emptyList(),
+                    selectedModifierIds = emptySet()
+                )
+            }
+            return
+        }
+
+        _ui.update {
+            it.copy(
+                modifierDialogOpen = true,
+                modifierBusy = true,
+                modifierError = null,
+                modifierProduct = product,
+                modifierGroups = emptyList(),
+                selectedModifierIds = emptySet()
+            )
+        }
+
+        viewModelScope.launch {
+            val orderType = _ui.value.draftOrderType
+            val cacheKey = modifierCacheKey(product.id, orderType)
+            runCatchingPreservingCancellation {
+                modifierGroupCache[cacheKey]
+                    ?: api.modifierGroups(currentToken, product.id, orderType)
+                        .also { modifierGroupCache[cacheKey] = it }
+            }.onSuccess { groups ->
+                if (groups.isEmpty()) {
+                    _ui.update {
+                        it.copy(
+                            modifierDialogOpen = false,
+                            modifierBusy = false,
+                            modifierError = null,
+                            modifierProduct = null,
+                            modifierGroups = emptyList(),
+                            selectedModifierIds = emptySet()
+                        )
+                    }
+                    addConfiguredProduct(product, emptyList())
+                    return@onSuccess
+                }
+
+                val preselected = buildSet {
+                    groups.forEach { group ->
+                        val selected = group.options.filter { it.available && it.preselected }
+                        if (group.allowMultiple) {
+                            addAll(selected.map { it.id })
+                        } else {
+                            selected.firstOrNull()?.let { add(it.id) }
+                        }
+                    }
+                }
+
+                _ui.update {
+                    it.copy(
+                        modifierDialogOpen = true,
+                        modifierBusy = false,
+                        modifierError = null,
+                        modifierProduct = product,
+                        modifierGroups = groups,
+                        selectedModifierIds = preselected
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        modifierBusy = false,
+                        modifierError = readableError(error)
+                    )
+                }
+            }
+        }
     }
 
-    fun incrementProduct(productId: Long) {
+    fun dismissModifierDialog() {
+        if (_ui.value.modifierBusy) return
+        _ui.update {
+            it.copy(
+                modifierDialogOpen = false,
+                modifierBusy = false,
+                modifierError = null,
+                modifierProduct = null,
+                modifierGroups = emptyList(),
+                selectedModifierIds = emptySet()
+            )
+        }
+    }
+
+    fun toggleModifier(groupId: Long, optionId: Long) {
+        val state = _ui.value
+        val group = state.modifierGroups.firstOrNull { it.id == groupId } ?: return
+        val option = group.options.firstOrNull { it.id == optionId && it.available } ?: return
+        val next = state.selectedModifierIds.toMutableSet()
+
+        if (group.allowMultiple) {
+            if (!next.add(option.id)) next.remove(option.id)
+        } else {
+            val wasSelected = option.id in next
+            val groupOptionIds = group.options.map { it.id }.toSet()
+            next.removeAll(groupOptionIds)
+            if (!wasSelected || group.required) next.add(option.id)
+        }
+
+        _ui.update {
+            it.copy(
+                selectedModifierIds = next,
+                modifierError = null
+            )
+        }
+    }
+
+    fun confirmModifierSelection() {
+        val state = _ui.value
+        if (state.modifierBusy) return
+        val product = state.modifierProduct ?: return
+
+        val missingRequired = state.modifierGroups.any { group ->
+            group.required && group.options.none { option -> option.id in state.selectedModifierIds }
+        }
+        if (missingRequired) {
+            _ui.update { it.copy(modifierError = "required") }
+            return
+        }
+
+        val selected = state.modifierGroups
+            .flatMap { group ->
+                group.options
+                    .filter { option -> option.available && option.id in state.selectedModifierIds }
+                    .map { option ->
+                        SelectedModifier(
+                            id = option.id,
+                            groupId = group.id,
+                            name = option.name,
+                            price = option.price
+                        )
+                    }
+            }
+            .distinctBy { it.id }
+
+        addConfiguredProduct(product, selected)
+        _ui.update {
+            it.copy(
+                modifierDialogOpen = false,
+                modifierBusy = false,
+                modifierError = null,
+                modifierProduct = null,
+                modifierGroups = emptyList(),
+                selectedModifierIds = emptySet()
+            )
+        }
+    }
+
+    fun incrementProduct(lineKey: String) {
         if (guardPendingOrderEdit()) return
         val next = _ui.value.draftCart.map {
-            if (it.product.id == productId) it.copy(quantity = it.quantity + 1) else it
+            if (it.stableKey == lineKey) it.copy(quantity = it.quantity + 1) else it
         }
         updateDraft(cart = next)
     }
 
-    fun decrementProduct(productId: Long) {
+    fun decrementProduct(lineKey: String) {
         if (guardPendingOrderEdit()) return
         val next = _ui.value.draftCart.mapNotNull {
-            if (it.product.id != productId) it
+            if (it.stableKey != lineKey) it
             else if (it.quantity <= 1) null
             else it.copy(quantity = it.quantity - 1)
         }
@@ -1813,6 +1982,17 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun setDraftOrderType(type: OrderType) {
         if (guardPendingOrderEdit()) return
         val tableId = if (type == OrderType.DINE_IN) _ui.value.draftTableId else null
+        modifierGroupCache.clear()
+        _ui.update {
+            it.copy(
+                modifierDialogOpen = false,
+                modifierBusy = false,
+                modifierError = null,
+                modifierProduct = null,
+                modifierGroups = emptyList(),
+                selectedModifierIds = emptySet()
+            )
+        }
         updateDraft(orderType = type, tableId = tableId)
     }
 
@@ -2020,11 +2200,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val resumed = state.resumedRemoteOrderId != null
         if (lines.isEmpty() && !resumed) return
 
-        val amountDue = if (resumed) {
-            state.resumedRemoteOrderTotal?.takeIf { it > 0 } ?: lines.sumOf { it.total }
-        } else {
-            lines.sumOf { it.total }
-        }
+        val amountDue = state.resumedRemoteOrderTotal?.takeIf { it > 0 }
+            ?: lines.sumOf { it.total }
         if (amountDue <= 0.0) {
             _ui.update { it.copy(checkoutError = "Montant de la commande indisponible. Rafraîchissez la commande avant l'encaissement.") }
             return
@@ -2093,6 +2270,29 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
 
+                // The backend is authoritative for base and modifier prices. For a newly
+                // created order, reload its server total before the irreversible payment.
+                val authoritativeAmountDue = if (existingOrderId == null) {
+                    val remote = api.orderDraft(currentToken, orderId)
+                    remote.total.takeIf { it > 0.0 } ?: amountDue
+                } else {
+                    _ui.value.resumedRemoteOrderTotal?.takeIf { it > 0.0 } ?: amountDue
+                }
+
+                if (existingOrderId == null) {
+                    _ui.update { it.copy(resumedRemoteOrderTotal = authoritativeAmountDue) }
+                    if (kotlin.math.abs(authoritativeAmountDue - amountDue) > 0.005) {
+                        throw IllegalStateException("total_updated")
+                    }
+                }
+
+                if (method == PosPaymentMethod.CASH) {
+                    val tendered = tenderedAmount ?: authoritativeAmountDue
+                    if (tendered + 0.0001 < authoritativeAmountDue) {
+                        throw IllegalStateException("Montant reçu insuffisant après recalcul Cookit.")
+                    }
+                }
+
                 // KOT is deliberately independent from settlement, matching Cookit Cloud.
                 // A paid order can receive its KOT later from the Orders screen.
 
@@ -2107,7 +2307,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     api.payOrder(
                         currentToken,
                         orderId,
-                        amountDue,
+                        authoritativeAmountDue,
                         method
                     )
                 } catch (e: Throwable) {
@@ -2122,7 +2322,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 val freshKots = runCatching { api.kots(currentToken) }.getOrDefault(_ui.value.kots)
                 knownOrderIds.addAll(fresh.map { it.id })
                 val change = if (method == PosPaymentMethod.CASH) {
-                    ((tenderedAmount ?: amountDue) - amountDue).coerceAtLeast(0.0)
+                    ((tenderedAmount ?: authoritativeAmountDue) - authoritativeAmountDue).coerceAtLeast(0.0)
                 } else null
                 finishSuccessfulCheckout(fresh, freshKots, change)
                 clearDeliveryDraft()
@@ -2276,7 +2476,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             quantity = line.quantity,
             remoteLineId = line.orderItemId,
             amountOverride = line.amount,
-            freeItem = line.freeItem
+            freeItem = line.freeItem,
+            modifiers = line.modifiers.sortedBy { it.id }
         )
     }
 
@@ -2459,9 +2660,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             append('|').append(state.deliveryExecutiveId ?: 0L)
             append('|').append(state.deliveryFeeText.trim())
             state.draftCart
-                .sortedBy { it.product.id }
+                .sortedBy { it.stableKey }
                 .forEach { line ->
-                    append('|').append(line.product.id).append(':').append(line.quantity)
+                    append('|').append(line.product.id)
+                    append(':').append(line.quantity)
+                    append(':').append(line.modifierKey)
                 }
         }
         val clientOrderUuid = runCatching {
@@ -2895,6 +3098,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 billingBusy = false,
                 billingError = null,
                 billingContext = null,
+                modifierDialogOpen = false,
+                modifierBusy = false,
+                modifierError = null,
+                modifierProduct = null,
+                modifierGroups = emptyList(),
+                selectedModifierIds = emptySet(),
                 commercialSheetOpen = false,
                 commercialBusy = false,
                 commercialError = null,
@@ -2941,6 +3150,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 billingBusy = false,
                 billingError = null,
                 billingContext = null,
+                modifierDialogOpen = false,
+                modifierBusy = false,
+                modifierError = null,
+                modifierProduct = null,
+                modifierGroups = emptyList(),
+                selectedModifierIds = emptySet(),
                 commercialSheetOpen = false,
                 commercialBusy = false,
                 commercialError = null,
@@ -2978,7 +3193,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private fun persistCurrentDraft() {
         val state = _ui.value
         val draft = PersistedDraft(
-            entries = state.draftCart.map { DraftEntry(it.product.id, it.quantity) },
+            entries = state.draftCart.map(::draftEntryFromLine),
             orderType = state.draftOrderType,
             tableId = state.draftTableId,
             pendingOrderId = state.pendingRemoteOrderId
@@ -2991,11 +3206,53 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun addToDraft(cart: List<CartLine>, product: Product): List<CartLine> {
-        val existing = cart.firstOrNull { it.product.id == product.id }
-        return if (existing == null) cart + CartLine(product, 1)
-        else cart.map { if (it.product.id == product.id) it.copy(quantity = it.quantity + 1) else it }
+    private fun modifierCacheKey(productId: Long, orderType: OrderType): String =
+        "$productId:${orderType.name}"
+
+    private fun addConfiguredProduct(product: Product, modifiers: List<SelectedModifier>) {
+        val candidate = CartLine(
+            product = product,
+            quantity = 1,
+            modifiers = modifiers.sortedBy { it.id }
+        )
+        val next = _ui.value.draftCart.let { cart ->
+            val existing = cart.firstOrNull { it.stableKey == candidate.stableKey }
+            if (existing == null) {
+                cart + candidate
+            } else {
+                cart.map {
+                    if (it.stableKey == candidate.stableKey) it.copy(quantity = it.quantity + 1) else it
+                }
+            }
+        }
+        updateDraft(cart = next)
     }
+
+    private fun draftEntryFromLine(line: CartLine): DraftEntry = DraftEntry(
+        productId = line.product.id,
+        quantity = line.quantity,
+        modifiers = line.modifiers.map {
+            DraftModifier(
+                id = it.id,
+                groupId = it.groupId,
+                name = it.name,
+                price = it.price
+            )
+        }
+    )
+
+    private fun cartLineFromDraftEntry(product: Product, entry: DraftEntry): CartLine = CartLine(
+        product = product,
+        quantity = entry.quantity.coerceAtLeast(1),
+        modifiers = entry.modifiers.map {
+            SelectedModifier(
+                id = it.id,
+                groupId = it.groupId,
+                name = it.name,
+                price = it.price
+            )
+        }.sortedBy { it.id }
+    )
 
     fun advanceKitchenTicket(ticket: KotTicket) {
         val currentToken = token ?: return
@@ -4649,13 +4906,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
         val liveProducts = cached.catalog.products
         val savedEntries = if (_ui.value.draftCart.isNotEmpty()) {
-            _ui.value.draftCart.map { DraftEntry(it.product.id, it.quantity) }
+            _ui.value.draftCart.map(::draftEntryFromLine)
         } else {
             persistedDraft.entries
         }
         val restoredCart = savedEntries.mapNotNull { entry ->
             liveProducts.firstOrNull { it.id == entry.productId }
-                ?.let { CartLine(it, entry.quantity.coerceAtLeast(1)) }
+                ?.let { product -> cartLineFromDraftEntry(product, entry) }
         }
         val requestedTableId = _ui.value.draftTableId ?: persistedDraft.tableId
         val restoredTableId = requestedTableId
@@ -4768,13 +5025,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
         val liveProducts = catalog.products
         val savedEntries = if (_ui.value.draftCart.isNotEmpty()) {
-            _ui.value.draftCart.map { DraftEntry(it.product.id, it.quantity) }
+            _ui.value.draftCart.map(::draftEntryFromLine)
         } else {
             persistedDraft.entries
         }
         val restoredCart = savedEntries.mapNotNull { entry ->
             liveProducts.firstOrNull { it.id == entry.productId }
-                ?.let { CartLine(it, entry.quantity.coerceAtLeast(1)) }
+                ?.let { product -> cartLineFromDraftEntry(product, entry) }
         }
         val requestedTableId = _ui.value.draftTableId ?: persistedDraft.tableId
         val restoredTableId = requestedTableId

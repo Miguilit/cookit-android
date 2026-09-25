@@ -630,7 +630,9 @@ private fun PosScreen(
                     products = products,
                     selectedCategory = selectedCategory,
                     onCategory = { selectedCategory = it },
-                    onAdd = vm::addProduct
+                    onAdd = vm::addProduct,
+                    t = t,
+                    modifiersEnabled = state.certificationCapabilities.modifiers
                 )
                 CartPane(
                     modifier = Modifier.weight(0.9f),
@@ -663,7 +665,9 @@ private fun PosScreen(
                     products = products,
                     selectedCategory = selectedCategory,
                     onCategory = { selectedCategory = it },
-                    onAdd = vm::addProduct
+                    onAdd = vm::addProduct,
+                    t = t,
+                    modifiersEnabled = state.certificationCapabilities.modifiers
                 )
                 if (showMobileCartBar) {
                     MobileCartBar(
@@ -694,6 +698,16 @@ private fun PosScreen(
             t = t,
             onDismiss = vm::dismissPaymentSheet,
             onConfirm = vm::confirmPayment
+        )
+    }
+
+    if (state.modifierDialogOpen) {
+        ModifierSelectionDialog(
+            state = state,
+            t = t,
+            onDismiss = vm::dismissModifierDialog,
+            onToggle = vm::toggleModifier,
+            onConfirm = vm::confirmModifierSelection
         )
     }
 
@@ -729,8 +743,9 @@ private fun PaymentMethodDialog(
     onConfirm: (PosPaymentMethod, Double?) -> Unit
 ) {
     var selected by remember(state.paymentSheetOpen) { mutableStateOf(PosPaymentMethod.CASH) }
-    val total = state.resumedRemoteOrderTotal?.takeIf { state.resumedRemoteOrderId != null && it > 0 }
-        ?: state.draftCart.sumOf { it.total }
+    val total = state.resumedRemoteOrderTotal?.takeIf {
+        (state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null) && it > 0
+    } ?: state.draftCart.sumOf { it.total }
     var tenderedText by remember(state.paymentSheetOpen, total) {
         mutableStateOf(String.format(Locale.US, "%.2f", total))
     }
@@ -801,9 +816,10 @@ private fun PaymentMethodDialog(
                 }
 
                 state.checkoutError?.let { error ->
+                    val message = if (error == "total_updated") t.totalUpdated else error
                     Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
                         Text(
-                            error,
+                            message,
                             Modifier.padding(10.dp),
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             fontSize = 12.sp,
@@ -1365,7 +1381,9 @@ private fun ProductPane(
     products: List<Product>,
     selectedCategory: Long,
     onCategory: (Long) -> Unit,
-    onAdd: (Product) -> Unit
+    onAdd: (Product) -> Unit,
+    t: UiStrings,
+    modifiersEnabled: Boolean
 ) {
     Column(modifier) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1389,14 +1407,24 @@ private fun ProductPane(
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
             items(visibleProducts, key = { it.id }) { product ->
-                ProductCard(product, onAdd)
+                ProductCard(
+                    product = product,
+                    onAdd = onAdd,
+                    t = t,
+                    modifiersEnabled = modifiersEnabled
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ProductCard(product: Product, onAdd: (Product) -> Unit) {
+private fun ProductCard(
+    product: Product,
+    onAdd: (Product) -> Unit,
+    t: UiStrings,
+    modifiersEnabled: Boolean
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1423,6 +1451,23 @@ private fun ProductCard(product: Product, onAdd: (Product) -> Unit) {
                         tint = Color.White,
                         modifier = Modifier.padding(7.dp).size(18.dp)
                     )
+                }
+                if (modifiersEnabled && product.hasModifiers) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
+                        shape = RoundedCornerShape(999.dp),
+                        color = Color.White.copy(alpha = 0.94f),
+                        border = BorderStroke(1.dp, CookitLine)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Tune, null, tint = CookitOrange, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(t.optionsAvailable, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
                 }
             }
             Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -1484,6 +1529,179 @@ private fun ProductImage(product: Product, modifier: Modifier = Modifier.size(62
 }
 
 @Composable
+private fun ModifierSelectionDialog(
+    state: PosUiState,
+    t: UiStrings,
+    onDismiss: () -> Unit,
+    onToggle: (Long, Long) -> Unit,
+    onConfirm: () -> Unit
+) {
+    val product = state.modifierProduct ?: return
+    Dialog(
+        onDismissRequest = { if (!state.modifierBusy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .widthIn(max = 640.dp),
+            shape = RoundedCornerShape(26.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(t.chooseOptions, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                        Text(product.name, color = CookitMuted, fontWeight = FontWeight.SemiBold)
+                    }
+                    IconButton(onClick = onDismiss, enabled = !state.modifierBusy) {
+                        Icon(Icons.Default.Close, contentDescription = t.close)
+                    }
+                }
+
+                when {
+                    state.modifierBusy -> {
+                        Box(
+                            Modifier.fillMaxWidth().height(160.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+
+                    state.modifierGroups.isEmpty() -> {
+                        if (state.modifierError == null) {
+                            Text(t.optionsLoadFailed, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 520.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            state.modifierGroups.forEach { group ->
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            group.name,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 16.sp,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (group.required) {
+                                            Surface(
+                                                shape = RoundedCornerShape(999.dp),
+                                                color = CookitSoftOrange
+                                            ) {
+                                                Text(
+                                                    t.requiredOption,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                    color = CookitOrange,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    group.options.forEach { option ->
+                                        val selected = option.id in state.selectedModifierIds
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable(enabled = !state.modifierBusy && option.available) {
+                                                    onToggle(group.id, option.id)
+                                                },
+                                            shape = RoundedCornerShape(15.dp),
+                                            color = if (selected) CookitSoftOrange else CookitCanvas,
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (selected) CookitOrange else CookitLine
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                if (group.allowMultiple) {
+                                                    Checkbox(
+                                                        checked = selected,
+                                                        onCheckedChange = { onToggle(group.id, option.id) },
+                                                        enabled = !state.modifierBusy && option.available
+                                                    )
+                                                } else {
+                                                    RadioButton(
+                                                        selected = selected,
+                                                        onClick = { onToggle(group.id, option.id) },
+                                                        enabled = !state.modifierBusy && option.available
+                                                    )
+                                                }
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    option.name,
+                                                    modifier = Modifier.weight(1f),
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Text(
+                                                    if (option.price > 0.0001) {
+                                                        String.format(Locale.FRANCE, "+%.2f €", option.price)
+                                                    } else {
+                                                        t.included
+                                                    },
+                                                    color = if (option.price > 0.0001) CookitGreen else CookitMuted,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                state.modifierError?.let { error ->
+                    val message = when (error) {
+                        "required" -> t.modifierRequired
+                        "session_expired" -> t.sessionExpired
+                        else -> t.optionsLoadFailed
+                    }
+                    Text(
+                        message,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
+                ) {
+                    TextButton(onClick = onDismiss, enabled = !state.modifierBusy) {
+                        Text(t.cancel)
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        enabled = !state.modifierBusy && state.modifierGroups.isNotEmpty()
+                    ) {
+                        Text(t.confirmOptions, fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CartPane(
     modifier: Modifier,
     cart: List<CartLine>,
@@ -1494,8 +1712,8 @@ private fun CartPane(
     commercialSnapshot: CommercialSnapshot? = null,
     commercialEnabled: Boolean = false,
     locked: Boolean = false,
-    onPlus: (Long) -> Unit,
-    onMinus: (Long) -> Unit,
+    onPlus: (String) -> Unit,
+    onMinus: (String) -> Unit,
     onCommercialTools: () -> Unit,
     onSendKitchen: () -> Unit,
     onBillingTools: () -> Unit,
@@ -1544,6 +1762,32 @@ private fun CartPane(
                                         }
                                     }
                                 }
+                                if (line.modifiers.isNotEmpty()) {
+                                    Spacer(Modifier.height(3.dp))
+                                    line.modifiers.forEach { modifier ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "• ${modifier.name}",
+                                                color = CookitMuted,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                if (modifier.price > 0.0001) {
+                                                    String.format(Locale.FRANCE, "+%.2f €", modifier.price)
+                                                } else {
+                                                    t.included
+                                                },
+                                                color = CookitMuted,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
                                 Text(
                                     String.format(Locale.FRANCE, "%.2f €", line.total),
                                     color = if (line.freeItem) CookitOrange else CookitGreen,
@@ -1551,9 +1795,9 @@ private fun CartPane(
                                 )
                             }
                             if (!line.freeItem) {
-                                FilledTonalIconButton(onClick = { onMinus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Remove, null) }
+                                FilledTonalIconButton(onClick = { onMinus(line.stableKey) }, enabled = !locked) { Icon(Icons.Default.Remove, null) }
                                 Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
-                                FilledTonalIconButton(onClick = { onPlus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Add, null) }
+                                FilledTonalIconButton(onClick = { onPlus(line.stableKey) }, enabled = !locked) { Icon(Icons.Default.Add, null) }
                             } else {
                                 Text("×${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black, color = CookitOrange)
                             }
