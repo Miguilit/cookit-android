@@ -35,7 +35,8 @@ data class CatalogSnapshot(
 
 data class PlatformSnapshot(
     val user: UserSession,
-    val policy: NativePolicy
+    val policy: NativePolicy,
+    val certificationCapabilities: NativeCertificationCapabilities = NativeCertificationCapabilities()
 )
 
 
@@ -170,6 +171,38 @@ class CookitHttpClient {
                 }
             }
 
+        // A4 capabilities are authoritative on the dedicated native bootstrap.
+        // Keep platform/config as the established Android identity source and fail
+        // closed if the bootstrap is temporarily unavailable.
+        val nativeBootstrap = runCatching {
+            request("native/bootstrap", token = token)
+        }.getOrNull()
+        val certificationJson = nativeBootstrap?.optJSONObject("certification_capabilities")
+            ?: json.optJSONObject("certification_capabilities")
+        val certificationCapabilities = NativeCertificationCapabilities(
+            contractVersion = certificationJson?.optText("contract_version") ?: "",
+            manualDiscount = certificationJson
+                ?.optJSONObject("manual_discount")
+                ?.optBoolean("android_expose", false)
+                ?: false,
+            tip = certificationJson
+                ?.optJSONObject("tip")
+                ?.optBoolean("android_expose", false)
+                ?: false,
+            loyaltyPoints = certificationJson
+                ?.optJSONObject("loyalty_points")
+                ?.optBoolean("android_expose", false)
+                ?: false,
+            stampRewards = certificationJson
+                ?.optJSONObject("stamp_rewards")
+                ?.optBoolean("android_expose", false)
+                ?: false,
+            modifiers = certificationJson
+                ?.optJSONObject("modifiers")
+                ?.optBoolean("android_expose", false)
+                ?: false
+        )
+
         val basePolicy =
             defaultPolicy(
                 role
@@ -210,7 +243,8 @@ class CookitHttpClient {
                         canApproveCashRegister,
                     canViewCashRegisterReports =
                         canViewCashRegisterReports
-                )
+                ),
+            certificationCapabilities = certificationCapabilities
         )
     }
 
@@ -507,7 +541,24 @@ class CookitHttpClient {
                     ?: nestedMenu?.longAny("category_id", "item_category_id", "menu_item_category_id")
                 val vatRate = extractVatRate(item) ?: nestedMenu?.let(::extractVatRate)
                 val vatLabel = extractVatLabel(item) ?: nestedMenu?.let(::extractVatLabel)
-                add(RemoteOrderLine(menuItemId, qty, price, name, categoryId, vatRate, vatLabel))
+                val orderItemId = item.longAny("id", "order_item_id")
+                val explicitFree = item.boolAny("is_free_item_from_stamp", "free_item")
+                val freeItem = explicitFree
+                    ?: (amount != null && kotlin.math.abs(amount) < 0.0001 && price > 0.0)
+                add(
+                    RemoteOrderLine(
+                        menuItemId = menuItemId,
+                        quantity = qty,
+                        price = price,
+                        name = name,
+                        categoryId = categoryId,
+                        vatRate = vatRate,
+                        vatLabel = vatLabel,
+                        orderItemId = orderItemId,
+                        amount = amount,
+                        freeItem = freeItem
+                    )
+                )
             }
         }
 
@@ -519,6 +570,14 @@ class CookitHttpClient {
             ?: lines.sumOf { it.price * it.quantity }
 
         val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
+        val customerObj = obj.optJSONObject("customer")
+        val rawOrder = obj.optJSONObject("order")
+        val commercial = parseCommercialSnapshot(
+            source = financials ?: cartSummary ?: JSONObject(),
+            orderId = obj.longAny("id", "order_id") ?: orderId,
+            rawOrder = rawOrder,
+            fallbackTotal = effectiveTotal
+        )
         RemoteOrderDraft(
             orderId = obj.longAny("id", "order_id") ?: orderId,
             type = type,
@@ -530,7 +589,11 @@ class CookitHttpClient {
             operationalStatus = (
                 obj.optText("operational_status", "order_status") ?: "placed"
             ).lowercase(Locale.ROOT),
-            lines = lines
+            lines = lines,
+            customerId = obj.longAny("customer_id") ?: customerObj?.longAny("id", "customer_id"),
+            customerName = customerObj?.optText("name", "full_name"),
+            customerPhone = customerObj?.optText("phone", "phone_number"),
+            commercial = commercial
         )
     }
 
@@ -726,7 +789,8 @@ class CookitHttpClient {
         customerPhone: String? = null,
         deliveryAddress: String? = null,
         deliveryFee: Double = 0.0,
-        deliveryExecutiveId: Long? = null
+        deliveryExecutiveId: Long? = null,
+        clientOrderUuid: String? = null
     ): Long = withContext(Dispatchers.IO) {
         if (lines.isEmpty()) throw CookitApiException(422, "Panier vide")
         val items = JSONArray()
@@ -748,12 +812,19 @@ class CookitHttpClient {
             })
             .put("placed_via", "pos")
             .put("items", items)
+
+        clientOrderUuid
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { body.put("client_order_uuid", it) }
+
+        val customer = JSONObject()
+        customerName?.trim()?.takeIf { it.isNotEmpty() }?.let { customer.put("name", it) }
+        customerPhone?.trim()?.takeIf { it.isNotEmpty() }?.let { customer.put("phone", it) }
+        if (customer.length() > 0) body.put("customer", customer)
+
         if (type == OrderType.DINE_IN && tableId != null) body.put("table_id", tableId)
         if (type == OrderType.DELIVERY) {
-            val customer = JSONObject()
-            customerName?.trim()?.takeIf { it.isNotEmpty() }?.let { customer.put("name", it) }
-            customerPhone?.trim()?.takeIf { it.isNotEmpty() }?.let { customer.put("phone", it) }
-            if (customer.length() > 0) body.put("customer", customer)
             deliveryAddress?.trim()?.takeIf { it.isNotEmpty() }?.let { body.put("delivery_address", it) }
             body.put("delivery_fee", deliveryFee.coerceAtLeast(0.0))
             deliveryExecutiveId?.let { body.put("delivery_executive_id", it) }
@@ -764,6 +835,100 @@ class CookitHttpClient {
         orderObj?.longAny("id", "order_id")
             ?: json.longAny("id", "order_id")
             ?: throw CookitApiException(200, "Commande créée mais identifiant introuvable.")
+    }
+
+    suspend fun updateCommercialAdjustments(
+        token: String,
+        orderId: Long,
+        includeDiscount: Boolean = false,
+        discountType: String? = null,
+        discountValue: Double = 0.0,
+        includeTip: Boolean = false,
+        tipAmount: Double = 0.0,
+        tipNote: String? = null
+    ): CommercialSnapshot = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+        if (includeDiscount) {
+            body.put(
+                "discount",
+                JSONObject()
+                    .put("type", discountType ?: JSONObject.NULL)
+                    .put("value", discountValue.coerceAtLeast(0.0))
+            )
+        }
+        if (includeTip) {
+            body.put(
+                "tip",
+                JSONObject()
+                    .put("amount", tipAmount.coerceAtLeast(0.0))
+                    .put("note", tipNote?.trim()?.takeIf { it.isNotEmpty() } ?: JSONObject.NULL)
+            )
+        }
+        val json = request(
+            "pos/orders/$orderId/commercial-adjustments",
+            method = "PATCH",
+            token = token,
+            body = body
+        )
+        parseCommercialSnapshot(
+            source = json.optJSONObject("commercial") ?: json,
+            orderId = orderId,
+            fallbackTotal = json.optJSONObject("commercial")
+                ?.optJSONObject("totals")
+                ?.optDouble("grand_total", 0.0)
+                ?: 0.0
+        )
+    }
+
+    suspend fun loyaltySummary(token: String, orderId: Long): LoyaltySummary = withContext(Dispatchers.IO) {
+        val json = request("pos/orders/$orderId/loyalty", token = token)
+        parseLoyaltySummary(json.optJSONObject("data") ?: json)
+    }
+
+    suspend fun redeemLoyaltyPoints(
+        token: String,
+        orderId: Long,
+        points: Int,
+        clientOperationId: String
+    ): LoyaltyMutationResult = withContext(Dispatchers.IO) {
+        val json = request(
+            "pos/orders/$orderId/loyalty/points/redeem",
+            method = "POST",
+            token = token,
+            body = JSONObject()
+                .put("points", points)
+                .put("client_operation_id", clientOperationId)
+        )
+        parseLoyaltyMutation(json, orderId)
+    }
+
+    suspend fun removeLoyaltyPoints(
+        token: String,
+        orderId: Long,
+        clientOperationId: String
+    ): LoyaltyMutationResult = withContext(Dispatchers.IO) {
+        val json = request(
+            "pos/orders/$orderId/loyalty/points/remove",
+            method = "POST",
+            token = token,
+            body = JSONObject().put("client_operation_id", clientOperationId)
+        )
+        parseLoyaltyMutation(json, orderId)
+    }
+
+    suspend fun redeemLoyaltyStamp(
+        token: String,
+        orderId: Long,
+        ruleId: Long,
+        clientOperationId: String
+    ): LoyaltyMutationResult = withContext(Dispatchers.IO) {
+        val json = request(
+            "pos/orders/$orderId/loyalty/stamps/$ruleId/redeem",
+            method = "POST",
+            token = token,
+            body = JSONObject().put("client_operation_id", clientOperationId)
+        )
+        parseLoyaltyMutation(json, orderId)
     }
 
     suspend fun createKot(token: String, orderId: Long) = withContext(Dispatchers.IO) {
@@ -926,6 +1091,200 @@ class CookitHttpClient {
                 token = token,
                 body = JSONObject().put("table_ids", ids)
             )
+        )
+    }
+
+    private fun parseCommercialSnapshot(
+        source: JSONObject,
+        orderId: Long,
+        rawOrder: JSONObject? = null,
+        fallbackTotal: Double = 0.0
+    ): CommercialSnapshot {
+        val discountObject = source.optJSONObject("discount")
+        val tipObject = source.optJSONObject("tip")
+        val loyaltyObject = source.optJSONObject("loyalty")
+        val totalsObject = source.optJSONObject("totals")
+
+        val discountType = discountObject?.optText("type")
+            ?: source.optText("discount_type")
+            ?: rawOrder?.optText("discount_type")
+        val discountValue = discountObject?.optDouble("value", Double.NaN)
+            ?.takeUnless { it.isNaN() }
+            ?: source.doubleAny("discount_value")
+            ?: rawOrder?.doubleAny("discount_value")
+            ?: 0.0
+        val discountAmount = discountObject?.optDouble("amount", Double.NaN)
+            ?.takeUnless { it.isNaN() }
+            ?: source.doubleAny("discount_amount")
+            ?: rawOrder?.doubleAny("discount_amount")
+            ?: 0.0
+        val tipAmount = tipObject?.optDouble("amount", Double.NaN)
+            ?.takeUnless { it.isNaN() }
+            ?: source.doubleAny("tip_amount")
+            ?: rawOrder?.doubleAny("tip_amount")
+            ?: 0.0
+        val tipNote = tipObject?.optText("note")
+            ?: rawOrder?.optText("tip_note")
+
+        val subTotal = totalsObject?.optDouble("sub_total", Double.NaN)
+            ?.takeUnless { it.isNaN() }
+            ?: source.doubleAny("sub_total")
+            ?: rawOrder?.doubleAny("sub_total")
+            ?: 0.0
+        val grandTotal = totalsObject?.optDouble("grand_total", Double.NaN)
+            ?.takeUnless { it.isNaN() }
+            ?: source.doubleAny("grand_total", "total")
+            ?: rawOrder?.doubleAny("total")
+            ?: fallbackTotal
+
+        return CommercialSnapshot(
+            contractVersion = source.optText("contract_version") ?: "a4.1",
+            orderId = source.longAny("order_id", "id") ?: orderId,
+            discount = CommercialDiscountState(
+                type = discountType,
+                value = discountValue,
+                amount = discountAmount
+            ),
+            tip = CommercialTipState(
+                amount = tipAmount,
+                note = tipNote
+            ),
+            loyalty = CommercialLoyaltyState(
+                pointsRedeemed = loyaltyObject?.optInt("points_redeemed", rawOrder?.optInt("loyalty_points_redeemed", 0) ?: 0)
+                    ?: rawOrder?.optInt("loyalty_points_redeemed", 0)
+                    ?: 0,
+                discountAmount = loyaltyObject?.optDouble("discount_amount", Double.NaN)
+                    ?.takeUnless { it.isNaN() }
+                    ?: source.doubleAny("loyalty_discount_amount")
+                    ?: rawOrder?.doubleAny("loyalty_discount_amount")
+                    ?: 0.0,
+                stampDiscountAmount = loyaltyObject?.optDouble("stamp_discount_amount", Double.NaN)
+                    ?.takeUnless { it.isNaN() }
+                    ?: source.doubleAny("stamp_discount_amount")
+                    ?: rawOrder?.doubleAny("stamp_discount_amount")
+                    ?: 0.0,
+                stampDiscountEmbeddedInItems = loyaltyObject?.optBoolean("stamp_discount_embedded_in_items", true) ?: true
+            ),
+            totals = CommercialTotals(
+                subTotal = subTotal,
+                chargesTotal = totalsObject?.optDouble("charges_total", 0.0)
+                    ?: source.doubleAny("charges_total")
+                    ?: 0.0,
+                taxTotal = totalsObject?.optDouble("tax_total", 0.0)
+                    ?: source.doubleAny("tax_total")
+                    ?: 0.0,
+                deliveryFee = totalsObject?.optDouble("delivery_fee", 0.0)
+                    ?: source.doubleAny("delivery_fee")
+                    ?: 0.0,
+                grandTotal = grandTotal
+            )
+        )
+    }
+
+    private fun parseLoyaltyOrderState(obj: JSONObject?): LoyaltyOrderState? {
+        obj ?: return null
+        val id = obj.longAny("id", "order_id") ?: return null
+        return LoyaltyOrderState(
+            id = id,
+            customerId = obj.longAny("customer_id"),
+            status = obj.optText("status") ?: "",
+            settlementStatus = obj.optText("settlement_status") ?: "",
+            subtotal = obj.doubleAny("subtotal", "sub_total") ?: 0.0,
+            total = obj.doubleAny("total", "grand_total") ?: 0.0,
+            manualDiscountAmount = obj.doubleAny("manual_discount_amount", "discount_amount") ?: 0.0,
+            loyaltyPointsRedeemed = obj.optInt("loyalty_points_redeemed", 0),
+            loyaltyDiscountAmount = obj.doubleAny("loyalty_discount_amount") ?: 0.0,
+            stampDiscountAmount = obj.doubleAny("stamp_discount_amount") ?: 0.0,
+            freeStampItemCount = obj.optInt("free_stamp_item_count", 0)
+        )
+    }
+
+    private fun parseLoyaltySummary(obj: JSONObject): LoyaltySummary {
+        val customerObj = obj.optJSONObject("customer")
+        val pointsObj = obj.optJSONObject("points") ?: JSONObject()
+        val stampsObj = obj.optJSONObject("stamps") ?: JSONObject()
+        val rulesJson = stampsObj.optJSONArray("rules") ?: JSONArray()
+        val rules = buildList {
+            for (index in 0 until rulesJson.length()) {
+                val row = rulesJson.optJSONObject(index) ?: continue
+                val ruleId = row.longAny("rule_id", "id") ?: continue
+                add(
+                    LoyaltyStampRuleSummary(
+                        ruleId = ruleId,
+                        menuItemId = row.longAny("menu_item_id") ?: 0L,
+                        menuItemName = row.optText("menu_item_name") ?: "",
+                        stampsRequired = row.optInt("stamps_required", 0),
+                        availableStamps = row.optInt("available_stamps", 0),
+                        canRedeem = row.optBoolean("can_redeem", false),
+                        eligibleQuantity = row.optInt("eligible_quantity", 0),
+                        redeemedQuantity = row.optInt("redeemed_quantity", 0),
+                        remainingEligibleQuantity = row.optInt("remaining_eligible_quantity", 0),
+                        redeemableQuantity = row.optInt("redeemable_quantity", 0),
+                        rewardType = row.optText("reward_type") ?: "",
+                        rewardValue = row.doubleAny("reward_value") ?: 0.0,
+                        rewardMenuItemId = row.longAny("reward_menu_item_id"),
+                        rewardMenuItemName = row.optText("reward_menu_item_name") ?: "",
+                        rewardMenuItemVariationId = row.longAny("reward_menu_item_variation_id")
+                    )
+                )
+            }
+        }
+
+        return LoyaltySummary(
+            contractVersion = obj.optText("contract_version") ?: "",
+            moduleEnabled = obj.optBoolean("module_enabled", false),
+            programEnabled = obj.optBoolean("program_enabled", false),
+            posEnabled = obj.optBoolean("pos_enabled", false),
+            settingsConfigured = obj.optBoolean("settings_configured", false),
+            customer = customerObj?.longAny("id", "customer_id")?.let { customerId ->
+                LoyaltyCustomer(
+                    id = customerId,
+                    name = customerObj.optText("name", "full_name") ?: "",
+                    phone = customerObj.optText("phone", "phone_number") ?: ""
+                )
+            },
+            points = LoyaltyPointsSummary(
+                enabled = pointsObj.optBoolean("enabled", false),
+                availablePoints = pointsObj.optInt("available_points", 0),
+                pointsValue = pointsObj.doubleAny("points_value") ?: 0.0,
+                maxDiscount = pointsObj.doubleAny("max_discount") ?: 0.0,
+                pointsRequired = pointsObj.optInt("points_required", 0),
+                minRedeemPoints = pointsObj.optInt("min_redeem_points", 0),
+                valuePerPoint = pointsObj.doubleAny("value_per_point") ?: 0.0,
+                maxDiscountPercent = pointsObj.doubleAny("max_discount_percent") ?: 0.0
+            ),
+            stampsEnabled = stampsObj.optBoolean("enabled", false),
+            stampRules = rules,
+            order = parseLoyaltyOrderState(obj.optJSONObject("order")),
+            customerRequired = obj.optBoolean("customer_required", false)
+        )
+    }
+
+    private fun parseLoyaltyMutation(obj: JSONObject, fallbackOrderId: Long): LoyaltyMutationResult {
+        return LoyaltyMutationResult(
+            success = obj.optBoolean("success", false),
+            operation = obj.optText("operation") ?: "",
+            orderId = obj.longAny("order_id") ?: fallbackOrderId,
+            pointsRedeemed = obj.optInt("points_redeemed", 0),
+            discountAmount = obj.doubleAny("discount_amount") ?: 0.0,
+            removed = obj.optBoolean("removed", false),
+            alreadyClear = obj.optBoolean("already_clear", false),
+            ruleId = obj.longAny("rule_id"),
+            stampsRedeemed = obj.optInt("stamps_redeemed", 0),
+            redeemedQuantity = obj.optInt("redeemed_quantity", 0),
+            rewardType = obj.optText("reward_type") ?: "",
+            rewardValue = obj.doubleAny("reward_value") ?: 0.0,
+            rewardMenuItemId = obj.longAny("reward_menu_item_id"),
+            commercial = obj.optJSONObject("commercial")?.let {
+                parseCommercialSnapshot(
+                    source = it,
+                    orderId = fallbackOrderId,
+                    fallbackTotal = it.optJSONObject("totals")?.optDouble("grand_total", 0.0) ?: 0.0
+                )
+            },
+            loyaltyOrder = parseLoyaltyOrderState(obj.optJSONObject("loyalty_order")),
+            clientOperationId = obj.optText("client_operation_id") ?: "",
+            idempotentReplay = obj.optBoolean("idempotent_replay", false)
         )
     }
 

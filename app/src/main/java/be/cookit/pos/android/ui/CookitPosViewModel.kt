@@ -109,6 +109,13 @@ data class PosUiState(
     val openedOrderCode: String? = null,
     val orderLoadBusy: Boolean = false,
     val orderLoadError: String? = null,
+    val certificationCapabilities: NativeCertificationCapabilities = NativeCertificationCapabilities(),
+    val commercialSheetOpen: Boolean = false,
+    val commercialBusy: Boolean = false,
+    val commercialError: String? = null,
+    val commercialMessage: String? = null,
+    val commercialSnapshot: CommercialSnapshot? = null,
+    val loyaltySummary: LoyaltySummary? = null,
     val kots: List<KotTicket> = emptyList(),
     val dashboard: be.cookit.pos.android.domain.DashboardSnapshot? = null,
     val deliveryExecutives: List<be.cookit.pos.android.domain.DeliveryExecutive> = emptyList(),
@@ -205,6 +212,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val offlineBootstrapStore = OfflineBootstrapStore(application)
     private val draftStore = DraftOrderStore(application)
     private val printerStore = PrinterSettingsStore(application)
+    private val nativeMutationOperationStore = NativeMutationOperationStore(application)
     private val localDatabase = CookitLocalDatabase.get(application)
     private val fiscalRuntimeRepository = FiscalRuntimeRepository(localDatabase.fiscalRuntimeDao())
     private val fiscalOutboxRepository = FiscalOutboxRepository(localDatabase.fiscalOutboxDao())
@@ -2152,6 +2160,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     resumedRemoteOrderId = null,
                     resumedRemoteOrderTotal = null,
                     openedOrderCode = null,
+                    commercialSheetOpen = false,
+                    commercialBusy = false,
+                    commercialError = null,
+                    commercialMessage = null,
+                    commercialSnapshot = null,
+                    loyaltySummary = null,
                     checkoutMessage = "sent_to_kitchen"
                 )
             }
@@ -2195,6 +2209,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         resumedRemoteOrderId = null,
                         resumedRemoteOrderTotal = null,
                         openedOrderCode = null,
+                        commercialSheetOpen = false,
+                        commercialBusy = false,
+                        commercialError = null,
+                        commercialMessage = null,
+                        commercialSnapshot = null,
+                        loyaltySummary = null,
                         orders = freshOrders,
                         kots = freshKots,
                         online = true
@@ -2233,10 +2253,85 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun cartLinesFromRemote(remote: RemoteOrderDraft): List<CartLine> = remote.lines.map { line ->
+        val product = _ui.value.products.firstOrNull { it.id == line.menuItemId }
+            ?: Product(
+                id = line.menuItemId,
+                categoryId = line.categoryId ?: 0,
+                name = line.name ?: "Article ${line.menuItemId}",
+                description = "",
+                price = line.price,
+                emoji = "🍽️",
+                vatRate = line.vatRate,
+                vatLabel = line.vatLabel
+            )
+        val enriched = product.copy(
+            categoryId = line.categoryId ?: product.categoryId,
+            price = line.price.takeIf { it > 0 } ?: product.price,
+            vatRate = line.vatRate ?: product.vatRate,
+            vatLabel = line.vatLabel ?: product.vatLabel
+        )
+        CartLine(
+            product = enriched,
+            quantity = line.quantity,
+            remoteLineId = line.orderItemId,
+            amountOverride = line.amount,
+            freeItem = line.freeItem
+        )
+    }
+
+    private suspend fun loyaltySummaryIfExposed(currentToken: String, orderId: Long): LoyaltySummary? {
+        val capabilities = _ui.value.certificationCapabilities
+        if (!capabilities.loyaltyPoints && !capabilities.stampRewards) return null
+        return runCatchingPreservingCancellation {
+            api.loyaltySummary(currentToken, orderId)
+        }.getOrNull()
+    }
+
+    private suspend fun refreshCommercialOrderState(
+        currentToken: String,
+        orderId: Long,
+        code: String? = _ui.value.openedOrderCode
+    ) {
+        val remote = api.orderDraft(currentToken, orderId)
+        if (isTerminalSettlement(remote.settlementStatus)) {
+            startFreshDraftInternal(message = "remote_settled")
+            return
+        }
+
+        val loyalty = loyaltySummaryIfExposed(currentToken, orderId)
+        val lines = cartLinesFromRemote(remote)
+
+        draftStore.clear()
+        persistedDraft = PersistedDraft()
+        _ui.update {
+            it.copy(
+                draftCart = lines,
+                draftOrderType = remote.type,
+                draftTableId = remote.tableId,
+                pendingRemoteOrderId = null,
+                resumedRemoteOrderId = remote.orderId,
+                resumedRemoteOrderTotal = remote.total,
+                openedOrderCode = code ?: it.openedOrderCode ?: "#${remote.orderId}",
+                commercialSnapshot = remote.commercial,
+                loyaltySummary = loyalty,
+                deliveryCustomerName = remote.customerName ?: it.deliveryCustomerName,
+                deliveryCustomerPhone = remote.customerPhone ?: it.deliveryCustomerPhone,
+                commercialError = null
+            )
+        }
+    }
+
     private suspend fun loadRemoteOrderForPos(currentToken: String, orderId: Long, code: String) {
         _ui.update { it.copy(orderLoadBusy = true, orderLoadError = null, checkoutError = null) }
-        runCatching { api.orderDraft(currentToken, orderId) }
-            .onSuccess { remote ->
+        runCatching {
+            val remote = api.orderDraft(currentToken, orderId)
+            if (isTerminalSettlement(remote.settlementStatus)) {
+                return@runCatching Pair(remote, null)
+            }
+            Pair(remote, loyaltySummaryIfExposed(currentToken, orderId))
+        }
+            .onSuccess { (remote, loyalty) ->
                 if (isTerminalSettlement(remote.settlementStatus)) {
                     startFreshDraftInternal(message = "remote_settled")
                     val freshOrders = runCatching { api.orders(currentToken) }.getOrDefault(_ui.value.orders)
@@ -2244,26 +2339,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     return@onSuccess
                 }
 
-                val lines = remote.lines.map { line ->
-                    val product = _ui.value.products.firstOrNull { it.id == line.menuItemId }
-                        ?: Product(
-                            id = line.menuItemId,
-                            categoryId = line.categoryId ?: 0,
-                            name = line.name ?: "Article ${line.menuItemId}",
-                            description = "",
-                            price = line.price,
-                            emoji = "🍽️",
-                            vatRate = line.vatRate,
-                            vatLabel = line.vatLabel
-                        )
-                    val enriched = product.copy(
-                        categoryId = line.categoryId ?: product.categoryId,
-                        price = line.price.takeIf { it > 0 } ?: product.price,
-                        vatRate = line.vatRate ?: product.vatRate,
-                        vatLabel = line.vatLabel ?: product.vatLabel
-                    )
-                    CartLine(product = enriched, quantity = line.quantity)
-                }
+                val lines = cartLinesFromRemote(remote)
 
                 // A reopened server order is not an idempotency-pending local checkout.
                 // Do not persist its database id in DraftOrderStore: that was the source of
@@ -2286,6 +2362,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         billingError = null,
                         checkoutError = null,
                         checkoutMessage = null,
+                        commercialSnapshot = remote.commercial,
+                        loyaltySummary = loyalty,
+                        commercialError = null,
+                        commercialMessage = null,
+                        deliveryCustomerName = remote.customerName ?: it.deliveryCustomerName,
+                        deliveryCustomerPhone = remote.customerPhone ?: it.deliveryCustomerPhone,
                         orderLoadError = if (lines.isEmpty() && remote.total <= 0.0) {
                             "La commande ne contient ni lignes ni montant exploitable. Utilisez Rafraîchir après le correctif API."
                         } else null
@@ -2295,6 +2377,292 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             .onFailure { e ->
                 _ui.update { it.copy(orderLoadBusy = false, orderLoadError = readableError(e)) }
             }
+    }
+
+    fun openCommercialTools() {
+        if (!_ui.value.certificationCapabilities.commercialToolsAvailable) return
+        _ui.update {
+            it.copy(
+                commercialSheetOpen = true,
+                commercialError = null,
+                commercialMessage = null
+            )
+        }
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId
+        if (orderId != null && !_ui.value.demoMode) {
+            refreshCommercialTools()
+        }
+    }
+
+    fun dismissCommercialTools() {
+        if (_ui.value.commercialBusy) return
+        _ui.update {
+            it.copy(
+                commercialSheetOpen = false,
+                commercialError = null,
+                commercialMessage = null
+            )
+        }
+    }
+
+    fun refreshCommercialTools() {
+        val currentToken = token ?: return
+        val state = _ui.value
+        val orderId = state.resumedRemoteOrderId ?: state.pendingRemoteOrderId ?: return
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                refreshCommercialOrderState(currentToken, orderId)
+            }.onSuccess {
+                _ui.update { it.copy(commercialBusy = false, commercialError = null) }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        commercialBusy = false,
+                        commercialError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
+    fun prepareCommercialDraft() {
+        val state = _ui.value
+        if (state.demoMode || state.draftCart.isEmpty()) return
+        if (state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null) {
+            refreshCommercialTools()
+            return
+        }
+        if (state.draftOrderType == OrderType.DINE_IN && state.draftTableId == null) {
+            _ui.update { it.copy(commercialError = "table_required") }
+            return
+        }
+        if (
+            state.draftOrderType == OrderType.DELIVERY &&
+            (state.deliveryAddress.isBlank() || state.deliveryExecutiveId == null)
+        ) {
+            _ui.update { it.copy(commercialError = "delivery_required") }
+            return
+        }
+
+        val currentToken = token ?: run {
+            _ui.update { it.copy(commercialError = "session_expired") }
+            return
+        }
+
+        val intentKey = buildString {
+            append(state.draftOrderType.name)
+            append('|').append(state.draftTableId ?: 0L)
+            append('|').append(state.deliveryCustomerName.trim())
+            append('|').append(state.deliveryCustomerPhone.trim())
+            append('|').append(state.deliveryAddress.trim())
+            append('|').append(state.deliveryExecutiveId ?: 0L)
+            append('|').append(state.deliveryFeeText.trim())
+            state.draftCart
+                .sortedBy { it.product.id }
+                .forEach { line ->
+                    append('|').append(line.product.id).append(':').append(line.quantity)
+                }
+        }
+        val clientOrderUuid = runCatching {
+            nativeMutationOperationStore.resolveOrderDraft(intentKey)
+        }.getOrElse { error ->
+            _ui.update { it.copy(commercialError = readableError(error)) }
+            return
+        }
+
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                val orderId = api.createOrder(
+                    token = currentToken,
+                    type = _ui.value.draftOrderType,
+                    lines = _ui.value.draftCart,
+                    tableId = _ui.value.draftTableId,
+                    customerName = _ui.value.deliveryCustomerName.takeIf { it.isNotBlank() },
+                    customerPhone = _ui.value.deliveryCustomerPhone.takeIf { it.isNotBlank() },
+                    deliveryAddress = _ui.value.deliveryAddress.takeIf { it.isNotBlank() },
+                    deliveryFee = _ui.value.deliveryFeeText.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                    deliveryExecutiveId = _ui.value.deliveryExecutiveId,
+                    clientOrderUuid = clientOrderUuid
+                )
+                val freshOrders = runCatchingPreservingCancellation {
+                    api.orders(currentToken)
+                }.getOrDefault(_ui.value.orders)
+                val code = freshOrders.firstOrNull { it.id == orderId }?.code ?: "#$orderId"
+                refreshCommercialOrderState(currentToken, orderId, code)
+                nativeMutationOperationStore.completeOrderDraft(intentKey, clientOrderUuid)
+                freshOrders
+            }.onSuccess { freshOrders ->
+                knownOrderIds.addAll(freshOrders.map { it.id })
+                _ui.update {
+                    it.copy(
+                        commercialBusy = false,
+                        commercialError = null,
+                        commercialMessage = "order_prepared",
+                        orders = if (freshOrders.isEmpty()) it.orders else freshOrders
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        commercialBusy = false,
+                        commercialError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
+    fun applyManualDiscount(type: String, value: Double) {
+        if (!_ui.value.certificationCapabilities.manualDiscount) return
+        if (value <= 0.0) return
+        val currentToken = token ?: return
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId ?: return
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                api.updateCommercialAdjustments(
+                    token = currentToken,
+                    orderId = orderId,
+                    includeDiscount = true,
+                    discountType = type,
+                    discountValue = value
+                )
+                refreshCommercialOrderState(currentToken, orderId)
+            }.onSuccess {
+                _ui.update { it.copy(commercialBusy = false, commercialMessage = "discount_applied") }
+            }.onFailure { error ->
+                _ui.update { it.copy(commercialBusy = false, commercialError = readableError(error)) }
+            }
+        }
+    }
+
+    fun clearManualDiscount() {
+        if (!_ui.value.certificationCapabilities.manualDiscount) return
+        val currentToken = token ?: return
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId ?: return
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                api.updateCommercialAdjustments(
+                    token = currentToken,
+                    orderId = orderId,
+                    includeDiscount = true,
+                    discountType = null,
+                    discountValue = 0.0
+                )
+                refreshCommercialOrderState(currentToken, orderId)
+            }.onSuccess {
+                _ui.update { it.copy(commercialBusy = false, commercialMessage = "discount_cleared") }
+            }.onFailure { error ->
+                _ui.update { it.copy(commercialBusy = false, commercialError = readableError(error)) }
+            }
+        }
+    }
+
+    fun applyTip(amount: Double, note: String?) {
+        if (!_ui.value.certificationCapabilities.tip) return
+        if (amount < 0.0) return
+        val currentToken = token ?: return
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId ?: return
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                api.updateCommercialAdjustments(
+                    token = currentToken,
+                    orderId = orderId,
+                    includeTip = true,
+                    tipAmount = amount,
+                    tipNote = note
+                )
+                refreshCommercialOrderState(currentToken, orderId)
+            }.onSuccess {
+                _ui.update { it.copy(commercialBusy = false, commercialMessage = "tip_applied") }
+            }.onFailure { error ->
+                _ui.update { it.copy(commercialBusy = false, commercialError = readableError(error)) }
+            }
+        }
+    }
+
+    fun clearTip() = applyTip(0.0, null)
+
+    fun redeemLoyaltyPoints(points: Int) {
+        if (!_ui.value.certificationCapabilities.loyaltyPoints || points <= 0) return
+        val currentToken = token ?: return
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId ?: return
+        val intentKey = points.toString()
+        val operationId = runCatching {
+            nativeMutationOperationStore.resolve("points_redeem", orderId, intentKey)
+        }.getOrElse { error ->
+            _ui.update { it.copy(commercialError = readableError(error)) }
+            return
+        }
+
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                api.redeemLoyaltyPoints(currentToken, orderId, points, operationId)
+                refreshCommercialOrderState(currentToken, orderId)
+                nativeMutationOperationStore.complete("points_redeem", orderId, intentKey, operationId)
+            }.onSuccess {
+                _ui.update { it.copy(commercialBusy = false, commercialMessage = "points_applied") }
+            }.onFailure { error ->
+                _ui.update { it.copy(commercialBusy = false, commercialError = readableError(error)) }
+            }
+        }
+    }
+
+    fun removeLoyaltyPoints() {
+        if (!_ui.value.certificationCapabilities.loyaltyPoints) return
+        val currentToken = token ?: return
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId ?: return
+        val intentKey = "remove"
+        val operationId = runCatching {
+            nativeMutationOperationStore.resolve("points_remove", orderId, intentKey)
+        }.getOrElse { error ->
+            _ui.update { it.copy(commercialError = readableError(error)) }
+            return
+        }
+
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                api.removeLoyaltyPoints(currentToken, orderId, operationId)
+                refreshCommercialOrderState(currentToken, orderId)
+                nativeMutationOperationStore.complete("points_remove", orderId, intentKey, operationId)
+            }.onSuccess {
+                _ui.update { it.copy(commercialBusy = false, commercialMessage = "points_removed") }
+            }.onFailure { error ->
+                _ui.update { it.copy(commercialBusy = false, commercialError = readableError(error)) }
+            }
+        }
+    }
+
+    fun redeemStampReward(ruleId: Long) {
+        if (!_ui.value.certificationCapabilities.stampRewards || ruleId <= 0L) return
+        val currentToken = token ?: return
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId ?: return
+        val intentKey = ruleId.toString()
+        val operationId = runCatching {
+            nativeMutationOperationStore.resolve("stamps_redeem", orderId, intentKey)
+        }.getOrElse { error ->
+            _ui.update { it.copy(commercialError = readableError(error)) }
+            return
+        }
+
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatching {
+                api.redeemLoyaltyStamp(currentToken, orderId, ruleId, operationId)
+                refreshCommercialOrderState(currentToken, orderId)
+                nativeMutationOperationStore.complete("stamps_redeem", orderId, intentKey, operationId)
+            }.onSuccess {
+                _ui.update { it.copy(commercialBusy = false, commercialMessage = "reward_applied") }
+            }.onFailure { error ->
+                _ui.update { it.copy(commercialBusy = false, commercialError = readableError(error)) }
+            }
+        }
     }
 
     fun openBillingTools() {
@@ -2527,6 +2895,19 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 billingBusy = false,
                 billingError = null,
                 billingContext = null,
+                commercialSheetOpen = false,
+                commercialBusy = false,
+                commercialError = null,
+                commercialMessage = null,
+                commercialSnapshot = null,
+                loyaltySummary = null,
+                deliveryCustomerName = "",
+                deliveryCustomerPhone = "",
+                deliveryAddress = "",
+                deliveryExecutiveId = null,
+                deliveryFeeText = "0.00",
+                deliveryDetailsOpen = false,
+                deliveryConfigError = null,
                 checkoutMessage = message,
                 lastCashChange = null
             )
@@ -2560,6 +2941,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 billingBusy = false,
                 billingError = null,
                 billingContext = null,
+                commercialSheetOpen = false,
+                commercialBusy = false,
+                commercialError = null,
+                commercialMessage = null,
+                commercialSnapshot = null,
+                loyaltySummary = null,
                 orders = if (freshOrders.isEmpty()) it.orders else freshOrders,
                 kots = freshKots,
                 lastCashChange = cashChange,
@@ -4286,6 +4673,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 online = false,
                 user = cached.platform.user,
                 policy = cached.platform.policy,
+                certificationCapabilities = cached.platform.certificationCapabilities,
                 categories = cached.catalog.categories,
                 products = cached.catalog.products,
                 orders = cached.orders,
@@ -4417,6 +4805,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 loading = false,
                 user = platform.user,
                 policy = platform.policy,
+                certificationCapabilities = platform.certificationCapabilities,
                 fiscalIdentity = fiscalIdentityResult.getOrNull() ?: it.fiscalIdentity,
                 posMachineId = posBinding?.id,
                 posMachinePublicId = posBinding?.publicId.orEmpty(),
@@ -4485,6 +4874,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                                 resumedRemoteOrderTotal = if (resumedSettled) null else state.resumedRemoteOrderTotal,
                                 openedOrderCode = if (resumedSettled) null else state.openedOrderCode,
                                 paymentSheetOpen = if (resumedSettled) false else state.paymentSheetOpen,
+                                commercialSheetOpen = if (resumedSettled) false else state.commercialSheetOpen,
+                                commercialBusy = if (resumedSettled) false else state.commercialBusy,
+                                commercialError = if (resumedSettled) null else state.commercialError,
+                                commercialMessage = if (resumedSettled) null else state.commercialMessage,
+                                commercialSnapshot = if (resumedSettled) null else state.commercialSnapshot,
+                                loyaltySummary = if (resumedSettled) null else state.loyaltySummary,
                                 checkoutMessage = if (resumedSettled) "remote_settled" else state.checkoutMessage,
                                 error = null
                             )

@@ -636,12 +636,15 @@ private fun PosScreen(
                     modifier = Modifier.weight(0.9f),
                     cart = cart,
                     t = t,
-                    busy = state.checkoutBusy,
+                    busy = state.checkoutBusy || state.commercialBusy,
                     tableLabel = state.tables.firstOrNull { it.id == selectedTableId }?.label,
                     canonicalTotal = state.resumedRemoteOrderTotal,
+                    commercialSnapshot = state.commercialSnapshot,
+                    commercialEnabled = state.certificationCapabilities.commercialToolsAvailable,
                     locked = state.resumedRemoteOrderId != null,
                     onPlus = vm::incrementProduct,
                     onMinus = vm::decrementProduct,
+                    onCommercialTools = vm::openCommercialTools,
                     onSendKitchen = vm::sendDraftToKitchen,
                     onBillingTools = vm::openBillingTools,
                     onCheckout = {
@@ -667,9 +670,11 @@ private fun PosScreen(
                         modifier = Modifier.align(Alignment.BottomCenter),
                         cart = cart,
                         t = t,
-                        busy = state.checkoutBusy,
+                        busy = state.checkoutBusy || state.commercialBusy,
                         canonicalTotal = state.resumedRemoteOrderTotal,
+                        commercialEnabled = state.certificationCapabilities.commercialToolsAvailable,
                         locked = state.resumedRemoteOrderId != null,
+                        onCommercialTools = vm::openCommercialTools,
                         onSendKitchen = vm::sendDraftToKitchen,
                         onBillingTools = vm::openBillingTools,
                         onCheckout = {
@@ -689,6 +694,14 @@ private fun PosScreen(
             t = t,
             onDismiss = vm::dismissPaymentSheet,
             onConfirm = vm::confirmPayment
+        )
+    }
+
+    if (state.commercialSheetOpen) {
+        CommercialToolsDialog(
+            state = state,
+            vm = vm,
+            t = t
         )
     }
 
@@ -1270,13 +1283,15 @@ private fun MobileCartBar(
     t: UiStrings,
     busy: Boolean,
     canonicalTotal: Double? = null,
+    commercialEnabled: Boolean = false,
     locked: Boolean = false,
+    onCommercialTools: () -> Unit,
     onSendKitchen: () -> Unit,
     onBillingTools: () -> Unit,
     onCheckout: () -> Unit
 ) {
     val lineTotal = cart.sumOf { it.total }
-    val total = canonicalTotal?.takeIf { it > 0 } ?: lineTotal
+    val total = canonicalTotal?.takeIf { it >= 0.0 } ?: lineTotal
     Surface(
         modifier = modifier.fillMaxWidth(),
         color = Color.White,
@@ -1290,6 +1305,15 @@ private fun MobileCartBar(
             Column(Modifier.weight(1f)) {
                 Text("${cart.sumOf { it.quantity }} articles", color = CookitMuted, fontSize = 12.sp)
                 Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 20.sp, fontWeight = FontWeight.Black)
+            }
+            if (commercialEnabled) {
+                FilledTonalIconButton(
+                    onClick = onCommercialTools,
+                    enabled = !busy
+                ) {
+                    Icon(Icons.Default.LocalOffer, contentDescription = t.commercialTools)
+                }
+                Spacer(Modifier.width(8.dp))
             }
             if (!locked) {
                 OutlinedButton(onClick = onSendKitchen, enabled = !busy && cart.isNotEmpty(), shape = RoundedCornerShape(14.dp)) {
@@ -1467,9 +1491,12 @@ private fun CartPane(
     busy: Boolean,
     tableLabel: String?,
     canonicalTotal: Double? = null,
+    commercialSnapshot: CommercialSnapshot? = null,
+    commercialEnabled: Boolean = false,
     locked: Boolean = false,
     onPlus: (Long) -> Unit,
     onMinus: (Long) -> Unit,
+    onCommercialTools: () -> Unit,
     onSendKitchen: () -> Unit,
     onBillingTools: () -> Unit,
     onCheckout: () -> Unit
@@ -1496,28 +1523,63 @@ private fun CartPane(
                 }
             } else {
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(cart, key = { it.product.id }) { line ->
+                    items(cart, key = { it.stableKey }) { line ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(line.product.name, fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(line.product.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
+                                    if (line.freeItem) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(999.dp),
+                                            color = CookitSoftOrange
+                                        ) {
+                                            Text(
+                                                t.freeItem,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                color = CookitOrange,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                }
                                 Text(
                                     String.format(Locale.FRANCE, "%.2f €", line.total),
-                                    color = CookitGreen,
+                                    color = if (line.freeItem) CookitOrange else CookitGreen,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            FilledTonalIconButton(onClick = { onMinus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Remove, null) }
-                            Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
-                            FilledTonalIconButton(onClick = { onPlus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Add, null) }
+                            if (!line.freeItem) {
+                                FilledTonalIconButton(onClick = { onMinus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Remove, null) }
+                                Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
+                                FilledTonalIconButton(onClick = { onPlus(line.product.id) }, enabled = !locked) { Icon(Icons.Default.Add, null) }
+                            } else {
+                                Text("×${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black, color = CookitOrange)
+                            }
                         }
                         HorizontalDivider(color = CookitLine)
                     }
                 }
             }
 
-            val subtotal = cart.sumOf { it.total }
-            val displayTotal = canonicalTotal?.takeIf { it > 0 } ?: subtotal
+            val localSubtotal = cart.sumOf { it.total }
+            val authoritativeSubtotal = commercialSnapshot?.totals?.subTotal?.takeIf { it >= 0.0 }
+            val subtotal = authoritativeSubtotal ?: localSubtotal
+            val displayTotal = canonicalTotal?.takeIf { it >= 0.0 }
+                ?: commercialSnapshot?.totals?.grandTotal?.takeIf { it >= 0.0 }
+                ?: subtotal
+
             SummaryLine(t.subtotal, subtotal)
+            commercialSnapshot?.discount?.amount?.takeIf { it > 0.0001 }?.let {
+                SummaryLine(t.manualDiscount, -it, muted = true)
+            }
+            commercialSnapshot?.loyalty?.discountAmount?.takeIf { it > 0.0001 }?.let {
+                SummaryLine(t.loyaltyPoints, -it, muted = true)
+            }
+            commercialSnapshot?.tip?.amount?.takeIf { it > 0.0001 }?.let {
+                SummaryLine(t.tipLabel, it, muted = true)
+            }
             if (!locked) SummaryLine(t.vatIncluded, subtotal * 0.12, muted = true)
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = CookitLine)
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1530,7 +1592,20 @@ private fun CartPane(
                     color = CookitGreen
                 )
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
+            if (commercialEnabled) {
+                OutlinedButton(
+                    onClick = onCommercialTools,
+                    enabled = !busy && cart.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(17.dp)
+                ) {
+                    Icon(Icons.Default.LocalOffer, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(t.commercialTools, fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
             if (!locked) {
                 OutlinedButton(
                     onClick = onSendKitchen,
@@ -1581,6 +1656,431 @@ private fun SummaryLine(label: String, amount: Double, muted: Boolean = false) {
             color = if (muted) CookitMuted else CookitInk,
             fontWeight = FontWeight.SemiBold
         )
+    }
+}
+
+@Composable
+private fun CommercialToolsDialog(
+    state: PosUiState,
+    vm: CookitPosViewModel,
+    t: UiStrings
+) {
+    val hasRemoteOrder = state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null
+    val capabilities = state.certificationCapabilities
+    val commercial = state.commercialSnapshot
+    val loyalty = state.loyaltySummary
+
+    var discountType by remember(state.commercialSheetOpen, commercial?.discount?.type) {
+        mutableStateOf(commercial?.discount?.type?.takeIf { it == "fixed" || it == "percent" } ?: "fixed")
+    }
+    var discountText by remember(state.commercialSheetOpen, commercial?.discount?.value) {
+        mutableStateOf(
+            commercial?.discount?.value
+                ?.takeIf { it > 0.0 }
+                ?.let { String.format(Locale.US, "%.2f", it) }
+                ?: ""
+        )
+    }
+    var tipText by remember(state.commercialSheetOpen, commercial?.tip?.amount) {
+        mutableStateOf(
+            commercial?.tip?.amount
+                ?.takeIf { it > 0.0 }
+                ?.let { String.format(Locale.US, "%.2f", it) }
+                ?: ""
+        )
+    }
+    var tipNote by remember(state.commercialSheetOpen, commercial?.tip?.note) {
+        mutableStateOf(commercial?.tip?.note.orEmpty())
+    }
+    var pointsText by remember(state.commercialSheetOpen, loyalty?.points?.availablePoints) {
+        mutableStateOf("")
+    }
+
+    val discountValue = discountText.replace(',', '.').toDoubleOrNull()
+    val tipValue = tipText.replace(',', '.').toDoubleOrNull()
+    val pointsValue = pointsText.toIntOrNull()
+    val loyaltyOrder = loyalty?.order
+    val hasManualDiscount = (commercial?.discount?.amount ?: loyaltyOrder?.manualDiscountAmount ?: 0.0) > 0.0001
+    val hasLoyaltyPoints = (commercial?.loyalty?.pointsRedeemed ?: loyaltyOrder?.loyaltyPointsRedeemed ?: 0) > 0
+
+    Dialog(
+        onDismissRequest = vm::dismissCommercialTools,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .widthIn(max = 920.dp)
+                .heightIn(max = 760.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = Color.White,
+            shadowElevation = 18.dp
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = CookitSoftOrange) {
+                        Icon(
+                            Icons.Default.LocalOffer,
+                            null,
+                            tint = CookitOrange,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(t.commercialTools, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                        Text(t.commercialToolsHelp, color = CookitMuted, fontSize = 13.sp)
+                    }
+                    IconButton(onClick = vm::dismissCommercialTools, enabled = !state.commercialBusy) {
+                        Icon(Icons.Default.Close, contentDescription = t.close)
+                    }
+                }
+                HorizontalDivider(color = CookitLine)
+
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    state.commercialError?.let { raw ->
+                        val message = when (raw) {
+                            "table_required" -> "${t.chooseTable}: ${t.selectionRequired}"
+                            "delivery_required" -> t.deliveryRequired
+                            "session_expired" -> t.sessionExpired
+                            else -> raw
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text(
+                                message,
+                                modifier = Modifier.padding(12.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    state.commercialMessage?.let { key ->
+                        val message = when (key) {
+                            "order_prepared" -> t.orderPrepared
+                            "discount_applied" -> t.discountApplied
+                            "discount_cleared" -> t.discountCleared
+                            "tip_applied" -> t.tipApplied
+                            "points_applied" -> t.pointsApplied
+                            "points_removed" -> t.pointsRemoved
+                            "reward_applied" -> t.rewardApplied
+                            else -> key
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = CookitSoftGreen,
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text(
+                                message,
+                                modifier = Modifier.padding(12.dp),
+                                color = CookitGreen,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (!hasRemoteOrder) {
+                        CommercialSection(title = t.customerBenefits) {
+                            Text(t.customerBenefitsHint, color = CookitMuted, fontSize = 13.sp)
+                            OutlinedTextField(
+                                value = state.deliveryCustomerName,
+                                onValueChange = vm::updateDeliveryCustomerName,
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text(t.customerName) },
+                                singleLine = true,
+                                enabled = !state.commercialBusy
+                            )
+                            OutlinedTextField(
+                                value = state.deliveryCustomerPhone,
+                                onValueChange = vm::updateDeliveryCustomerPhone,
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text(t.customerPhone) },
+                                singleLine = true,
+                                enabled = !state.commercialBusy
+                            )
+                        }
+
+                        CommercialSection(title = t.prepareOrder) {
+                            Text(t.prepareOrderHelp, color = CookitMuted, fontSize = 13.sp)
+                            Button(
+                                onClick = vm::prepareCommercialDraft,
+                                enabled = !state.commercialBusy && state.draftCart.isNotEmpty(),
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                if (state.commercialBusy) {
+                                    CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.CloudUpload, null)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(t.prepareOrder, fontWeight = FontWeight.Black)
+                            }
+                        }
+                    } else {
+                        val customer = loyalty?.customer
+                        val customerDisplayName = customer?.name?.takeIf { it.isNotBlank() }
+                            ?: state.deliveryCustomerName.takeIf { it.isNotBlank() }
+                        val customerDisplayPhone = customer?.phone?.takeIf { it.isNotBlank() }
+                            ?: state.deliveryCustomerPhone.takeIf { it.isNotBlank() }
+                        CommercialSection(title = t.customerBenefits) {
+                            if (customerDisplayName != null || customerDisplayPhone != null) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Person, null, tint = CookitOrange)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(customerDisplayName ?: customer?.let { "#${it.id}" }.orEmpty(), fontWeight = FontWeight.Black)
+                                        customerDisplayPhone?.let { Text(it, color = CookitMuted, fontSize = 12.sp) }
+                                    }
+                                    TextButton(onClick = vm::refreshCommercialTools, enabled = !state.commercialBusy) {
+                                        Icon(Icons.Default.Refresh, null)
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(t.refreshBenefits)
+                                    }
+                                }
+                            } else {
+                                Text(t.customerRequired, color = CookitMuted, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        if (capabilities.manualDiscount) {
+                            CommercialSection(title = t.manualDiscount) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        selected = discountType == "fixed",
+                                        onClick = { discountType = "fixed" },
+                                        label = { Text(t.discountFixed) },
+                                        enabled = !state.commercialBusy
+                                    )
+                                    FilterChip(
+                                        selected = discountType == "percent",
+                                        onClick = { discountType = "percent" },
+                                        label = { Text(t.discountPercent) },
+                                        enabled = !state.commercialBusy
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = discountText,
+                                    onValueChange = { discountText = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text(t.discountValue) },
+                                    singleLine = true,
+                                    enabled = !state.commercialBusy && !hasLoyaltyPoints
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { vm.applyManualDiscount(discountType, discountValue ?: 0.0) },
+                                        enabled = !state.commercialBusy && !hasLoyaltyPoints &&
+                                            (discountValue ?: 0.0) > 0.0 &&
+                                            (discountType != "percent" || (discountValue ?: 0.0) <= 100.0),
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text(t.applyAdjustment, fontWeight = FontWeight.Bold) }
+                                    OutlinedButton(
+                                        onClick = vm::clearManualDiscount,
+                                        enabled = !state.commercialBusy && (commercial?.discount?.amount ?: 0.0) > 0.0001,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text(t.removeAdjustment, fontWeight = FontWeight.Bold) }
+                                }
+                                if (hasLoyaltyPoints) {
+                                    Text(t.loyaltyPoints, color = CookitMuted, fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        if (capabilities.tip) {
+                            CommercialSection(title = t.tipLabel) {
+                                OutlinedTextField(
+                                    value = tipText,
+                                    onValueChange = { tipText = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text(t.tipAmount) },
+                                    singleLine = true,
+                                    enabled = !state.commercialBusy
+                                )
+                                OutlinedTextField(
+                                    value = tipNote,
+                                    onValueChange = { tipNote = it.take(500) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text(t.tipNote) },
+                                    maxLines = 2,
+                                    enabled = !state.commercialBusy
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { vm.applyTip(tipValue ?: 0.0, tipNote.takeIf { it.isNotBlank() }) },
+                                        enabled = !state.commercialBusy && tipValue != null && tipValue >= 0.0,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text(t.applyAdjustment, fontWeight = FontWeight.Bold) }
+                                    OutlinedButton(
+                                        onClick = vm::clearTip,
+                                        enabled = !state.commercialBusy && (commercial?.tip?.amount ?: 0.0) > 0.0001,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text(t.removeAdjustment, fontWeight = FontWeight.Bold) }
+                                }
+                            }
+                        }
+
+                        if (capabilities.loyaltyPoints) {
+                            CommercialSection(title = t.loyaltyPoints) {
+                                val points = loyalty?.points
+                                if (customer == null || points == null || !points.enabled) {
+                                    Text(t.customerRequired, color = CookitMuted)
+                                } else {
+                                    Row(Modifier.fillMaxWidth()) {
+                                        Text(t.pointsAvailable, color = CookitMuted)
+                                        Spacer(Modifier.weight(1f))
+                                        Text("${points.availablePoints}", fontWeight = FontWeight.Black, color = CookitGreen)
+                                    }
+                                    Row(Modifier.fillMaxWidth()) {
+                                        Text(t.discountValue, color = CookitMuted)
+                                        Spacer(Modifier.weight(1f))
+                                        Text(String.format(Locale.FRANCE, "%.2f €", points.maxDiscount), fontWeight = FontWeight.Bold)
+                                    }
+                                    if ((loyaltyOrder?.loyaltyPointsRedeemed ?: 0) > 0) {
+                                        Surface(shape = RoundedCornerShape(12.dp), color = CookitSoftOrange) {
+                                            Text(
+                                                "${loyaltyOrder?.loyaltyPointsRedeemed ?: 0} ${t.loyaltyPoints.lowercase()} • ${String.format(Locale.FRANCE, "%.2f €", loyaltyOrder?.loyaltyDiscountAmount ?: 0.0)}",
+                                                modifier = Modifier.padding(10.dp),
+                                                color = CookitOrange,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = vm::removeLoyaltyPoints,
+                                            enabled = !state.commercialBusy,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text(t.removePoints, fontWeight = FontWeight.Bold) }
+                                    } else {
+                                        OutlinedTextField(
+                                            value = pointsText,
+                                            onValueChange = { value -> pointsText = value.filter { char -> char.isDigit() } },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            label = { Text(t.pointsToUse) },
+                                            supportingText = {
+                                                Text("Min ${points.minRedeemPoints} • max ${points.availablePoints}")
+                                            },
+                                            singleLine = true,
+                                            enabled = !state.commercialBusy && !hasManualDiscount
+                                        )
+                                        Button(
+                                            onClick = { vm.redeemLoyaltyPoints(pointsValue ?: 0) },
+                                            enabled = !state.commercialBusy && !hasManualDiscount &&
+                                                (pointsValue ?: 0) >= points.minRedeemPoints &&
+                                                (pointsValue ?: 0) <= points.availablePoints &&
+                                                (points.pointsRequired <= 0 || (pointsValue ?: 0) <= points.pointsRequired),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text(t.usePoints, fontWeight = FontWeight.Bold) }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (capabilities.stampRewards) {
+                            CommercialSection(title = t.stampRewards) {
+                                val rules = loyalty?.stampRules.orEmpty()
+                                if (customer == null || loyalty?.stampsEnabled != true) {
+                                    Text(t.customerRequired, color = CookitMuted)
+                                } else if (rules.isEmpty()) {
+                                    Text(t.loyaltyUnavailable, color = CookitMuted)
+                                } else {
+                                    rules.forEach { rule ->
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = CookitCanvas,
+                                            border = BorderStroke(1.dp, CookitLine)
+                                        ) {
+                                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Text(
+                                                    rule.rewardMenuItemName.ifBlank { rule.menuItemName },
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                                Text(
+                                                    "${t.stampsAvailable}: ${rule.availableStamps}/${rule.stampsRequired}",
+                                                    color = CookitMuted,
+                                                    fontSize = 12.sp
+                                                )
+                                                if (rule.redeemedQuantity > 0) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(Icons.Default.CardGiftcard, null, tint = CookitOrange)
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text("${t.freeItem} • ${t.alreadyRedeemed}", color = CookitOrange, fontWeight = FontWeight.Bold)
+                                                    }
+                                                } else {
+                                                    Button(
+                                                        onClick = { vm.redeemStampReward(rule.ruleId) },
+                                                        enabled = !state.commercialBusy && rule.canRedeem && rule.redeemableQuantity > 0,
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    ) {
+                                                        Icon(Icons.Default.CardGiftcard, null)
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text(t.redeemReward, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        commercial?.let { snapshot ->
+                            CommercialSection(title = t.total) {
+                                SummaryLine(t.subtotal, snapshot.totals.subTotal)
+                                snapshot.discount.amount.takeIf { it > 0.0001 }?.let { SummaryLine(t.manualDiscount, -it, muted = true) }
+                                snapshot.loyalty.discountAmount.takeIf { it > 0.0001 }?.let { SummaryLine(t.loyaltyPoints, -it, muted = true) }
+                                snapshot.tip.amount.takeIf { it > 0.0001 }?.let { SummaryLine(t.tipLabel, it, muted = true) }
+                                HorizontalDivider(color = CookitLine)
+                                SummaryLine(t.total, snapshot.totals.grandTotal)
+                            }
+                        }
+
+                        Text(t.retrySameAction, color = CookitMuted, fontSize = 11.sp)
+                    }
+                }
+
+                HorizontalDivider(color = CookitLine)
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = vm::dismissCommercialTools, enabled = !state.commercialBusy) {
+                        Text(t.close, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CommercialSection(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, CookitLine)
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, fontSize = 17.sp, fontWeight = FontWeight.Black)
+            content()
+        }
     }
 }
 

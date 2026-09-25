@@ -68,9 +68,13 @@ data class Product(
 
 data class CartLine(
     val product: Product,
-    val quantity: Int
+    val quantity: Int,
+    val remoteLineId: Long? = null,
+    val amountOverride: Double? = null,
+    val freeItem: Boolean = false
 ) {
-    val total: Double get() = product.price * quantity
+    val total: Double get() = amountOverride ?: product.price * quantity
+    val stableKey: String get() = remoteLineId?.let { "remote:$it" } ?: "product:${product.id}"
 }
 
 data class PosOrder(
@@ -157,8 +161,141 @@ data class RemoteOrderLine(
     val name: String? = null,
     val categoryId: Long? = null,
     val vatRate: Double? = null,
-    val vatLabel: String? = null
+    val vatLabel: String? = null,
+    val orderItemId: Long? = null,
+    val amount: Double? = null,
+    val freeItem: Boolean = false
 )
+
+data class CommercialDiscountState(
+    val type: String? = null,
+    val value: Double = 0.0,
+    val amount: Double = 0.0
+)
+
+data class CommercialTipState(
+    val amount: Double = 0.0,
+    val note: String? = null
+)
+
+data class CommercialLoyaltyState(
+    val pointsRedeemed: Int = 0,
+    val discountAmount: Double = 0.0,
+    val stampDiscountAmount: Double = 0.0,
+    val stampDiscountEmbeddedInItems: Boolean = true
+)
+
+data class CommercialTotals(
+    val subTotal: Double = 0.0,
+    val chargesTotal: Double = 0.0,
+    val taxTotal: Double = 0.0,
+    val deliveryFee: Double = 0.0,
+    val grandTotal: Double = 0.0
+)
+
+data class CommercialSnapshot(
+    val contractVersion: String = "",
+    val orderId: Long = 0L,
+    val discount: CommercialDiscountState = CommercialDiscountState(),
+    val tip: CommercialTipState = CommercialTipState(),
+    val loyalty: CommercialLoyaltyState = CommercialLoyaltyState(),
+    val totals: CommercialTotals = CommercialTotals()
+)
+
+data class LoyaltyCustomer(
+    val id: Long,
+    val name: String,
+    val phone: String
+)
+
+data class LoyaltyPointsSummary(
+    val enabled: Boolean = false,
+    val availablePoints: Int = 0,
+    val pointsValue: Double = 0.0,
+    val maxDiscount: Double = 0.0,
+    val pointsRequired: Int = 0,
+    val minRedeemPoints: Int = 0,
+    val valuePerPoint: Double = 0.0,
+    val maxDiscountPercent: Double = 0.0
+)
+
+data class LoyaltyStampRuleSummary(
+    val ruleId: Long,
+    val menuItemId: Long,
+    val menuItemName: String,
+    val stampsRequired: Int,
+    val availableStamps: Int,
+    val canRedeem: Boolean,
+    val eligibleQuantity: Int,
+    val redeemedQuantity: Int,
+    val remainingEligibleQuantity: Int,
+    val redeemableQuantity: Int,
+    val rewardType: String,
+    val rewardValue: Double,
+    val rewardMenuItemId: Long?,
+    val rewardMenuItemName: String,
+    val rewardMenuItemVariationId: Long? = null
+)
+
+data class LoyaltyOrderState(
+    val id: Long,
+    val customerId: Long?,
+    val status: String,
+    val settlementStatus: String,
+    val subtotal: Double,
+    val total: Double,
+    val manualDiscountAmount: Double,
+    val loyaltyPointsRedeemed: Int,
+    val loyaltyDiscountAmount: Double,
+    val stampDiscountAmount: Double,
+    val freeStampItemCount: Int
+)
+
+data class LoyaltySummary(
+    val contractVersion: String = "",
+    val moduleEnabled: Boolean = false,
+    val programEnabled: Boolean = false,
+    val posEnabled: Boolean = false,
+    val settingsConfigured: Boolean = false,
+    val customer: LoyaltyCustomer? = null,
+    val points: LoyaltyPointsSummary = LoyaltyPointsSummary(),
+    val stampsEnabled: Boolean = false,
+    val stampRules: List<LoyaltyStampRuleSummary> = emptyList(),
+    val order: LoyaltyOrderState? = null,
+    val customerRequired: Boolean = false
+)
+
+data class LoyaltyMutationResult(
+    val success: Boolean,
+    val operation: String,
+    val orderId: Long,
+    val pointsRedeemed: Int = 0,
+    val discountAmount: Double = 0.0,
+    val removed: Boolean = false,
+    val alreadyClear: Boolean = false,
+    val ruleId: Long? = null,
+    val stampsRedeemed: Int = 0,
+    val redeemedQuantity: Int = 0,
+    val rewardType: String = "",
+    val rewardValue: Double = 0.0,
+    val rewardMenuItemId: Long? = null,
+    val commercial: CommercialSnapshot? = null,
+    val loyaltyOrder: LoyaltyOrderState? = null,
+    val clientOperationId: String = "",
+    val idempotentReplay: Boolean = false
+)
+
+data class NativeCertificationCapabilities(
+    val contractVersion: String = "",
+    val manualDiscount: Boolean = false,
+    val tip: Boolean = false,
+    val loyaltyPoints: Boolean = false,
+    val stampRewards: Boolean = false,
+    val modifiers: Boolean = false
+) {
+    val commercialToolsAvailable: Boolean
+        get() = manualDiscount || tip || loyaltyPoints || stampRewards
+}
 
 data class RemoteOrderDraft(
     val orderId: Long,
@@ -167,7 +304,11 @@ data class RemoteOrderDraft(
     val total: Double,
     val settlementStatus: String,
     val operationalStatus: String,
-    val lines: List<RemoteOrderLine>
+    val lines: List<RemoteOrderLine>,
+    val customerId: Long? = null,
+    val customerName: String? = null,
+    val customerPhone: String? = null,
+    val commercial: CommercialSnapshot = CommercialSnapshot()
 )
 
 data class KotItem(

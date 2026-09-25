@@ -102,7 +102,45 @@ data class UiStrings(
     val statusPlaced: String,
     val statusConfirmed: String,
     val statusCancelled: String,
-    val statusBilled: String
+    val statusBilled: String,
+    val commercialTools: String,
+    val commercialToolsHelp: String,
+    val prepareOrder: String,
+    val prepareOrderHelp: String,
+    val customerBenefits: String,
+    val customerBenefitsHint: String,
+    val customerRequired: String,
+    val manualDiscount: String,
+    val discountFixed: String,
+    val discountPercent: String,
+    val discountValue: String,
+    val applyAdjustment: String,
+    val removeAdjustment: String,
+    val tipLabel: String,
+    val tipAmount: String,
+    val tipNote: String,
+    val loyaltyPoints: String,
+    val pointsAvailable: String,
+    val pointsToUse: String,
+    val usePoints: String,
+    val removePoints: String,
+    val stampRewards: String,
+    val stampsAvailable: String,
+    val redeemReward: String,
+    val freeItem: String,
+    val alreadyRedeemed: String,
+    val loyaltyUnavailable: String,
+    val refreshBenefits: String,
+    val close: String,
+    val orderPrepared: String,
+    val discountApplied: String,
+    val discountCleared: String,
+    val tipApplied: String,
+    val pointsApplied: String,
+    val pointsRemoved: String,
+    val rewardApplied: String,
+    val sessionExpired: String,
+    val retrySameAction: String
 )
 
 fun strings(language: AppLanguage): UiStrings = when (language) {
@@ -141,7 +179,20 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         noDeliveryDrivers="Aucun livreur disponible", save="Enregistrer",
         deliveryRequired="Adresse et livreur requis.", deliveryLoadFailed="Impossible de charger les paramètres de livraison.",
         statusDelivered="Livré", statusInKitchen="En cuisine", statusReady="Prêt", statusPreparing="En préparation",
-        statusPlaced="Reçue", statusConfirmed="Confirmée", statusCancelled="Annulée", statusBilled="Facturée"
+        statusPlaced="Reçue", statusConfirmed="Confirmée", statusCancelled="Annulée", statusBilled="Facturée",
+        commercialTools="Client & avantages", commercialToolsHelp="Remises, pourboires et fidélité avec total recalculé par Cookit.",
+        prepareOrder="Préparer la commande", prepareOrderHelp="Enregistrez d’abord le brouillon cloud. Si vous utilisez la fidélité, renseignez le client avant cette étape.",
+        customerBenefits="Client & avantages", customerBenefitsHint="Associez le client avant de préparer la commande pour utiliser ses avantages.",
+        customerRequired="Un client doit être associé à la commande pour utiliser la fidélité.",
+        manualDiscount="Remise manuelle", discountFixed="Montant", discountPercent="Pourcentage", discountValue="Valeur de la remise",
+        applyAdjustment="Appliquer", removeAdjustment="Supprimer", tipLabel="Pourboire", tipAmount="Montant du pourboire", tipNote="Note du pourboire",
+        loyaltyPoints="Points fidélité", pointsAvailable="Points disponibles", pointsToUse="Points à utiliser", usePoints="Utiliser les points", removePoints="Annuler les points",
+        stampRewards="Récompenses", stampsAvailable="Tampons disponibles", redeemReward="Utiliser la récompense", freeItem="Offert", alreadyRedeemed="Récompense utilisée",
+        loyaltyUnavailable="Fidélité indisponible pour cette commande.", refreshBenefits="Actualiser les avantages", close="Fermer",
+        orderPrepared="Commande préparée sur Cookit.", discountApplied="Remise appliquée.", discountCleared="Remise supprimée.", tipApplied="Pourboire mis à jour.",
+        pointsApplied="Points appliqués.", pointsRemoved="Points restaurés.", rewardApplied="Récompense appliquée.",
+        sessionExpired="Session Cookit expirée. Reconnectez-vous.",
+        retrySameAction="En cas de coupure réseau, réessayez la même action : Cookit réutilise la même opération."
     )
     AppLanguage.NL -> UiStrings(
         home="Start", pos="POS", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
@@ -178,7 +229,20 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         noDeliveryDrivers="Geen koerier beschikbaar", save="Opslaan",
         deliveryRequired="Adres en koerier zijn verplicht.", deliveryLoadFailed="Leveringsinstellingen konden niet worden geladen.",
         statusDelivered="Geleverd", statusInKitchen="In keuken", statusReady="Klaar", statusPreparing="In bereiding",
-        statusPlaced="Ontvangen", statusConfirmed="Bevestigd", statusCancelled="Geannuleerd", statusBilled="Gefactureerd"
+        statusPlaced="Ontvangen", statusConfirmed="Bevestigd", statusCancelled="Geannuleerd", statusBilled="Gefactureerd",
+        commercialTools="Klant & voordelen", commercialToolsHelp="Kortingen, fooien en loyaliteit met totalen die door Cookit worden herberekend.",
+        prepareOrder="Bestelling voorbereiden", prepareOrderHelp="Sla eerst de cloudconceptbestelling op. Vul de klant in vóór deze stap als u loyaliteit wilt gebruiken.",
+        customerBenefits="Klant & voordelen", customerBenefitsHint="Koppel de klant vóór het voorbereiden van de bestelling om voordelen te gebruiken.",
+        customerRequired="Er moet een klant aan de bestelling gekoppeld zijn om loyaliteit te gebruiken.",
+        manualDiscount="Handmatige korting", discountFixed="Bedrag", discountPercent="Percentage", discountValue="Kortingswaarde",
+        applyAdjustment="Toepassen", removeAdjustment="Verwijderen", tipLabel="Fooi", tipAmount="Fooibedrag", tipNote="Notitie bij fooi",
+        loyaltyPoints="Loyaliteitspunten", pointsAvailable="Beschikbare punten", pointsToUse="Te gebruiken punten", usePoints="Punten gebruiken", removePoints="Punten annuleren",
+        stampRewards="Beloningen", stampsAvailable="Beschikbare stempels", redeemReward="Beloning gebruiken", freeItem="Gratis", alreadyRedeemed="Beloning gebruikt",
+        loyaltyUnavailable="Loyaliteit is niet beschikbaar voor deze bestelling.", refreshBenefits="Voordelen vernieuwen", close="Sluiten",
+        orderPrepared="Bestelling voorbereid in Cookit.", discountApplied="Korting toegepast.", discountCleared="Korting verwijderd.", tipApplied="Fooi bijgewerkt.",
+        pointsApplied="Punten toegepast.", pointsRemoved="Punten hersteld.", rewardApplied="Beloning toegepast.",
+        sessionExpired="De Cookit-sessie is verlopen. Meld u opnieuw aan.",
+        retrySameAction="Probeer bij een netwerkonderbreking dezelfde actie opnieuw: Cookit gebruikt dezelfde bewerking."
     )
     AppLanguage.EN -> UiStrings(
         home="Home", pos="POS", orders="Orders", kitchen="Kitchen", delivery="Delivery",
@@ -215,7 +279,20 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         noDeliveryDrivers="No driver available", save="Save",
         deliveryRequired="Address and driver are required.", deliveryLoadFailed="Could not load delivery settings.",
         statusDelivered="Delivered", statusInKitchen="In kitchen", statusReady="Ready", statusPreparing="Preparing",
-        statusPlaced="Received", statusConfirmed="Confirmed", statusCancelled="Cancelled", statusBilled="Billed"
+        statusPlaced="Received", statusConfirmed="Confirmed", statusCancelled="Cancelled", statusBilled="Billed",
+        commercialTools="Customer & benefits", commercialToolsHelp="Discounts, tips and loyalty with totals recalculated by Cookit.",
+        prepareOrder="Prepare order", prepareOrderHelp="Save the cloud draft first. Enter the customer before this step if you want to use loyalty.",
+        customerBenefits="Customer & benefits", customerBenefitsHint="Attach the customer before preparing the order to use benefits.",
+        customerRequired="A customer must be attached to the order to use loyalty.",
+        manualDiscount="Manual discount", discountFixed="Amount", discountPercent="Percentage", discountValue="Discount value",
+        applyAdjustment="Apply", removeAdjustment="Remove", tipLabel="Tip", tipAmount="Tip amount", tipNote="Tip note",
+        loyaltyPoints="Loyalty points", pointsAvailable="Available points", pointsToUse="Points to use", usePoints="Use points", removePoints="Remove points",
+        stampRewards="Rewards", stampsAvailable="Available stamps", redeemReward="Redeem reward", freeItem="Free", alreadyRedeemed="Reward redeemed",
+        loyaltyUnavailable="Loyalty is unavailable for this order.", refreshBenefits="Refresh benefits", close="Close",
+        orderPrepared="Order prepared in Cookit.", discountApplied="Discount applied.", discountCleared="Discount removed.", tipApplied="Tip updated.",
+        pointsApplied="Points applied.", pointsRemoved="Points restored.", rewardApplied="Reward applied.",
+        sessionExpired="Your Cookit session has expired. Sign in again.",
+        retrySameAction="If the network drops, retry the same action: Cookit reuses the same operation."
     )
     AppLanguage.DE -> UiStrings(
         home="Start", pos="POS", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
@@ -252,7 +329,20 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         noDeliveryDrivers="Kein Fahrer verfügbar", save="Speichern",
         deliveryRequired="Adresse und Fahrer sind erforderlich.", deliveryLoadFailed="Liefereinstellungen konnten nicht geladen werden.",
         statusDelivered="Geliefert", statusInKitchen="In Küche", statusReady="Bereit", statusPreparing="In Zubereitung",
-        statusPlaced="Eingegangen", statusConfirmed="Bestätigt", statusCancelled="Storniert", statusBilled="Abgerechnet"
+        statusPlaced="Eingegangen", statusConfirmed="Bestätigt", statusCancelled="Storniert", statusBilled="Abgerechnet",
+        commercialTools="Kunde & Vorteile", commercialToolsHelp="Rabatte, Trinkgeld und Treuevorteile mit von Cookit neu berechneten Summen.",
+        prepareOrder="Bestellung vorbereiten", prepareOrderHelp="Speichern Sie zuerst den Cloud-Entwurf. Geben Sie den Kunden vorher ein, wenn Treuevorteile genutzt werden sollen.",
+        customerBenefits="Kunde & Vorteile", customerBenefitsHint="Verknüpfen Sie den Kunden vor dem Vorbereiten der Bestellung, um Vorteile zu nutzen.",
+        customerRequired="Für Treuevorteile muss ein Kunde mit der Bestellung verknüpft sein.",
+        manualDiscount="Manueller Rabatt", discountFixed="Betrag", discountPercent="Prozent", discountValue="Rabattwert",
+        applyAdjustment="Anwenden", removeAdjustment="Entfernen", tipLabel="Trinkgeld", tipAmount="Trinkgeldbetrag", tipNote="Trinkgeldnotiz",
+        loyaltyPoints="Treuepunkte", pointsAvailable="Verfügbare Punkte", pointsToUse="Zu verwendende Punkte", usePoints="Punkte verwenden", removePoints="Punkte entfernen",
+        stampRewards="Belohnungen", stampsAvailable="Verfügbare Stempel", redeemReward="Belohnung einlösen", freeItem="Gratis", alreadyRedeemed="Belohnung eingelöst",
+        loyaltyUnavailable="Treuevorteile sind für diese Bestellung nicht verfügbar.", refreshBenefits="Vorteile aktualisieren", close="Schließen",
+        orderPrepared="Bestellung in Cookit vorbereitet.", discountApplied="Rabatt angewendet.", discountCleared="Rabatt entfernt.", tipApplied="Trinkgeld aktualisiert.",
+        pointsApplied="Punkte angewendet.", pointsRemoved="Punkte wiederhergestellt.", rewardApplied="Belohnung angewendet.",
+        sessionExpired="Die Cookit-Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+        retrySameAction="Bei einer Netzwerkunterbrechung dieselbe Aktion erneut versuchen: Cookit verwendet denselben Vorgang."
     )
 }
 
