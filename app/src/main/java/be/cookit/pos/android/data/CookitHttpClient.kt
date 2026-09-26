@@ -1096,7 +1096,8 @@ class CookitHttpClient {
         token: String,
         orderId: Long,
         amount: Double,
-        method: PosPaymentMethod
+        method: PosPaymentMethod,
+        roundingAmount: Double = 0.0
     ) = withContext(Dispatchers.IO) {
         // Deployed Cookit RestApi versions accept the legacy flat contract while
         // newer documentation exposes a payments[] contract. Prefer the deployed
@@ -1104,6 +1105,7 @@ class CookitHttpClient {
         val flatBody = JSONObject()
             .put("amount", amount)
             .put("method", method.apiValue)
+            .put("rounding_amount", roundingAmount)
 
         try {
             request(
@@ -1119,6 +1121,7 @@ class CookitHttpClient {
                 JSONObject()
                     .put("amount", amount)
                     .put("method", method.apiValue)
+                    .put("rounding_amount", roundingAmount)
             )
             request(
                 "pos/orders/$orderId/pay",

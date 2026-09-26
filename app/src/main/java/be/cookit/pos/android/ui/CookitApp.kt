@@ -45,6 +45,17 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+private fun roundedCashTotalForUi(amount: Double): Double {
+    val cents = kotlin.math.round(amount * 100.0).toInt()
+    val remainder = ((cents % 5) + 5) % 5
+    val roundedCents = when (remainder) {
+        0 -> cents
+        1, 2 -> cents - remainder
+        else -> cents + (5 - remainder)
+    }
+    return roundedCents / 100.0
+}
+
 private enum class Screen(val label: String) {
     DASHBOARD("Accueil"),
     POS("POS"),
@@ -746,12 +757,16 @@ private fun PaymentMethodDialog(
     val total = state.resumedRemoteOrderTotal?.takeIf {
         (state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null) && it > 0
     } ?: state.draftCart.sumOf { it.total }
+    val roundedCashTotal = roundedCashTotalForUi(total)
+    val cashRounding = kotlin.math.round((roundedCashTotal - total) * 100.0) / 100.0
     var tenderedText by remember(state.paymentSheetOpen, total) {
-        mutableStateOf(String.format(Locale.US, "%.2f", total))
+        mutableStateOf(String.format(Locale.US, "%.2f", roundedCashTotal))
     }
     val tendered = tenderedText.replace(',', '.').toDoubleOrNull()
-    val change = if (selected == PosPaymentMethod.CASH && tendered != null) (tendered - total).coerceAtLeast(0.0) else 0.0
-    val cashValid = selected != PosPaymentMethod.CASH || ((tendered ?: 0.0) + 0.0001 >= total)
+    val change = if (selected == PosPaymentMethod.CASH && tendered != null) {
+        (tendered - roundedCashTotal).coerceAtLeast(0.0)
+    } else 0.0
+    val cashValid = selected != PosPaymentMethod.CASH || ((tendered ?: 0.0) + 0.0001 >= roundedCashTotal)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -795,15 +810,33 @@ private fun PaymentMethodDialog(
                 ) { selected = PosPaymentMethod.CARD_TERMINAL }
 
                 if (selected == PosPaymentMethod.CASH) {
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(t.cashRoundedTotal, color = CookitMuted)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            String.format(Locale.FRANCE, "%.2f €", roundedCashTotal),
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    if (kotlin.math.abs(cashRounding) >= 0.005) {
+                        Row(Modifier.fillMaxWidth()) {
+                            Text(t.cashRounding, color = CookitMuted)
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                String.format(Locale.FRANCE, "%+.2f €", cashRounding),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     OutlinedTextField(
                         value = tenderedText,
                         onValueChange = { tenderedText = it.filter { ch -> ch.isDigit() || ch == '.' || ch == ',' } },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Montant reçu") },
+                        label = { Text(t.amountReceived) },
                         singleLine = true
                     )
                     Row(Modifier.fillMaxWidth()) {
-                        Text("Monnaie à rendre", color = CookitMuted)
+                        Text(t.changeDue, color = CookitMuted)
                         Spacer(Modifier.weight(1f))
                         Text(
                             String.format(Locale.FRANCE, "%.2f €", change),

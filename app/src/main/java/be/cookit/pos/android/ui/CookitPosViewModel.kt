@@ -26,6 +26,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+private fun roundedCashTotal(amount: Double): Double {
+    val cents = kotlin.math.round(amount * 100.0).toInt()
+    val remainder = ((cents % 5) + 5) % 5
+    val roundedCents = when (remainder) {
+        0 -> cents
+        1, 2 -> cents - remainder
+        else -> cents + (5 - remainder)
+    }
+    return roundedCents / 100.0
+}
+
+private fun cashRoundingAmount(amount: Double): Double =
+    kotlin.math.round((roundedCashTotal(amount) - amount) * 100.0) / 100.0
+
 private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> = try {
     Result.success(block())
 } catch (cancelled: CancellationException) {
@@ -2206,9 +2220,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             _ui.update { it.copy(checkoutError = "Montant de la commande indisponible. Rafraîchissez la commande avant l'encaissement.") }
             return
         }
+        val initialRoundedCashDue = roundedCashTotal(amountDue)
+
         if (method == PosPaymentMethod.CASH) {
-            val tendered = tenderedAmount ?: amountDue
-            if (tendered + 0.0001 < amountDue) {
+            val tendered = tenderedAmount ?: initialRoundedCashDue
+            if (tendered + 0.0001 < initialRoundedCashDue) {
                 _ui.update { it.copy(checkoutError = "Montant reçu insuffisant.") }
                 return
             }
@@ -2227,7 +2243,12 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         if (state.demoMode) {
-            finishSuccessfulCheckout(emptyList(), cashChange = if (method == PosPaymentMethod.CASH) ((tenderedAmount ?: amountDue) - amountDue).coerceAtLeast(0.0) else null)
+            finishSuccessfulCheckout(
+                emptyList(),
+                cashChange = if (method == PosPaymentMethod.CASH) {
+                    ((tenderedAmount ?: initialRoundedCashDue) - initialRoundedCashDue).coerceAtLeast(0.0)
+                } else null
+            )
             return
         }
 
@@ -2286,9 +2307,16 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
 
+                val authoritativeRoundedCashDue = roundedCashTotal(authoritativeAmountDue)
+                val authoritativeRoundingAmount = if (method == PosPaymentMethod.CASH) {
+                    cashRoundingAmount(authoritativeAmountDue)
+                } else {
+                    0.0
+                }
+
                 if (method == PosPaymentMethod.CASH) {
-                    val tendered = tenderedAmount ?: authoritativeAmountDue
-                    if (tendered + 0.0001 < authoritativeAmountDue) {
+                    val tendered = tenderedAmount ?: authoritativeRoundedCashDue
+                    if (tendered + 0.0001 < authoritativeRoundedCashDue) {
                         throw IllegalStateException("Montant reçu insuffisant après recalcul Cookit.")
                     }
                 }
@@ -2308,7 +2336,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         currentToken,
                         orderId,
                         authoritativeAmountDue,
-                        method
+                        method,
+                        authoritativeRoundingAmount
                     )
                 } catch (e: Throwable) {
                     // Keep the outbox record in PREPARED. On reconnect the reconciliation loop
@@ -2322,7 +2351,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 val freshKots = runCatching { api.kots(currentToken) }.getOrDefault(_ui.value.kots)
                 knownOrderIds.addAll(fresh.map { it.id })
                 val change = if (method == PosPaymentMethod.CASH) {
-                    ((tenderedAmount ?: authoritativeAmountDue) - authoritativeAmountDue).coerceAtLeast(0.0)
+                    ((tenderedAmount ?: authoritativeRoundedCashDue) - authoritativeRoundedCashDue).coerceAtLeast(0.0)
                 } else null
                 finishSuccessfulCheckout(fresh, freshKots, change)
                 clearDeliveryDraft()
