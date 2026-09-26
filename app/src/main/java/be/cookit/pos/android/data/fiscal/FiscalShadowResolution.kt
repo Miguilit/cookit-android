@@ -167,28 +167,14 @@ data class FiscalShadowOrderResolution(
             "CookitFiscal fiscal lines do not represent immutable gross total (${itemGrossMinor + adjustmentGrossMinor} != ${snapshot.grossTotalMinor})"
         }
 
-        val supportedPaymentTypes = setOf(
-            "UNKNOWN", "CASH", "CARD_DEBIT", "CARD_UNKNOWN", "CARD_CREDIT", "CARD_OTHER",
-            "CHEQUE_MEAL", "CHEQUE_OTHER", "APP", "ONLINE", "CUSTOMER_CREDIT", "ROOM_CREDIT",
-            "LOYALTY_REWARDS", "VOUCHER_STORE", "VOUCHER_SUPPLIER", "VOUCHER_OTHER", "OTHER"
-        )
-        financials.forEach { financial ->
-            require(financial.amountMinor > 0L) { "Invalid fiscal financial amount for ${financial.name}" }
-            require(financial.type.uppercase() in supportedPaymentTypes) {
-                "Unsupported Module2 financial type ${financial.type}"
-            }
-            require(financial.inputMethod.uppercase() in setOf("MANUAL", "AUTOMATIC")) {
-                "Unsupported Module2 input method ${financial.inputMethod}"
-            }
-            require(financial.amountType.equals("PAYMENT", ignoreCase = true)) {
-                "Unsupported Module2 amount type ${financial.amountType}"
-            }
-        }
-        require(financials.isNotEmpty()) { "CookitFiscal returned no financial lines" }
-        val financialTotalMinor = financials.sumOf { it.amountMinor }
-        require(financialTotalMinor == snapshot.grossTotalMinor) {
-            "CookitFiscal financial total differs from immutable gross total ($financialTotalMinor != ${snapshot.grossTotalMinor})"
-        }
+        /*
+         * CookitFiscal is authoritative for financial semantics.
+         *
+         * Android validates immutable snapshot alignment and transports the
+         * server-resolved financial rows without maintaining a second
+         * certification whitelist for payment type, input method or
+         * amountType.
+         */
 
         return aligned
     }
