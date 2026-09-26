@@ -453,12 +453,16 @@ class CookitHttpClient {
         productId: Long,
         orderType: OrderType
     ): List<NativeModifierGroup> = withContext(Dispatchers.IO) {
-        val orderTypeId = orderTypeId(token, orderType)
+        val orderTypeKey = when (orderType) {
+            OrderType.DINE_IN -> "dine_in"
+            OrderType.TAKEAWAY -> "pickup"
+            OrderType.DELIVERY -> "delivery"
+        }
         val query = buildString {
             append("pos/items/")
             append(productId)
-            append("/modifier-groups")
-            orderTypeId?.let { append("?order_type_id=").append(it) }
+            append("/modifier-groups?order_type=")
+            append(orderTypeKey)
         }
         val json = request(query, token = token)
         val array = findArrayDeep(json, setOf("data", "modifier_groups", "groups")) ?: JSONArray()
@@ -510,56 +514,6 @@ class CookitHttpClient {
                 )
             }
         }
-    }
-
-    private suspend fun orderTypeId(token: String, type: OrderType): Long? {
-        val json = request("pos/order-types", token = token)
-        val array = findArrayDeep(json, setOf("data", "order_types")) ?: JSONArray()
-
-        fun canonicalOrderType(row: JSONObject): String = listOf(
-            "slug",
-            "type",
-            "order_type_name",
-            "name",
-            "label"
-        ).mapNotNull { key ->
-            row.optText(key)
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-        }.joinToString(" ")
-            .lowercase(Locale.ROOT)
-            .replace('_', ' ')
-            .replace('-', ' ')
-
-        fun matches(candidate: String): Boolean {
-            val compact = candidate.replace(" ", "")
-            return when (type) {
-                OrderType.DINE_IN ->
-                    "dine in" in candidate ||
-                        "dinein" in compact ||
-                        "sur place" in candidate ||
-                        "eatin" in compact
-
-                OrderType.TAKEAWAY ->
-                    "pickup" in compact ||
-                        "takeaway" in compact ||
-                        "takeout" in compact ||
-                        "emporter" in compact ||
-                        "collect" in compact
-
-                OrderType.DELIVERY ->
-                    "delivery" in compact ||
-                        "livraison" in compact
-            }
-        }
-
-        for (index in 0 until array.length()) {
-            val row = array.optJSONObject(index) ?: continue
-            if (matches(canonicalOrderType(row))) {
-                return row.longAny("id", "order_type_id")
-            }
-        }
-        return null
     }
 
     private fun localizedModifierText(value: Any?, fallback: String): String {
