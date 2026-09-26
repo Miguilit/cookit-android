@@ -1858,7 +1858,7 @@ private fun CartPane(
                 SummaryLine(t.tipLabel, it, muted = true)
             }
             if (!locked) {
-                val vatIncluded = state.draftCart.sumOf { line ->
+                val vatIncluded = cart.sumOf { line ->
                     val rate = line.product.vatRate
                     if (rate != null && rate > 0.0) {
                         line.total * rate / (100.0 + rate)
