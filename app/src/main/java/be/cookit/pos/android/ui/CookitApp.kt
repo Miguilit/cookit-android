@@ -1857,7 +1857,17 @@ private fun CartPane(
             commercialSnapshot?.tip?.amount?.takeIf { it > 0.0001 }?.let {
                 SummaryLine(t.tipLabel, it, muted = true)
             }
-            if (!locked) SummaryLine(t.vatIncluded, subtotal * 0.12, muted = true)
+            if (!locked) {
+                val vatIncluded = state.draftCart.sumOf { line ->
+                    val rate = line.product.vatRate
+                    if (rate != null && rate > 0.0) {
+                        line.total * rate / (100.0 + rate)
+                    } else {
+                        0.0
+                    }
+                }
+                SummaryLine(t.vatIncluded, vatIncluded, muted = true)
+            }
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = CookitLine)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(t.total, fontSize = 20.sp, fontWeight = FontWeight.Black)

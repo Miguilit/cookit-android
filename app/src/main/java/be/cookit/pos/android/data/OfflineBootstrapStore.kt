@@ -131,6 +131,9 @@ class OfflineBootstrapStore(context: Context) {
         .put("emoji", product.emoji)
         .put("available", product.available)
         .putNullable("image_url", product.imageUrl)
+        .putNullable("vat_rate", product.vatRate)
+        .putNullable("vat_label", product.vatLabel)
+        .put("has_modifiers", product.hasModifiers)
 
     private fun decodeProduct(json: JSONObject) = Product(
         id = json.getLong("id"),
@@ -140,7 +143,14 @@ class OfflineBootstrapStore(context: Context) {
         price = json.optDouble("price", 0.0),
         emoji = json.optString("emoji"),
         available = json.optBoolean("available", true),
-        imageUrl = json.optNullableString("image_url")
+        imageUrl = json.optNullableString("image_url"),
+        vatRate = if (!json.has("vat_rate") || json.isNull("vat_rate")) {
+            null
+        } else {
+            json.optDouble("vat_rate")
+        },
+        vatLabel = json.optNullableString("vat_label"),
+        hasModifiers = json.optBoolean("has_modifiers", false)
     )
 
     private fun encodeOrder(order: PosOrder) = JSONObject()
