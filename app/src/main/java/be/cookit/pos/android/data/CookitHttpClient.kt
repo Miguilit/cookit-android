@@ -1027,6 +1027,43 @@ class CookitHttpClient {
         )
     }
 
+    /**
+     * UC220 line-level discount.
+     *
+     * Cookit Cloud is the single commercial authority. Android sends only the operator intent
+     * (target order item + fixed/percent value), never computes the authoritative discounted
+     * line amount and never builds an FDM priceChanges structure locally.
+     *
+     * The backend exposes one canonical contract on the existing commercial-adjustments route:
+     * `line_discount`. Do not probe compatibility aliases here: an unknown or incompatible
+     * backend must fail visibly rather than silently changing semantics.
+     */
+    suspend fun updateLineDiscount(
+        token: String,
+        orderId: Long,
+        orderItemId: Long,
+        type: String?,
+        value: Double
+    ) = withContext(Dispatchers.IO) {
+        val normalizedType = type
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { it == "fixed" || it == "percent" }
+
+        val payload = JSONObject()
+            .put("order_item_id", orderItemId)
+            .put("type", normalizedType ?: JSONObject.NULL)
+            .put("value", value.coerceAtLeast(0.0))
+
+        request(
+            "pos/orders/$orderId/commercial-adjustments",
+            method = "PATCH",
+            token = token,
+            body = JSONObject().put("line_discount", payload)
+        )
+        Unit
+    }
+
     suspend fun loyaltySummary(token: String, orderId: Long): LoyaltySummary = withContext(Dispatchers.IO) {
         val json = request("pos/orders/$orderId/loyalty", token = token)
         parseLoyaltySummary(json.optJSONObject("data") ?: json)

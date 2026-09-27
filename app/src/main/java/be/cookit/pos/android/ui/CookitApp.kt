@@ -1968,6 +1968,18 @@ private fun CommercialToolsDialog(
                 ?: ""
         )
     }
+    val lineDiscountCandidates = state.draftCart.filter { line ->
+        line.remoteLineId != null && !line.freeItem
+    }
+    var selectedLineId by remember(
+        state.commercialSheetOpen,
+        lineDiscountCandidates.mapNotNull { it.remoteLineId }
+    ) {
+        mutableStateOf(lineDiscountCandidates.firstOrNull()?.remoteLineId)
+    }
+    var lineDiscountType by remember(state.commercialSheetOpen) { mutableStateOf("percent") }
+    var lineDiscountText by remember(state.commercialSheetOpen) { mutableStateOf("50") }
+
     var tipText by remember(state.commercialSheetOpen, commercial?.tip?.amount) {
         mutableStateOf(
             commercial?.tip?.amount
@@ -1984,6 +1996,7 @@ private fun CommercialToolsDialog(
     }
 
     val discountValue = discountText.replace(',', '.').toDoubleOrNull()
+    val lineDiscountValue = lineDiscountText.replace(',', '.').toDoubleOrNull()
     val tipValue = tipText.replace(',', '.').toDoubleOrNull()
     val pointsValue = pointsText.toIntOrNull()
     val loyaltyOrder = loyalty?.order
@@ -2059,6 +2072,8 @@ private fun CommercialToolsDialog(
                             "order_prepared" -> t.orderPrepared
                             "discount_applied" -> t.discountApplied
                             "discount_cleared" -> t.discountCleared
+                            "line_discount_applied" -> t.lineDiscountApplied
+                            "line_discount_cleared" -> t.lineDiscountCleared
                             "tip_applied" -> t.tipApplied
                             "points_applied" -> t.pointsApplied
                             "points_removed" -> t.pointsRemoved
@@ -2183,6 +2198,94 @@ private fun CommercialToolsDialog(
                                 }
                                 if (hasLoyaltyPoints) {
                                     Text(t.loyaltyPoints, color = CookitMuted, fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        if (capabilities.manualDiscount && lineDiscountCandidates.isNotEmpty()) {
+                            CommercialSection(title = t.lineDiscount) {
+                                Text(t.lineDiscountHelp, color = CookitMuted, fontSize = 13.sp)
+
+                                Text(t.chooseLine, color = CookitMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                lineDiscountCandidates.forEach { line ->
+                                    val lineId = line.remoteLineId ?: return@forEach
+                                    val normalTotal = line.configuredUnitPrice * line.quantity
+                                    val effectiveTotal = line.total
+                                    FilterChip(
+                                        selected = selectedLineId == lineId,
+                                        onClick = { selectedLineId = lineId },
+                                        enabled = !state.commercialBusy,
+                                        label = {
+                                            Text(
+                                                buildString {
+                                                    append(line.product.name)
+                                                    append(" • ")
+                                                    append(line.quantity)
+                                                    append("× • ")
+                                                    append(String.format(Locale.FRANCE, "%.2f €", effectiveTotal))
+                                                    if (kotlin.math.abs(normalTotal - effectiveTotal) > 0.004) {
+                                                        append(" / ")
+                                                        append(String.format(Locale.FRANCE, "%.2f €", normalTotal))
+                                                    }
+                                                }
+                                            )
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        selected = lineDiscountType == "fixed",
+                                        onClick = { lineDiscountType = "fixed" },
+                                        label = { Text(t.discountFixed) },
+                                        enabled = !state.commercialBusy
+                                    )
+                                    FilterChip(
+                                        selected = lineDiscountType == "percent",
+                                        onClick = { lineDiscountType = "percent" },
+                                        label = { Text(t.discountPercent) },
+                                        enabled = !state.commercialBusy
+                                    )
+                                }
+
+                                OutlinedTextField(
+                                    value = lineDiscountText,
+                                    onValueChange = { lineDiscountText = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text(t.discountValue) },
+                                    singleLine = true,
+                                    enabled = !state.commercialBusy
+                                )
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            selectedLineId?.let { lineId ->
+                                                vm.applyLineDiscount(
+                                                    lineId,
+                                                    lineDiscountType,
+                                                    lineDiscountValue ?: 0.0
+                                                )
+                                            }
+                                        },
+                                        enabled = !state.commercialBusy &&
+                                            selectedLineId != null &&
+                                            (lineDiscountValue ?: 0.0) > 0.0 &&
+                                            (lineDiscountType != "percent" || (lineDiscountValue ?: 0.0) <= 100.0),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(t.applyAdjustment, fontWeight = FontWeight.Bold)
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            selectedLineId?.let(vm::clearLineDiscount)
+                                        },
+                                        enabled = !state.commercialBusy && selectedLineId != null,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(t.removeAdjustment, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }

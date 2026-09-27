@@ -2746,6 +2746,64 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun applyLineDiscount(orderItemId: Long, type: String, value: Double) {
+        if (!_ui.value.certificationCapabilities.manualDiscount) return
+        if (value <= 0.0 || (type == "percent" && value > 100.0)) return
+        mutateLineDiscount(orderItemId, type, value, "line_discount_applied")
+    }
+
+    fun clearLineDiscount(orderItemId: Long) {
+        if (!_ui.value.certificationCapabilities.manualDiscount) return
+        mutateLineDiscount(orderItemId, null, 0.0, "line_discount_cleared")
+    }
+
+    private fun mutateLineDiscount(
+        orderItemId: Long,
+        type: String?,
+        value: Double,
+        successMessage: String
+    ) {
+        val currentToken = token ?: return
+        val state = _ui.value
+        val orderId = state.resumedRemoteOrderId ?: state.pendingRemoteOrderId ?: return
+
+        // A line-level commercial mutation is only valid for a backend-persisted order item.
+        // The backend remains authoritative for the resulting amount and totals.
+        if (state.draftCart.none { it.remoteLineId == orderItemId && !it.freeItem }) return
+
+        _ui.update { it.copy(commercialBusy = true, commercialError = null, commercialMessage = null) }
+        viewModelScope.launch {
+            runCatchingPreservingCancellation {
+                api.updateLineDiscount(
+                    token = currentToken,
+                    orderId = orderId,
+                    orderItemId = orderItemId,
+                    type = type,
+                    value = value
+                )
+
+                // Never infer the new line total locally. Reload the authoritative order and
+                // commercial snapshot so Android reflects the exact backend calculation.
+                refreshCommercialOrderState(currentToken, orderId)
+            }.onSuccess {
+                _ui.update {
+                    it.copy(
+                        commercialBusy = false,
+                        commercialError = null,
+                        commercialMessage = successMessage
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        commercialBusy = false,
+                        commercialError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
     fun applyManualDiscount(type: String, value: Double) {
         if (!_ui.value.certificationCapabilities.manualDiscount) return
         if (value <= 0.0) return
