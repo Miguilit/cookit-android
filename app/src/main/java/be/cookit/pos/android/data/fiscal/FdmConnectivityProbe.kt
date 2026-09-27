@@ -15,14 +15,13 @@ data class FdmConnectivityProbeResult(
     val endpoint: String = "",
     val attempted: Boolean = false,
     val tlsConnected: Boolean = false,
-    val mockCleartextConnected: Boolean = false,
     val httpStatus: Int? = null,
     val graphqlResponded: Boolean = false,
     val certificateSha256: String? = null,
     val latencyMs: Long? = null,
     val message: String? = null
 ) {
-    val networkConnected: Boolean get() = tlsConnected || mockCleartextConnected
+    val networkConnected: Boolean get() = tlsConnected
     val transportReady: Boolean get() = networkConnected && httpStatus != null
 }
 
@@ -33,11 +32,11 @@ class FdmConnectivityProbe {
         if (!settings.configured) {
             return@withContext FdmConnectivityProbeResult(endpoint = endpoint, message = "FDM host/port not configured")
         }
-        if (!settings.useTls && !MockFdmDebugGuard.cleartextAllowed(settings)) {
+        if (!settings.useTls) {
             return@withContext FdmConnectivityProbeResult(
                 endpoint = endpoint,
                 attempted = false,
-                message = "Clear-text transport blocked outside debug Mock FDM/private LAN"
+                message = "Fiscal GraphQL transport requires TLS"
             )
         }
 
@@ -81,13 +80,11 @@ class FdmConnectivityProbe {
                 endpoint = endpoint,
                 attempted = true,
                 tlsConnected = https,
-                mockCleartextConnected = !https && MockFdmDebugGuard.cleartextAllowed(settings),
                 httpStatus = status,
                 graphqlResponded = graphql,
                 certificateSha256 = certFingerprint,
                 latencyMs = latency,
                 message = when {
-                    !https && settings.isMock && status in 200..299 && graphql -> "Debug Mock FDM reachable over local/private HTTP"
                     status in 200..299 && graphql -> "TLS + GraphQL endpoint reachable"
                     status in 200..299 -> "Transport reachable; response is not a GraphQL envelope"
                     status == 401 || status == 403 -> "Transport reachable; FDM authentication is required"
@@ -99,7 +96,6 @@ class FdmConnectivityProbe {
                 endpoint = endpoint,
                 attempted = true,
                 tlsConnected = false,
-                mockCleartextConnected = false,
                 latencyMs = (System.nanoTime() - started) / 1_000_000L,
                 message = error.message ?: error::class.java.simpleName
             )

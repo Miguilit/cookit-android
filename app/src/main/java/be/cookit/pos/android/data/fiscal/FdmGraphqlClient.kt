@@ -20,9 +20,8 @@ class FdmGraphqlException(message: String, val responseBody: String = "", val ht
 /**
  * Network-only POS -> FDM GraphQL transport.
  *
- * Production providers remain HTTPS-only. A14.4 permits clear-text only for the debug Mock FDM and
- * only when its host resolves to loopback/RFC1918/link-local space; release builds keep the exception
- * disabled through BuildConfig.ENABLE_MOCK_FDM=false.
+ * Fiscal provider transport is HTTPS-only. Test behavior must use cloud-prepared
+ * certification/training jobs rather than a local clear-text mock server.
  */
 class FdmGraphqlClient {
     suspend fun execute(
@@ -31,7 +30,7 @@ class FdmGraphqlClient {
         extraHeaders: Map<String, String> = emptyMap()
     ): JSONObject = withContext(Dispatchers.IO) {
         require(settings.configured) { "FDM host/port not configured" }
-        if (!settings.useTls) MockFdmDebugGuard.requireAllowed(settings)
+        require(settings.useTls) { "Fiscal GraphQL transport requires TLS" }
 
         val endpoint = settings.endpoint ?: error("FDM endpoint unavailable")
         val body = JSONObject()

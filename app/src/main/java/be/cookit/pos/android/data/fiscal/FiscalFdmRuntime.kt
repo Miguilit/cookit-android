@@ -2,7 +2,7 @@ package be.cookit.pos.android.data.fiscal
 
 /**
  * Orchestrates local POS -> provider submissions without mixing transport into checkout.
- * Checkbox remains fail-closed; the A14.4 Mock adapter is available only in debug builds.
+ * Checkbox remains fail-closed until its certified live mapping is installed.
  */
 class FiscalFdmRuntime(
     private val client: FdmGraphqlClient,
@@ -12,7 +12,6 @@ class FiscalFdmRuntime(
     private fun adapter(
         settings: FiscalFdmSettings
     ): FiscalProviderAdapter = when (settings.provider) {
-        FiscalFdmSettings.PROVIDER_MOCK -> MockFiscalProviderAdapter()
         FiscalFdmSettings.PROVIDER_MODULE2 -> Module2FiscalProviderAdapter()
         else -> CheckboxFiscalProviderAdapter()
     }

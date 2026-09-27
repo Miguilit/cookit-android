@@ -33,7 +33,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import be.cookit.pos.android.BuildConfig
-import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmContract
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeStateStore
 import be.cookit.pos.android.domain.*
@@ -4301,12 +4300,8 @@ private fun FiscalityScreen(
                         )
                     }
                     Text(
-                        when {
-                            state.fdmSettings.isMock -> fs.testMode
-                            state.fdmSettings.isModule2 -> "Module2 A15.0D"
-                            else -> fs.productionMode
-                        },
-                        color = if (state.fdmSettings.isMock || state.fdmSettings.isModule2) CookitOrange else CookitGreen,
+                        if (state.fdmSettings.isModule2) "Module2 • certification" else fs.productionMode,
+                        color = if (state.fdmSettings.isModule2) CookitOrange else CookitGreen,
                         fontWeight = FontWeight.Bold,
                         fontSize = 11.sp
                     )
@@ -4462,18 +4457,14 @@ private fun FiscalityScreen(
                     )
                 }
 
-                if (state.policy.canManageSettings && !state.demoMode) {
-                    if (!state.fdmSettings.isModule2) {
-                        OutlinedButton(onClick = vm::verifyFdmAdapterGate) { Text(fs.verifyAdapterGate) }
-                    } else {
-                        HorizontalDivider(color = CookitLine)
-                        Text("Pipeline fiscal automatique", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text(
-                            "Cookit Cloud construit et fige le payload fiscal. L’agent Android transporte ensuite la requête canonique vers Module2 sans la reconstruire. Les anciens outils SHADOW / TRAINING manuel / Mock FDM sont retirés du runtime actif.",
-                            color = CookitMuted,
-                            fontSize = 10.sp
-                        )
-                    }
+                if (state.policy.canManageSettings && !state.demoMode && state.fdmSettings.isModule2) {
+                    HorizontalDivider(color = CookitLine)
+                    Text("Pipeline fiscal automatique", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(
+                        "Cookit Cloud construit et fige le payload fiscal. L’agent Android transporte la requête canonique vers Module2 sans reconstruire les prix, TVA, remises ou moyens de paiement.",
+                        color = CookitMuted,
+                        fontSize = 10.sp
+                    )
                 }
             }
         }

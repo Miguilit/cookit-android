@@ -48,24 +48,6 @@ private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result
     Result.failure(error)
 }
 
-data class Module2FinalizedOrderCandidate(
-    val available: Boolean = false,
-    val orderId: Long? = null,
-    val localEventId: String = "",
-    val schema: String = "",
-    val status: String = "",
-    val lineCount: Int = 0,
-    val total: Double = 0.0,
-    val paymentMethod: String = "",
-    val cashierName: String? = null,
-    val snapshotHash: String = "",
-    val fiscalSummary: List<String> = emptyList(),
-    val financialSummary: List<String> = emptyList(),
-    val ready: Boolean = false,
-    val alreadySent: Boolean = false,
-    val message: String? = null
-)
-
 data class PosUiState(
     val authenticated: Boolean = false,
     val demoMode: Boolean = false,
@@ -173,14 +155,8 @@ data class PosUiState(
     val module2TokenConfigured: Boolean = false,
     val module2StatusBusy: Boolean = false,
     val module2Status: Module2StatusResult = Module2StatusResult(),
-    val module2TrainingSaleBusy: Boolean = false,
-    val module2TrainingSale: Module2TrainingSaleResult = Module2TrainingSaleResult(),
-    val module2FinalizedCandidate: Module2FinalizedOrderCandidate = Module2FinalizedOrderCandidate(),
     val fdmProviderStatus: FiscalProviderStatus = FiscalProviderStatus(),
     val module2Message: String? = null,
-    val mockFdmBusy: Boolean = false,
-    val mockFdmMessage: String? = null,
-    val embeddedMockFdmStatus: EmbeddedMockFdmStatus = EmbeddedMockFdmStatus(),
     val fiscalAgentConfigured: Boolean = false,
     val fiscalAgentDeviceHint: String = "",
     val fiscalAgentMessage: String? = null,
@@ -240,19 +216,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fiscalCloudClient = FiscalCloudClient()
     private val fiscalSyncEngine = FiscalSyncEngine(fiscalOutboxRepository, fiscalCloudClient)
     private val fdmSettingsStore = FiscalFdmSettingsStore(application)
-    private val embeddedMockFdmServer = EmbeddedMockFdmServer(application)
-    private val storedFdmSettings = fdmSettingsStore.load()
-    private val initialFdmSettings = if (storedFdmSettings.isMock) {
-        // Legacy embedded mock is retired. Certification now uses the real
-        // Module2/Pracsys provider path through the Fiscal Agent.
-        storedFdmSettings.copy(
-            provider = FiscalFdmSettings.PROVIDER_MODULE2,
-            host = "fdm.module2.be",
-            port = 443,
-            path = "/graphql/",
-            useTls = true
-        )
-    } else storedFdmSettings
+    private val initialFdmSettings = fdmSettingsStore.load()
     private val fdmGraphqlClient = FdmGraphqlClient()
     private val module2CredentialStore =
         Module2CredentialStore(application)
@@ -264,7 +228,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         module2CredentialStore = module2CredentialStore
     )
     private val fdmConnectivityProbe = FdmConnectivityProbe()
-    private val module2TrainingReceiptStore = Module2TrainingReceiptStore(application)
     private val fiscalAgentCredentialStore = FiscalAgentCredentialStore(application)
     private val fiscalAgentRuntimeStateStore = FiscalAgentRuntimeStateStore(application)
     private val fiscalAgentDiagnosticDao = localDatabase.fiscalAgentDiagnosticDao()
@@ -292,7 +255,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             fdmSettings = initialFdmSettings,
             fdmReadiness = fdmRuntime.readiness(initialFdmSettings),
             module2TokenConfigured = module2CredentialStore.configured(),
-            embeddedMockFdmStatus = embeddedMockFdmServer.status(),
             fiscalAgentConfigured = fiscalAgentCredentialStore.configured(),
             fiscalAgentDeviceHint = fiscalAgentCredentialStore.deviceHint(),
             fiscalAgentAutoRunning = storedFiscalAgentRuntimeState.autoEnabled,
@@ -346,9 +308,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         api.languageCode = sessionStore.language().code
-        if (initialFdmSettings != storedFdmSettings) {
-            fdmSettingsStore.save(initialFdmSettings)
-        }
         startFiscalAgentStateMirror()
         viewModelScope.launch { initializeFiscalRuntime() }
         sessionStore.clearSession()
@@ -394,9 +353,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fdmReadiness = it.fdmReadiness,
                 fdmMessage = it.fdmMessage,
                 fdmProbe = it.fdmProbe,
-                mockFdmBusy = it.mockFdmBusy,
-                mockFdmMessage = it.mockFdmMessage,
-                embeddedMockFdmStatus = it.embeddedMockFdmStatus,
                 fiscalAgentConfigured = it.fiscalAgentConfigured,
                 fiscalAgentDeviceHint = it.fiscalAgentDeviceHint,
                 fiscalAgentMessage = it.fiscalAgentMessage,
@@ -497,8 +453,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             it.copy(
                 module2TokenConfigured = false,
                 module2Status = Module2StatusResult(),
-                module2TrainingSaleBusy = false,
-                module2TrainingSale = Module2TrainingSaleResult(),
                 fdmProviderStatus = FiscalProviderStatus(),
                 module2Message = "module2_token_cleared"
             )
@@ -571,275 +525,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun runModule2TrainingSale() {
-        val settings = _ui.value.fdmSettings
-        if (!settings.isModule2 || !settings.configured) {
-            _ui.update { it.copy(module2Message = "module2_not_configured") }
-            return
-        }
-        val token = module2CredentialStore.loadBearerToken()
-        if (token.isNullOrBlank()) {
-            _ui.update { it.copy(module2TokenConfigured = false, module2Message = "module2_token_required") }
-            return
-        }
-        if (!_ui.value.fdmProviderStatus.transportConnected) {
-            _ui.update { it.copy(module2Message = "module2_training_requires_status_test") }
-            return
-        }
-
-        viewModelScope.launch {
-            _ui.update {
-                it.copy(
-                    module2TrainingSaleBusy = true,
-                    module2TrainingSale = Module2TrainingSaleResult(),
-                    module2Message = "module2_training_signsale_running"
-                )
-            }
-            try {
-                val result = module2StatusClient.trainingSale(settings, token)
-                val refreshedStatus = if (result.success) {
-                    runCatchingPreservingCancellation { module2StatusClient.status(settings, token) }.getOrNull()
-                } else {
-                    null
-                }
-                _ui.update { current ->
-                    current.copy(
-                        module2TrainingSaleBusy = false,
-                        module2TrainingSale = result,
-                        module2Status = refreshedStatus ?: current.module2Status,
-                        fdmProviderStatus = refreshedStatus?.normalized() ?: current.fdmProviderStatus,
-                        module2Message = if (result.success) {
-                            "module2_training_signsale_ok"
-                        } else {
-                            "module2_training_signsale_failed:${result.message.orEmpty()}"
-                        }
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }
-                _ui.update {
-                    it.copy(
-                        module2TrainingSaleBusy = false,
-                        module2TrainingSale = Module2TrainingSaleResult(
-                            attempted = true,
-                            success = false,
-                            message = message
-                        ),
-                        module2Message = "module2_training_signsale_failed:$message"
-                    )
-                }
-            }
-        }
-    }
-
-    fun runModule2CookitCartTrainingSale(paymentMethod: PosPaymentMethod) {
-        val state = _ui.value
-        val settings = state.fdmSettings
-        if (!settings.isModule2 || !settings.configured) {
-            _ui.update { it.copy(module2Message = "module2_not_configured") }
-            return
-        }
-        val bearer = module2CredentialStore.loadBearerToken()
-        if (bearer.isNullOrBlank()) {
-            _ui.update { it.copy(module2TokenConfigured = false, module2Message = "module2_token_required") }
-            return
-        }
-        if (!state.fdmProviderStatus.transportConnected) {
-            _ui.update { it.copy(module2Message = "module2_training_requires_status_test") }
-            return
-        }
-        if (state.draftCart.isEmpty()) {
-            _ui.update { it.copy(module2Message = "module2_cookit_training_cart_empty") }
-            return
-        }
-
-        val categoriesById = state.categories.associateBy { it.id }
-        val mapped = state.draftCart.map { cartLine ->
-            val product = cartLine.product
-            Module2CookitTrainingLine(
-                productId = product.id.toString(),
-                productName = product.name,
-                departmentId = product.categoryId.toString(),
-                departmentName = categoriesById[product.categoryId]?.name ?: "Cookit",
-                quantity = cartLine.quantity,
-                unitPrice = product.price,
-                vatRate = product.vatRate,
-                vatLabel = product.vatLabel
-            )
-        }
-        val missingVat = mapped.filter { it.vatLabel.isNullOrBlank() && it.vatRate == null }
-        if (missingVat.isNotEmpty()) {
-            val names = missingVat.joinToString(", ") { it.productName }.take(240)
-            _ui.update { it.copy(module2Message = "module2_cookit_training_vat_missing:$names") }
-            return
-        }
-
-        val terminal = state.fiscalIdentity?.terminalId ?: "COOKIT-ANDROID-TRAINING"
-        viewModelScope.launch {
-            _ui.update {
-                it.copy(
-                    module2TrainingSaleBusy = true,
-                    module2TrainingSale = Module2TrainingSaleResult(),
-                    module2Message = "module2_cookit_training_running"
-                )
-            }
-            try {
-                val result = module2StatusClient.trainingSaleFromCookit(
-                    settings = settings,
-                    bearerToken = bearer,
-                    lines = mapped,
-                    paymentMethod = paymentMethod.apiValue,
-                    terminalId = terminal
-                )
-                val refreshedStatus = if (result.success) {
-                    runCatchingPreservingCancellation { module2StatusClient.status(settings, bearer) }.getOrNull()
-                } else null
-                _ui.update { current ->
-                    current.copy(
-                        module2TrainingSaleBusy = false,
-                        module2TrainingSale = result,
-                        module2Status = refreshedStatus ?: current.module2Status,
-                        fdmProviderStatus = refreshedStatus?.normalized() ?: current.fdmProviderStatus,
-                        module2Message = if (result.success) {
-                            "module2_cookit_training_ok"
-                        } else {
-                            "module2_cookit_training_failed:${result.message.orEmpty()}"
-                        }
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }
-                _ui.update {
-                    it.copy(
-                        module2TrainingSaleBusy = false,
-                        module2TrainingSale = Module2TrainingSaleResult(attempted = true, success = false, message = message),
-                        module2Message = "module2_cookit_training_failed:$message"
-                    )
-                }
-            }
-        }
-    }
-
-    fun runModule2FinalizedOrderTrainingSale() {
-        val state = _ui.value
-        val settings = state.fdmSettings
-        if (!settings.isModule2 || !settings.configured) {
-            _ui.update { it.copy(module2Message = "module2_not_configured") }
-            return
-        }
-        val bearer = module2CredentialStore.loadBearerToken()
-        if (bearer.isNullOrBlank()) {
-            _ui.update { it.copy(module2TokenConfigured = false, module2Message = "module2_token_required") }
-            return
-        }
-        if (!state.fdmProviderStatus.transportConnected) {
-            _ui.update { it.copy(module2Message = "module2_finalized_training_requires_status_test") }
-            return
-        }
-        if (!state.module2FinalizedCandidate.available) {
-            _ui.update { it.copy(module2Message = "module2_finalized_training_no_paid_order") }
-            return
-        }
-        if (state.module2FinalizedCandidate.alreadySent) {
-            _ui.update { it.copy(module2Message = "module2_finalized_training_already_sent") }
-            return
-        }
-        if (!state.module2FinalizedCandidate.ready) {
-            _ui.update {
-                it.copy(module2Message = "module2_finalized_training_not_ready:${state.module2FinalizedCandidate.message.orEmpty()}")
-            }
-            return
-        }
-
-        viewModelScope.launch {
-            _ui.update {
-                it.copy(
-                    module2TrainingSaleBusy = true,
-                    module2TrainingSale = Module2TrainingSaleResult(),
-                    module2Message = "module2_finalized_training_running"
-                )
-            }
-            try {
-                val identity = fiscalRuntimeRepository.ensureIdentity()
-                val event = fiscalOutboxRepository.latestActivated(identity)
-                    ?: error("No activated Cookit fiscal event")
-                if (module2TrainingReceiptStore.isSent(event.localEventId, event.snapshotHash)) {
-                                _ui.update {
-                        it.copy(
-                            module2TrainingSaleBusy = false,
-                            module2Message = "module2_finalized_training_already_sent"
-                        )
-                    }
-                    return@launch
-                }
-
-                val cookitToken = token ?: error("Cookit API session is unavailable")
-                val shadowResolution = api.fiscalShadowResolution(cookitToken, event.orderId)
-                val result = module2StatusClient.trainingSaleFromFinalizedEvent(
-                    settings = settings,
-                    bearerToken = bearer,
-                    event = event,
-                    shadowResolution = shadowResolution
-                )
-                if (result.success) {
-                    module2TrainingReceiptStore.markSent(event, result)
-                }
-                val refreshedStatus = if (result.success) {
-                    runCatchingPreservingCancellation { module2StatusClient.status(settings, bearer) }.getOrNull()
-                } else null
-                        _ui.update { current ->
-                    current.copy(
-                        module2TrainingSaleBusy = false,
-                        module2TrainingSale = result,
-                        module2Status = refreshedStatus ?: current.module2Status,
-                        fdmProviderStatus = refreshedStatus?.normalized() ?: current.fdmProviderStatus,
-                        module2Message = if (result.success) {
-                            "module2_finalized_training_ok"
-                        } else {
-                            "module2_finalized_training_failed:${result.message.orEmpty()}"
-                        }
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                val message = error.message.orEmpty().ifBlank { error::class.java.simpleName }
-                _ui.update {
-                    it.copy(
-                        module2TrainingSaleBusy = false,
-                        module2TrainingSale = Module2TrainingSaleResult(attempted = true, success = false, message = message),
-                        module2Message = "module2_finalized_training_failed:$message"
-                    )
-                }
-            }
-        }
-    }
-
-    fun restartEmbeddedMockFdm() {
-        if (!BuildConfig.ENABLE_MOCK_FDM) return
-        embeddedMockFdmServer.stop()
-        val status = embeddedMockFdmServer.start()
-        _ui.update { it.copy(embeddedMockFdmStatus = status, mockFdmMessage = null) }
-    }
-
     /**
      * Intentionally does not send a GraphQL fiscal mutation. This exposes the permanent provider
      * boundary to the UI while the certified Checkbox signSale input mapping remains unavailable.
      */
-    fun verifyFdmAdapterGate() {
-        val readiness = fdmRuntime.readiness(_ui.value.fdmSettings)
-        _ui.update {
-            it.copy(
-                fdmReadiness = readiness,
-                fdmMessage = if (readiness.readyForFiscalization) "ready" else "mapping_gated"
-            )
-        }
-    }
-
     fun probeFdmConnectivity() {
         val settings = _ui.value.fdmSettings
         viewModelScope.launch {
@@ -851,78 +540,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     fdmProbe = result,
                     fdmMessage = if (result.transportReady) "probe_reachable" else "probe_failed"
                 )
-            }
-        }
-    }
-
-    fun runMockFdmTest(scenario: String) {
-        if (!BuildConfig.ENABLE_MOCK_FDM) {
-            _ui.update { it.copy(mockFdmMessage = "mock_disabled") }
-            return
-        }
-        if (!_ui.value.policy.canManageSettings || _ui.value.demoMode) {
-            _ui.update { it.copy(mockFdmMessage = "mock_forbidden") }
-            return
-        }
-        val settings = _ui.value.fdmSettings
-        if (!settings.isMock || !settings.configured) {
-            _ui.update { it.copy(mockFdmMessage = "mock_not_configured") }
-            return
-        }
-        val embeddedStatus = embeddedMockFdmServer.start()
-        _ui.update { it.copy(embeddedMockFdmStatus = embeddedStatus) }
-        if (!embeddedStatus.running) {
-            _ui.update { it.copy(mockFdmMessage = "mock_embedded_unavailable:${embeddedStatus.lastError.orEmpty()}") }
-            return
-        }
-        val identity = _ui.value.fiscalIdentity
-        if (identity == null || identity.restaurantId == null || identity.branchId == null) {
-            _ui.update { it.copy(mockFdmMessage = "mock_identity_missing") }
-            return
-        }
-
-        viewModelScope.launch {
-            _ui.update { it.copy(mockFdmBusy = true, mockFdmMessage = "mock_running:$scenario") }
-            val event = runCatching { fiscalOutboxRepository.latest(identity) }.getOrNull()
-            if (event == null) {
-                _ui.update { it.copy(mockFdmBusy = false, mockFdmMessage = "mock_no_event") }
-                return@launch
-            }
-
-            val calculatedHash = FiscalCanonicalJson.sha256Hex(event.snapshotJson)
-            if (!calculatedHash.equals(event.snapshotHash, ignoreCase = true)) {
-                _ui.update {
-                    it.copy(
-                        mockFdmBusy = false,
-                        mockFdmMessage = "mock_local_hash_mismatch:${event.localEventId}"
-                    )
-                }
-                return@launch
-            }
-
-            runCatching {
-                fdmRuntime.submitSale(
-                    settings = settings,
-                    event = event,
-                    headers = mapOf("X-Cookit-Mock-Scenario" to scenario.trim().ifBlank { "success" })
-                )
-            }.onSuccess { envelope ->
-                val sale = envelope.optJSONObject("data")?.optJSONObject("signSale")
-                val receipt = sale?.optString("receiptNumber").orEmpty()
-                val duplicate = sale?.optBoolean("duplicate", false) ?: false
-                _ui.update {
-                    it.copy(
-                        mockFdmBusy = false,
-                        mockFdmMessage = "mock_ok:${event.localEventId}:${receipt.ifBlank { "n/a" }}:$duplicate"
-                    )
-                }
-            }.onFailure { error ->
-                _ui.update {
-                    it.copy(
-                        mockFdmBusy = false,
-                        mockFdmMessage = "mock_failed:${scenario.trim().ifBlank { "success" }}:${error.message.orEmpty().take(180)}"
-                    )
-                }
             }
         }
     }
@@ -1216,15 +833,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         val settings = _ui.value.fdmSettings
-        if (settings.isMock) {
-            val status = embeddedMockFdmServer.start()
-            _ui.update { it.copy(embeddedMockFdmStatus = status) }
-            if (!status.running) {
-                _ui.update { it.copy(fiscalAgentMessage = "agent_mock_unavailable:${status.lastError.orEmpty()}") }
-                return false
-            }
-        }
-
         val readiness = fdmRuntime.readiness(settings)
         if (!readiness.readyForFiscalization) {
             _ui.update {
@@ -4788,78 +4396,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }
     }
 
-    private suspend fun refreshModule2FinalizedCandidate() {
-        val candidate = runCatchingPreservingCancellation {
-            val identity = fiscalRuntimeRepository.ensureIdentity()
-            val event = fiscalOutboxRepository.latestActivated(identity)
-                ?: return@runCatchingPreservingCancellation Module2FinalizedOrderCandidate()
-            val snapshot = FiscalSaleSnapshotParser.parse(event)
-            val alreadySent = module2TrainingReceiptStore.isSent(event.localEventId, event.snapshotHash)
-            val issues = mutableListOf<String>()
-            if (snapshot.schema != "cookit.android.fiscal.sale.v2") {
-                issues += "snapshot ${snapshot.schema}; pay a new order with A15.0E"
-            }
-            if (snapshot.lines.isEmpty()) issues += "no fiscal lines"
-
-            var fiscalSummary = emptyList<String>()
-            var financialSummary = emptyList<String>()
-            var paymentDisplay = snapshot.paymentMethod.uppercase()
-            if (issues.isEmpty()) {
-                val currentToken = token
-                if (currentToken == null) {
-                    issues += "Cookit API session unavailable"
-                } else {
-                    runCatchingPreservingCancellation {
-                        val shadow = api.fiscalShadowResolution(currentToken, event.orderId)
-                        shadow.validateAgainst(snapshot)
-                        shadow
-                    }.onSuccess { shadow ->
-                        fiscalSummary = buildList {
-                            shadow.lines.forEach { line ->
-                                val rate = line.rate?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: "?"
-                                add("${line.name}: ${line.fiscalClass} → ${line.taxCategoryCode ?: "?"} @ ${rate}%")
-                            }
-                            shadow.adjustments.forEach { adjustment ->
-                                val rate = adjustment.rate?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() } ?: "?"
-                                add("${adjustment.name}: ${adjustment.taxCategoryCode ?: "?"} @ ${rate}%")
-                            }
-                        }
-                        financialSummary = shadow.financials.map { financial ->
-                            "${financial.type.uppercase()} €${String.format(java.util.Locale.US, "%.2f", financial.amountMinor / 100.0)}"
-                        }
-                        paymentDisplay = shadow.financials.joinToString(" + ") { it.type.uppercase() }.ifBlank { paymentDisplay }
-                    }.onFailure { error ->
-                        issues += (error.message ?: "CookitFiscal SHADOW validation failed")
-                    }
-                }
-            }
-            Module2FinalizedOrderCandidate(
-                available = true,
-                orderId = event.orderId,
-                localEventId = event.localEventId,
-                schema = snapshot.schema,
-                status = event.status,
-                lineCount = snapshot.lines.size,
-                total = snapshot.grossTotalMinor.toDouble() / 100.0,
-                paymentMethod = paymentDisplay,
-                cashierName = snapshot.cashierName,
-                snapshotHash = event.snapshotHash,
-                fiscalSummary = fiscalSummary,
-                financialSummary = financialSummary,
-                ready = issues.isEmpty() && !alreadySent,
-                alreadySent = alreadySent,
-                message = when {
-                    alreadySent -> "already sent to Module2 TRAINING"
-                    issues.isNotEmpty() -> issues.joinToString(" | ")
-                    else -> "ready • CookitFiscal SHADOW validated (items + adjustments + financials)"
-                }
-            )
-        }.getOrElse { error ->
-            Module2FinalizedOrderCandidate(message = error.message ?: "Unable to read finalized fiscal snapshot")
-        }
-        _ui.update { it.copy(module2FinalizedCandidate = candidate) }
-    }
-
     private fun kickFiscalSync() {
         if (token == null || _ui.value.demoMode) return
         startFiscalSync(initialDelayMs = 250L)
@@ -5231,7 +4767,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     override fun onCleared() {
         pollingJob?.cancel()
         fiscalSyncJob?.cancel()
-        embeddedMockFdmServer.stop()
         tone.release()
         super.onCleared()
     }

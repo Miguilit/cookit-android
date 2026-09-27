@@ -2,8 +2,6 @@ package be.cookit.pos.android.data
 
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.domain.*
-import be.cookit.pos.android.data.fiscal.FiscalShadowOrderResolution
-import be.cookit.pos.android.data.fiscal.FiscalShadowResolutionParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -605,14 +603,6 @@ class CookitHttpClient {
                 )
             }
         }
-    }
-
-    suspend fun fiscalShadowResolution(token: String, orderId: Long): FiscalShadowOrderResolution = withContext(Dispatchers.IO) {
-        val json = requestAbsolute(
-            originUrl + "api/v1/fiscal/orders/$orderId/shadow-resolution",
-            token = token
-        )
-        FiscalShadowResolutionParser.parse(json)
     }
 
     suspend fun orderDraft(token: String, orderId: Long): RemoteOrderDraft = withContext(Dispatchers.IO) {

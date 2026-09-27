@@ -16,12 +16,9 @@ import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.MainActivity
 import be.cookit.pos.android.R
 import be.cookit.pos.android.data.fiscal.CookitLocalDatabase
-import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmContract
-import be.cookit.pos.android.data.fiscal.EmbeddedMockFdmServer
 import be.cookit.pos.android.data.fiscal.FdmGraphqlClient
 import be.cookit.pos.android.data.fiscal.FdmGraphqlException
 import be.cookit.pos.android.data.fiscal.FdmConnectivityProbe
@@ -105,7 +102,6 @@ class FiscalAgentForegroundService : Service() {
     private lateinit var outcomeDao: FiscalAgentOutcomeDao
     private lateinit var fdmRuntime: FiscalFdmRuntime
     private lateinit var fdmProbe: FdmConnectivityProbe
-    private lateinit var embeddedMock: EmbeddedMockFdmServer
     private lateinit var notifications: NotificationManager
     private lateinit var powerManager: PowerManager
     private var screenOffWakeLock: PowerManager.WakeLock? = null
@@ -140,7 +136,6 @@ class FiscalAgentForegroundService : Service() {
         fdmProbe = FdmConnectivityProbe()
         outcomeDao = database.fiscalAgentOutcomeDao()
         runner = FiscalAgentRunner(client, fdmRuntime, outcomeDao)
-        embeddedMock = EmbeddedMockFdmServer(this)
         notifications = getSystemService(NotificationManager::class.java)
         powerManager = getSystemService(PowerManager::class.java)
 
@@ -313,7 +308,7 @@ class FiscalAgentForegroundService : Service() {
 
             val credentials = credentialStore.load()
             val identity = runtimeRepository.currentIdentity()
-            val settings = normalizedSettings(settingsStore.load())
+            val settings = settingsStore.load()
 
             if (credentials == null || identity == null || identity.restaurantId == null || identity.branchId == null) {
                 stateStore.recordFailure(
@@ -329,27 +324,6 @@ class FiscalAgentForegroundService : Service() {
                 publishIdle("credentials_or_identity_missing", "CONFIG ERROR • identité/credentials manquants")
                 delay(RETRY_NOT_READY_MS)
                 continue
-            }
-
-            if (settings.isMock) {
-                val status = embeddedMock.start()
-                if (!status.running) {
-                    val error = status.lastError.orEmpty().ifBlank { "mock_fdm_unavailable" }
-                    stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_FDM_ERROR, error)
-                    diagnosticLogger.record(
-                        eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
-                        health = FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
-                        provider = settings.provider,
-                        runtimeId = identity.runtimeId,
-                        message = error
-                    )
-                    publishIdle(
-                        "agent_mock_unavailable:$error",
-                        "FDM ERROR • Mock indisponible"
-                    )
-                    delay(RETRY_NOT_READY_MS)
-                    continue
-                }
             }
 
             val readiness = fdmRuntime.readiness(settings)
@@ -371,32 +345,6 @@ class FiscalAgentForegroundService : Service() {
                 updateNotification("CONFIG • adapter fiscal non activé, auto arrêté")
                 stopSelf()
                 return
-            }
-
-            if (settings.isMock) {
-                var probe = fdmProbe.probe(settings)
-                if (!probe.transportReady || !probe.graphqlResponded) {
-                    // The embedded Mock is process-global. Heal a stale loopback listener before
-                    // claiming any Cloud job so a local harness issue cannot consume a lease.
-                    embeddedMock.stop()
-                    delay(MOCK_RESTART_GRACE_MS)
-                    embeddedMock.start()
-                    probe = fdmProbe.probe(settings)
-                }
-                if (!probe.transportReady || !probe.graphqlResponded) {
-                    val error = "mock_preflight:${probe.message.orEmpty()}"
-                    stateStore.recordFailure(FiscalAgentRuntimeState.HEALTH_FDM_ERROR, error)
-                    diagnosticLogger.record(
-                        eventType = FiscalAgentDiagnosticLogger.EVENT_HEALTH_FAILURE,
-                        health = FiscalAgentRuntimeState.HEALTH_FDM_ERROR,
-                        provider = settings.provider,
-                        runtimeId = identity.runtimeId,
-                        message = error
-                    )
-                    publishIdle(error, "FDM ERROR • Mock local non joignable")
-                    delay(RETRY_NOT_READY_MS)
-                    continue
-                }
             }
 
             val now = System.currentTimeMillis()
@@ -767,18 +715,7 @@ class FiscalAgentForegroundService : Service() {
         }
     }
 
-    private fun normalizedSettings(stored: FiscalFdmSettings): FiscalFdmSettings =
-        if (stored.isMock) {
-            // Legacy embedded mock was retired by the authority cutover.
-            // Certification now exercises the real Module2/Pracsys transport.
-            stored.copy(
-                provider = FiscalFdmSettings.PROVIDER_MODULE2,
-                host = "fdm.module2.be",
-                port = 443,
-                path = "/graphql/",
-                useTls = true
-            )
-        } else {
+else {
             stored
         }
 
@@ -859,7 +796,6 @@ class FiscalAgentForegroundService : Service() {
         private const val WATCHDOG_CHECK_MS = 15_000L
         private const val WATCHDOG_STALL_MS = 90_000L
         private const val WATCHDOG_RESTART_GRACE_MS = 500L
-        private const val MOCK_RESTART_GRACE_MS = 150L
         private const val RETRY_WAIT_TICK_MS = 5_000L
         private const val MANUAL_HOLD_POLL_MS = 15_000L
     }

@@ -10,7 +10,6 @@ data class FiscalFdmSettings(
     val useTls: Boolean = true
 ) {
     val configured: Boolean get() = host.isNotBlank() && port in 1..65535
-    val isMock: Boolean get() = provider == PROVIDER_MOCK
     val isModule2: Boolean get() = provider == PROVIDER_MODULE2
 
     val endpoint: String?
@@ -25,31 +24,47 @@ data class FiscalFdmSettings(
     companion object {
         const val PROVIDER_CHECKBOX = "checkbox_eutronix"
         const val PROVIDER_MODULE2 = "module2_pracsys"
-        const val PROVIDER_MOCK = "cookit_mock_fdm_a14_4"
+        internal const val LEGACY_PROVIDER_MOCK = "cookit_mock_fdm_a14_4"
     }
 }
 
 /**
  * Non-secret FDM network configuration.
  *
- * Provider authentication secrets/certificates are deliberately NOT persisted here. The certified
- * installer/provider layer must provision them through a dedicated secure mechanism once the exact
- * Checkbox/Eutronix security profile is known.
- *
- * A14.4 adds a debug-only Mock FDM provider. Its clear-text LAN transport is never accepted by the
- * production Checkbox adapter and is additionally gated by BuildConfig.ENABLE_MOCK_FDM at runtime.
+ * The embedded Mock FDM runtime was retired in 0.15.0.42. A persisted legacy
+ * mock provider value is migrated once to the Module2 certification transport.
+ * Provider authentication secrets/certificates remain in their dedicated
+ * secure stores.
  */
 class FiscalFdmSettingsStore(context: Context) {
     private val prefs = context.getSharedPreferences("cookit_fdm_runtime", Context.MODE_PRIVATE)
 
-    fun load(): FiscalFdmSettings = FiscalFdmSettings(
-        provider = prefs.getString(KEY_PROVIDER, FiscalFdmSettings.PROVIDER_CHECKBOX)
-            ?: FiscalFdmSettings.PROVIDER_CHECKBOX,
-        host = prefs.getString(KEY_HOST, "").orEmpty(),
-        port = prefs.getInt(KEY_PORT, 443).coerceIn(1, 65535),
-        path = prefs.getString(KEY_PATH, "/graphql").orEmpty().ifBlank { "/graphql" },
-        useTls = prefs.getBoolean(KEY_TLS, true)
-    )
+    fun load(): FiscalFdmSettings {
+        val storedProvider = prefs.getString(
+            KEY_PROVIDER,
+            FiscalFdmSettings.PROVIDER_CHECKBOX
+        ) ?: FiscalFdmSettings.PROVIDER_CHECKBOX
+
+        if (storedProvider == FiscalFdmSettings.LEGACY_PROVIDER_MOCK) {
+            val migrated = FiscalFdmSettings(
+                provider = FiscalFdmSettings.PROVIDER_MODULE2,
+                host = "fdm.module2.be",
+                port = 443,
+                path = "/graphql/",
+                useTls = true
+            )
+            save(migrated)
+            return migrated
+        }
+
+        return FiscalFdmSettings(
+            provider = storedProvider,
+            host = prefs.getString(KEY_HOST, "").orEmpty(),
+            port = prefs.getInt(KEY_PORT, 443).coerceIn(1, 65535),
+            path = prefs.getString(KEY_PATH, "/graphql").orEmpty().ifBlank { "/graphql" },
+            useTls = prefs.getBoolean(KEY_TLS, true)
+        )
+    }
 
     fun save(settings: FiscalFdmSettings) {
         prefs.edit()

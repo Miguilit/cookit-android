@@ -114,15 +114,6 @@ class FiscalAgentRunner(
             val replayedFromJournal = existing != null
             val outcome = existing?.also { validateStoredOutcome(it, job) } ?: run {
                 val metadata = job.metadata
-                val mockScenario = if (settings.isMock && metadata?.optBoolean("test_only", false) == true) {
-                    metadata.optString("scenario")
-                        .trim()
-                        .lowercase()
-                        .takeIf { it in ALLOWED_MOCK_SCENARIOS }
-                } else {
-                    null
-                }
-                val mockHeaders = mockScenario?.let { mapOf("X-Cookit-Mock-Scenario" to it) }.orEmpty()
 
                 /*
                  * A15.0F8.6
@@ -245,8 +236,7 @@ class FiscalAgentRunner(
                 val envelope = fdmRuntime.submitSale(
                     settings = settings,
                     event = event,
-                    preparedSale = preparedSale,
-                    headers = mockHeaders
+                    preparedSale = preparedSale
                 )
 
                 val responseOperation =
@@ -257,7 +247,7 @@ class FiscalAgentRunner(
                             )
                     } else {
                         /*
-                         * Existing Cookit Mock contract remains signSale.
+                         * Future non-Module2 provider adapters use signSale.
                          */
                         "signSale"
                     }
@@ -342,7 +332,7 @@ class FiscalAgentRunner(
 
                 } else {
                     /*
-                     * Existing Cookit Mock contract remains unchanged.
+                     * Future non-Module2 adapters retain the normalized signSale contract.
                      */
                     if (!sale.optBoolean("success", false)) {
                         throw FdmGraphqlException(
@@ -398,8 +388,7 @@ class FiscalAgentRunner(
                         ) == true
 
                 val ambiguityTestAllowed =
-                    settings.isMock
-                        || preparedSale?.training == true
+                    preparedSale?.training == true
 
                 if (
                     simulateProviderOutcomeLoss
@@ -449,9 +438,7 @@ class FiscalAgentRunner(
              * Deterministic crash/replay test hook.
              *
              * The delay is allowed only for an explicitly test-only job and
-             * either:
-             *   - the mock provider, or
-             *   - a Cloud-prepared Module2 TRAINING request.
+             * a Cloud-prepared Module2 TRAINING request.
              *
              * A LIVE Module2 request can therefore never activate this hook.
              */
@@ -459,8 +446,7 @@ class FiscalAgentRunner(
                 job.metadata?.optBoolean("test_only", false) == true
 
             val deterministicDelayAllowed =
-                settings.isMock
-                    || preparedSale?.training == true
+                preparedSale?.training == true
 
             if (
                 ! replayedFromJournal
@@ -751,10 +737,6 @@ class FiscalAgentRunner(
          */
         val providerTestOnly =
             when {
-                provider ==
-                    FiscalFdmSettings.PROVIDER_MOCK ->
-                    true
-
                 module2 ->
                     fdmRef
                         ?.optNullableNonBlank(
@@ -863,16 +845,5 @@ class FiscalAgentRunner(
     companion object {
         private const val MAX_TEST_CLOUD_SUBMIT_DELAY_MS = 60_000L
 
-        private val ALLOWED_MOCK_SCENARIOS = setOf(
-            "success",
-            "lost_response",
-            "lost_response_once",
-            "graphql_error",
-            "http_500",
-            "malformed",
-            "auth_required",
-            "slow",
-            "timeout"
-        )
     }
 }
