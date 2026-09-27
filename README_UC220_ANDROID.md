@@ -1,11 +1,12 @@
-# Cookit Android 0.15.0.39 — UC220 backend wiring
+# Cookit Android 0.15.0.40 — UC220 dedicated line-adjustment wiring
 
 Base inspected from the supplied archive:
 
 - Git branch: `feature/android-fiscal-backend-authority`
 - Git HEAD: `0592471`
 - Previous Android version: `0.15.0.38` / versionCode `73`
-- This patch: `0.15.0.39` / versionCode `74`
+- Previous UC220 UI build: `0.15.0.39` / versionCode `74`
+- This corrective patch: `0.15.0.40` / versionCode `75`
 
 ## Purpose
 
@@ -15,16 +16,15 @@ Android does **not** calculate or persist the authoritative discounted line amou
 
 ## Canonical backend contract used
 
-Existing endpoint:
+Dedicated line endpoint:
 
-`PATCH pos/orders/{orderId}/commercial-adjustments`
+`PATCH pos/orders/{orderId}/items/{orderItemId}/commercial-adjustment`
 
 Apply a line discount:
 
 ```json
 {
-  "line_discount": {
-    "order_item_id": 123,
+  "discount": {
     "type": "percent",
     "value": 50.0
   }
@@ -35,15 +35,11 @@ Clear the line discount:
 
 ```json
 {
-  "line_discount": {
-    "order_item_id": 123,
-    "type": null,
-    "value": 0.0
-  }
+  "discount": null
 }
 ```
 
-There is deliberately **no alias probing** (`line_price_change`, `line_adjustment`, etc.). If the canonical backend contract is unavailable, the Android request fails visibly instead of guessing another semantic contract.
+The order-level endpoint `PATCH pos/orders/{id}/commercial-adjustments` remains reserved for order-level commercial adjustments such as ticket discount/tip. Android must not send UC220 line discounts there.
 
 ## Android flow
 
@@ -56,13 +52,13 @@ There is deliberately **no alias probing** (`line_price_change`, `line_adjustmen
 7. The displayed line amount and order total therefore come from Cookit Cloud.
 8. Payment/fiscalization continues through the existing backend-generated immutable fiscal job/canonical request path.
 
-## Files changed
+## Files changed by this corrective patch
 
 - `app/build.gradle.kts`
 - `app/src/main/java/be/cookit/pos/android/data/CookitHttpClient.kt`
-- `app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt`
-- `app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt`
-- `app/src/main/java/be/cookit/pos/android/ui/Localization.kt`
+- `README_UC220_ANDROID.md`
+
+The UC220 UI/ViewModel/localization introduced in 0.15.0.39 is unchanged.
 
 ## UI
 

@@ -1031,12 +1031,12 @@ class CookitHttpClient {
      * UC220 line-level discount.
      *
      * Cookit Cloud is the single commercial authority. Android sends only the operator intent
-     * (target order item + fixed/percent value), never computes the authoritative discounted
-     * line amount and never builds an FDM priceChanges structure locally.
+     * to the dedicated order-item commercial-adjustment endpoint, never computes the
+     * authoritative discounted line amount and never builds an FDM priceChanges structure
+     * locally.
      *
-     * The backend exposes one canonical contract on the existing commercial-adjustments route:
-     * `line_discount`. Do not probe compatibility aliases here: an unknown or incompatible
-     * backend must fail visibly rather than silently changing semantics.
+     * Apply: { "discount": { "type": "fixed|percent", "value": n } }
+     * Clear: { "discount": null }
      */
     suspend fun updateLineDiscount(
         token: String,
@@ -1050,16 +1050,19 @@ class CookitHttpClient {
             ?.lowercase()
             ?.takeIf { it == "fixed" || it == "percent" }
 
-        val payload = JSONObject()
-            .put("order_item_id", orderItemId)
-            .put("type", normalizedType ?: JSONObject.NULL)
-            .put("value", value.coerceAtLeast(0.0))
+        val discount: Any = if (normalizedType == null || value <= 0.0) {
+            JSONObject.NULL
+        } else {
+            JSONObject()
+                .put("type", normalizedType)
+                .put("value", value.coerceAtLeast(0.0))
+        }
 
         request(
-            "pos/orders/$orderId/commercial-adjustments",
+            "pos/orders/$orderId/items/$orderItemId/commercial-adjustment",
             method = "PATCH",
             token = token,
-            body = JSONObject().put("line_discount", payload)
+            body = JSONObject().put("discount", discount)
         )
         Unit
     }
