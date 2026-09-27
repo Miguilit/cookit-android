@@ -62,7 +62,7 @@ interface FiscalOutboxDao {
     @Query(
         """
         SELECT * FROM fiscal_outbox
-        WHERE status IN ('pending', 'retry', 'blocked_profile_off')
+        WHERE status IN ('pending', 'retry')
           AND restaurant_id = :restaurantId
           AND branch_id = :branchId
           AND next_attempt_at_epoch_ms <= :nowEpochMs
@@ -141,7 +141,7 @@ interface FiscalOutboxDao {
     @Query("SELECT COUNT(*) FROM fiscal_outbox WHERE restaurant_id = :restaurantId AND branch_id = :branchId AND status = 'prepared'")
     suspend fun preparedCount(restaurantId: Long, branchId: Long): Int
 
-    @Query("SELECT COUNT(*) FROM fiscal_outbox WHERE restaurant_id = :restaurantId AND branch_id = :branchId AND status IN ('pending', 'retry', 'blocked_profile_off')")
+    @Query("SELECT COUNT(*) FROM fiscal_outbox WHERE restaurant_id = :restaurantId AND branch_id = :branchId AND status IN ('pending', 'retry')")
     suspend fun pendingCount(restaurantId: Long, branchId: Long): Int
 
     @Query("SELECT COUNT(*) FROM fiscal_outbox WHERE restaurant_id = :restaurantId AND branch_id = :branchId AND status = 'cloud_queued'")

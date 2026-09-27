@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         FiscalAgentOutcomeEntity::class,
         FiscalAgentDiagnosticEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class CookitLocalDatabase : RoomDatabase() {
@@ -139,6 +139,31 @@ abstract class CookitLocalDatabase : RoomDatabase() {
             }
         }
 
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                /*
+                 * Fiscal authority cutover R1.
+                 *
+                 * Pre-cutover Android sale snapshots were created for the old
+                 * SHADOW/manual-training architecture. They were never accepted
+                 * by Cloud (cloud_transaction_id IS NULL), so they must not wake
+                 * up after the new certification pipeline is enabled. Preserve
+                 * them for audit, but make them permanently non-runnable.
+                 */
+                db.execSQL(
+                    """
+                    UPDATE `fiscal_outbox`
+                    SET `status` = 'legacy_quarantined',
+                        `next_attempt_at_epoch_ms` = 9223372036854775807,
+                        `last_error` = 'Legacy pre-cutover Android fiscal outbox quarantined during cloud-authority cutover'
+                    WHERE `cloud_transaction_id` IS NULL
+                      AND `status` IN ('prepared','pending','retry','blocked_profile_off')
+                    """.trimIndent()
+                )
+            }
+        }
+
         @Volatile
         private var instance: CookitLocalDatabase? = null
 
@@ -149,7 +174,7 @@ abstract class CookitLocalDatabase : RoomDatabase() {
                 DATABASE_NAME
             )
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                    MIGRATION_4_5
+                    MIGRATION_4_5, MIGRATION_5_6
                 )
                 .build()
                 .also { instance = it }

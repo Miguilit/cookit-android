@@ -86,7 +86,7 @@ private fun allowedTabletScreens(state: PosUiState): List<Screen> = buildList {
     if (policy.canViewKds) add(Screen.KDS)
     if (policy.canViewDelivery) add(Screen.DELIVERY)
     if (policy.canUsePos) add(Screen.CASH)
-    val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured || BuildConfig.ENABLE_MOCK_FDM
+    val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured
     if (policy.canManageSettings && fiscalAvailable) add(Screen.FISCALITY)
     add(Screen.SETTINGS)
 }
@@ -3210,7 +3210,7 @@ private fun SettingsScreen(
         SettingsRow(Icons.Default.Security, t.permissions, "${state.policy.profile.name.lowercase()}")
 
         val fiscalUi = fiscalStrings(state.language)
-        val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured || BuildConfig.ENABLE_MOCK_FDM
+        val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured
         if (fiscalAvailable) Card(
             colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(18.dp),
@@ -3252,7 +3252,6 @@ private fun SettingsScreen(
                         Spacer(Modifier.width(6.dp))
                         Text(fiscalUi.openCenter)
                     }
-                }
             }
         }
 
@@ -4076,10 +4075,8 @@ private fun FiscalityScreen(
     var fdmHost by remember(state.fdmSettings.host) { mutableStateOf(state.fdmSettings.host) }
     var fdmPort by remember(state.fdmSettings.port) { mutableStateOf(state.fdmSettings.port.toString()) }
     var fdmProvider by remember(state.fdmSettings.provider) { mutableStateOf(state.fdmSettings.provider) }
-    val mockFdmMode = BuildConfig.ENABLE_MOCK_FDM && fdmProvider == be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_MOCK
     val module2Mode = fdmProvider == be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_MODULE2
     var module2Token by remember { mutableStateOf("") }
-    var mockScenario by remember { mutableStateOf("success") }
     var fiscalAgentDeviceId by remember(state.fiscalAgentDeviceHint) { mutableStateOf(state.fiscalAgentDeviceHint) }
     var fiscalAgentToken by remember { mutableStateOf("") }
 
@@ -4327,8 +4324,8 @@ private fun FiscalityScreen(
                             selected = fdmProvider == be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_CHECKBOX,
                             onClick = {
                                 fdmProvider = be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_CHECKBOX
-                                if (fdmHost == EmbeddedMockFdmContract.HOST || fdmHost == "fdm.module2.be") fdmHost = ""
-                                if (fdmPort == EmbeddedMockFdmContract.PORT.toString()) fdmPort = "443"
+                                if (fdmHost == "fdm.module2.be") fdmHost = ""
+                                fdmPort = "443"
                             },
                             label = { Text("Checkbox") },
                             modifier = Modifier.weight(1f)
@@ -4344,19 +4341,6 @@ private fun FiscalityScreen(
                             leadingIcon = { Icon(Icons.Default.Api, null, Modifier.size(16.dp)) },
                             modifier = Modifier.weight(1f)
                         )
-                        if (BuildConfig.ENABLE_MOCK_FDM) {
-                            FilterChip(
-                                selected = mockFdmMode,
-                                onClick = {
-                                    fdmProvider = be.cookit.pos.android.data.fiscal.FiscalFdmSettings.PROVIDER_MOCK
-                                    fdmHost = EmbeddedMockFdmContract.HOST
-                                    fdmPort = EmbeddedMockFdmContract.PORT.toString()
-                                },
-                                label = { Text(fs.mockMode) },
-                                leadingIcon = { Icon(Icons.Default.BugReport, null, Modifier.size(16.dp)) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
                     }
                 }
 
@@ -4368,7 +4352,7 @@ private fun FiscalityScreen(
                             label = { Text(fs.host) },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
-                            enabled = !mockFdmMode
+                            enabled = true
                         )
                         OutlinedTextField(
                             value = fdmPort,
@@ -4376,7 +4360,7 @@ private fun FiscalityScreen(
                             label = { Text(fs.port) },
                             modifier = Modifier.width(120.dp),
                             singleLine = true,
-                            enabled = !mockFdmMode
+                            enabled = true
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4390,9 +4374,6 @@ private fun FiscalityScreen(
                                 Spacer(Modifier.width(6.dp))
                             }
                             Text(fs.testConnection)
-                        }
-                        if (BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock && !state.embeddedMockFdmStatus.running) {
-                            OutlinedButton(onClick = vm::restartEmbeddedMockFdm) { Text(fs.restart) }
                         }
                     }
                 }
@@ -4481,215 +4462,18 @@ private fun FiscalityScreen(
                 }
 
                 if (state.policy.canManageSettings && !state.demoMode) {
-                    if (BuildConfig.ENABLE_MOCK_FDM && state.fdmSettings.isMock) {
-                        HorizontalDivider(color = CookitLine)
-                        Text(fs.testTools, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        val scenarios = listOf(
-                            "success",
-                            "lost_response",
-                            "graphql_error",
-                            "http_500",
-                            "malformed",
-                            "auth_required",
-                            "slow",
-                            "timeout"
-                        )
-                        scenarios.chunked(4).forEach { row ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                row.forEach { scenario ->
-                                    FilterChip(
-                                        selected = mockScenario == scenario,
-                                        onClick = { mockScenario = scenario },
-                                        label = { Text(scenario, fontSize = 9.sp) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = { vm.runMockFdmTest(mockScenario) },
-                            enabled = !state.mockFdmBusy && state.fdmSettings.configured
-                        ) {
-                            if (state.mockFdmBusy) {
-                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(fs.testLastEvent)
-                        }
-                    } else if (!state.fdmSettings.isMock && !state.fdmSettings.isModule2) {
+                    if (!state.fdmSettings.isModule2) {
                         OutlinedButton(onClick = vm::verifyFdmAdapterGate) { Text(fs.verifyAdapterGate) }
-                    } else if (state.fdmSettings.isModule2) {
+                    } else {
                         HorizontalDivider(color = CookitLine)
-                        Text("Module2 TRAINING signSale", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Pipeline fiscal automatique", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text(
-                            "Manual simulator test only. Cookit sends the Module2 sample sale with isTraining=true; automatic fiscal processing remains stopped.",
-                            color = CookitOrange,
-                            fontSize = 11.sp
+                            "Cookit Cloud construit et fige le payload fiscal. L’agent Android transporte ensuite la requête canonique vers Module2 sans la reconstruire. Les anciens outils SHADOW / TRAINING manuel / Mock FDM sont retirés du runtime actif.",
+                            color = CookitMuted,
+                            fontSize = 10.sp
                         )
-                        OutlinedButton(
-                            onClick = vm::runModule2TrainingSale,
-                            enabled = !state.module2TrainingSaleBusy &&
-                                state.module2TokenConfigured &&
-                                state.fdmProviderStatus.transportConnected
-                        ) {
-                            if (state.module2TrainingSaleBusy) {
-                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(if (state.module2TrainingSaleBusy) "Sending TRAINING sale…" else "Send TRAINING signSale")
-                        }
-
-                        HorizontalDivider(color = CookitLine)
-                        Text("Cookit cart → Module2 TRAINING", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        val cookitTrainingTotal = state.draftCart.sumOf { it.total }
-                        val vatMissingProducts = state.draftCart.filter { line ->
-                            line.product.vatLabel.isNullOrBlank() && line.product.vatRate == null
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            FiscalCompactMetric(Modifier.weight(1f), "Cookit lines", state.draftCart.size.toString())
-                            FiscalCompactMetric(Modifier.weight(1f), "Total", String.format(Locale.US, "€%.2f", cookitTrainingTotal))
-                            FiscalCompactMetric(
-                                Modifier.weight(1f),
-                                "VAT mapping",
-                                if (state.draftCart.isEmpty()) "No cart" else if (vatMissingProducts.isEmpty()) "Ready" else "Missing ${vatMissingProducts.size}"
-                            )
-                            FiscalCompactMetric(
-                                Modifier.weight(1f),
-                                "Source",
-                                if (state.resumedRemoteOrderId != null) "Server order" else "Current cart"
-                            )
-                        }
-                        if (vatMissingProducts.isNotEmpty()) {
-                            Text(
-                                "VAT metadata missing for: ${vatMissingProducts.joinToString(", ") { it.product.name }.take(220)}. Cookit will not guess a fiscal VAT code.",
-                                color = CookitOrange,
-                                fontSize = 10.sp
-                            )
-                        } else if (state.draftCart.isNotEmpty()) {
-                            Text(
-                                "Uses actual Cookit products, quantities, prices, departments and VAT metadata. Simulator VAT/establishment identity remains TRAINING-only.",
-                                color = CookitMuted,
-                                fontSize = 10.sp
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = { vm.runModule2CookitCartTrainingSale(PosPaymentMethod.CASH) },
-                                enabled = !state.module2TrainingSaleBusy && state.module2TokenConfigured &&
-                                    state.fdmProviderStatus.transportConnected && state.draftCart.isNotEmpty() && vatMissingProducts.isEmpty()
-                            ) { Text("Send Cookit cart • CASH") }
-                            OutlinedButton(
-                                onClick = { vm.runModule2CookitCartTrainingSale(PosPaymentMethod.CARD_TERMINAL) },
-                                enabled = !state.module2TrainingSaleBusy && state.module2TokenConfigured &&
-                                    state.fdmProviderStatus.transportConnected && state.draftCart.isNotEmpty() && vatMissingProducts.isEmpty()
-                            ) { Text("Send Cookit cart • CARD") }
-                        }
-                        state.module2Message?.takeIf { it.startsWith("module2_cookit_training") }?.let { message ->
-                            Text(message, color = if ("_ok" in message) CookitGreen else CookitOrange, fontSize = 10.sp)
-                        }
-
-                        HorizontalDivider(color = CookitLine)
-                        Text("Paid order snapshot → Module2 TRAINING", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        val finalized = state.module2FinalizedCandidate
-                        if (!finalized.available) {
-                            Text(
-                                "No paid A15.0E fiscal snapshot yet. Create a new Cookit order, pay it normally, then return here.",
-                                color = CookitMuted,
-                                fontSize = 10.sp
-                            )
-                        } else {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                FiscalCompactMetric(Modifier.weight(1f), "Order", finalized.orderId?.let { "#$it" } ?: "—")
-                                FiscalCompactMetric(Modifier.weight(1f), "Lines", finalized.lineCount.toString())
-                                FiscalCompactMetric(Modifier.weight(1f), "Total", String.format(Locale.US, "€%.2f", finalized.total))
-                                FiscalCompactMetric(Modifier.weight(1f), "Payment", finalized.paymentMethod.uppercase())
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                FiscalCompactMetric(Modifier.weight(1f), "Snapshot", finalized.schema.substringAfterLast('.').ifBlank { "—" })
-                                FiscalCompactMetric(Modifier.weight(1f), "Outbox", finalized.status.ifBlank { "—" })
-                                FiscalCompactMetric(Modifier.weight(1f), "Cashier", finalized.cashierName ?: "—")
-                                FiscalCompactMetric(Modifier.weight(1f), "Guard", if (finalized.alreadySent) "Sent" else if (finalized.ready) "Ready" else "Blocked")
-                            }
-                            Text(
-                                "Immutable snapshot ${finalized.snapshotHash.take(12)}… • ${finalized.message.orEmpty()}",
-                                color = if (finalized.ready) CookitGreen else if (finalized.alreadySent) CookitMuted else CookitOrange,
-                                fontSize = 10.sp
-                            )
-                            Text(
-                                "VAT source: CookitFiscal SHADOW resolver (country + regime + order context + fiscal class). Items, adjustments and financials are validated against this immutable snapshot before signSale.",
-                                color = CookitMuted,
-                                fontSize = 10.sp
-                            )
-                            finalized.fiscalSummary.takeIf { it.isNotEmpty() }?.let { rows ->
-                                Text("Fiscal resolution", fontWeight = FontWeight.SemiBold, fontSize = 10.sp, color = CookitInk)
-                                rows.forEach { row -> Text(row, color = CookitMuted, fontSize = 10.sp) }
-                            }
-                            finalized.financialSummary.takeIf { it.isNotEmpty() }?.let { rows ->
-                                Text("Financials: ${rows.joinToString(" + ")}", color = CookitMuted, fontSize = 10.sp)
-                            }
-                        }
-                        OutlinedButton(
-                            onClick = vm::runModule2FinalizedOrderTrainingSale,
-                            enabled = !state.module2TrainingSaleBusy && state.module2TokenConfigured &&
-                                state.fdmProviderStatus.transportConnected && finalized.ready && !finalized.alreadySent
-                        ) {
-                            if (state.module2TrainingSaleBusy) {
-                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(if (finalized.alreadySent) "Finalized order already sent" else "Send finalized order TRAINING")
-                        }
-                        state.module2Message?.takeIf { it.startsWith("module2_finalized_training") }?.let { message ->
-                            Text(message, color = if ("_ok" in message || "already_sent" in message) CookitGreen else CookitOrange, fontSize = 10.sp)
-                        }
-
-                        val training = state.module2TrainingSale
-                        if (training.attempted) {
-                            if (training.success) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    FiscalCompactMetric(Modifier.weight(1f), "Ticket", training.posFiscalTicketNo?.toString() ?: "—")
-                                    FiscalCompactMetric(Modifier.weight(1f), "Event", training.eventLabel ?: "—")
-                                    FiscalCompactMetric(Modifier.weight(1f), "Event counter", training.eventCounter?.toString() ?: "—")
-                                    FiscalCompactMetric(Modifier.weight(1f), "Total counter", training.totalCounter?.toString() ?: "—")
-                                }
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    FiscalCompactMetric(Modifier.weight(1f), "FDM", training.fdmId ?: "—")
-                                    FiscalCompactMetric(Modifier.weight(1f), "Operation", training.eventOperation ?: "—")
-                                    FiscalCompactMetric(Modifier.weight(1f), "Short signature", training.shortSignature ?: "—")
-                                    FiscalCompactMetric(Modifier.weight(1f), "Latency", training.latencyMs?.let { "${it} ms" } ?: "—")
-                                }
-                                Text("TRAINING signSale accepted", color = CookitGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                training.fiscalResolution.takeIf { it.isNotEmpty() }?.let { rows ->
-                                    Text("Resolved fiscal lines", color = CookitInk, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                                    rows.forEach { row -> Text(row, color = CookitMuted, fontSize = 10.sp) }
-                                }
-                                training.financials.takeIf { it.isNotEmpty() }?.let {
-                                    Text("Financials: ${it.joinToString(" + ")}", color = CookitMuted, fontSize = 10.sp)
-                                }
-                                training.vatCalc.takeIf { it.isNotEmpty() }?.let {
-                                    Text("VAT: ${it.joinToString(" | ")}", color = CookitMuted, fontSize = 10.sp)
-                                }
-                                training.warnings.takeIf { it.isNotEmpty() }?.let {
-                                    Text("Warnings: ${it.joinToString(" | ")}", color = CookitOrange, fontSize = 10.sp)
-                                }
-                                training.informations.takeIf { it.isNotEmpty() }?.let {
-                                    Text("Info: ${it.joinToString(" | ")}", color = CookitMuted, fontSize = 10.sp)
-                                }
-                            } else {
-                                Text(
-                                    "TRAINING signSale rejected${training.httpStatus?.let { " • HTTP $it" }.orEmpty()}",
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                val detail = training.graphqlErrors.takeIf { it.isNotEmpty() }?.joinToString(" | ")
-                                    ?: training.message.orEmpty()
-                                if (detail.isNotBlank()) {
-                                    Text(detail, color = MaterialTheme.colorScheme.error, fontSize = 10.sp)
-                                }
-                            }
-                        }
                     }
+                }
                 }
             }
         }

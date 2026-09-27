@@ -1,0 +1,11 @@
+5275669e99440791a162d42528bb9743753bd1947247c4dbbf77403d0bd35488  app/build.gradle.kts
+fa78740180ec1bd87d7806efbafe5bc84a3b105b3f1b2a61d5240d6b97cfed07  app/src/main/java/be/cookit/pos/android/data/fiscal/CookitLocalDatabase.kt
+51fa8d1a396b2364bb59416395156236395824f0a34ccd8d9a93cd4e2bf3e441  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalCloudClient.kt
+77c861372d7880d589f7c0b3c817af7425c34007e31295101c257a6e1b85e5d2  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalOutboxDao.kt
+19de5cdf50e2edd7a3a9712a6d4cb533153fda77643053b580d823d942f66e0d  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalOutboxEntity.kt
+e5fa6a8813fc42a3fa32e405b2ebcf42a59c415529acb18fc7ee84698d66e8b7  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalOutboxRepository.kt
+4e38a596439dfa897100b3fda77d2d764095f17755b2200493a20f0070701fd8  app/src/main/java/be/cookit/pos/android/data/fiscal/FiscalSyncEngine.kt
+d25ac20a9f987c8be2fdeda30c00cdb6261ef88e6827d8733214b47e95dcc7b8  app/src/main/java/be/cookit/pos/android/service/FiscalAgentForegroundService.kt
+68da531c926235683b90d53c1384f3e66e1f3ef0cf037c961aa6cd25c40c967e  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt
+b8c0a0c01d019b1b415aba537190157de62b700cbf92578281e9bfca75ce90ab  app/src/main/java/be/cookit/pos/android/ui/CookitPosViewModel.kt
+67f69c0c4332508bba1a9266fa07221ed41ffd88e6fcf2fa4243d19d0a12a654  README_FISCAL_AUTHORITY_CUTOVER_R1.md

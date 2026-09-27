@@ -36,8 +36,8 @@ android {
         applicationId = "be.cookit.pos.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 75
-        versionName = "0.15.0.40"
+        versionCode = 76
+        versionName = "0.15.0.41"
 
         buildConfigField(
             "String",
@@ -49,7 +49,7 @@ android {
     buildTypes {
         getByName("debug") {
             // A14.4.1 embedded Mock FDM is a debug-only test harness. Release builds stay fail-closed.
-            buildConfigField("boolean", "ENABLE_MOCK_FDM", "true")
+            buildConfigField("boolean", "ENABLE_MOCK_FDM", "false")
             if (cookitPersistentSigningAvailable) {
                 signingConfig = signingConfigs.getByName("cookitPersistent")
             }

@@ -45,13 +45,12 @@ class FiscalSyncEngine(
         outbox.due(identity).forEach { entity ->
             attempted++
             try {
-                val result = cloud.queueOrder(token, entity)
+                val result = cloud.queueOrder(token, entity, identity)
                 outbox.markCloudQueued(entity, result.publicId)
                 queued++
             } catch (error: CookitApiException) {
-                val disabled = error.statusCode == 422 && isProfileDisabled(error)
-                outbox.recordRetry(entity, error.message ?: "Fiscal cloud queue failed", profileOff = disabled)
-                if (disabled) profileOff++ else failed++
+                outbox.recordRetry(entity, error.message ?: "Fiscal cloud queue failed")
+                failed++
             } catch (error: Throwable) {
                 outbox.recordRetry(entity, error.message ?: "Fiscal cloud queue failed")
                 failed++
@@ -59,14 +58,6 @@ class FiscalSyncEngine(
         }
 
         return SyncResult(attempted, queued, profileOff, failed)
-    }
-
-    private fun isProfileDisabled(error: CookitApiException): Boolean {
-        val text = (error.message.orEmpty() + " " + error.responseBody).lowercase()
-        return "profile_not_enabled" in text ||
-            "profile not enabled" in text ||
-            "profil fiscal" in text ||
-            "fiscal profile" in text
     }
 
     private fun isTerminalSettlement(status: String?): Boolean = status

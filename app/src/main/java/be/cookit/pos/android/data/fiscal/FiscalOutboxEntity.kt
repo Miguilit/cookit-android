@@ -78,7 +78,8 @@ data class FiscalOutboxEntity(
         const val STATUS_FDM_SUBMITTED = "fdm_submitted"
         const val STATUS_FISCALIZED = "fiscalized"
         const val STATUS_RETRY = "retry"
-        const val STATUS_BLOCKED_PROFILE_OFF = "blocked_profile_off"
+        const val STATUS_BLOCKED_PROFILE_OFF = "blocked_profile_off" // legacy DB compatibility only
+        const val STATUS_LEGACY_QUARANTINED = "legacy_quarantined"
         const val STATUS_FAILED = "failed"
     }
 }

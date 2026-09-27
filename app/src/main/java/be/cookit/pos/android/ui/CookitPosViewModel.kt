@@ -242,12 +242,15 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val fdmSettingsStore = FiscalFdmSettingsStore(application)
     private val embeddedMockFdmServer = EmbeddedMockFdmServer(application)
     private val storedFdmSettings = fdmSettingsStore.load()
-    private val initialFdmSettings = if (BuildConfig.ENABLE_MOCK_FDM && storedFdmSettings.isMock) {
+    private val initialFdmSettings = if (storedFdmSettings.isMock) {
+        // Legacy embedded mock is retired. Certification now uses the real
+        // Module2/Pracsys provider path through the Fiscal Agent.
         storedFdmSettings.copy(
-            host = EmbeddedMockFdmContract.HOST,
-            port = EmbeddedMockFdmContract.PORT,
-            path = EmbeddedMockFdmContract.PATH,
-            useTls = false
+            provider = FiscalFdmSettings.PROVIDER_MODULE2,
+            host = "fdm.module2.be",
+            port = 443,
+            path = "/graphql/",
+            useTls = true
         )
     } else storedFdmSettings
     private val fdmGraphqlClient = FdmGraphqlClient()
@@ -343,10 +346,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         api.languageCode = sessionStore.language().code
-        if (BuildConfig.ENABLE_MOCK_FDM) {
-            if (initialFdmSettings != storedFdmSettings) fdmSettingsStore.save(initialFdmSettings)
-            val embeddedStatus = embeddedMockFdmServer.start()
-            _ui.update { it.copy(embeddedMockFdmStatus = embeddedStatus) }
+        if (initialFdmSettings != storedFdmSettings) {
+            fdmSettingsStore.save(initialFdmSettings)
         }
         startFiscalAgentStateMirror()
         viewModelScope.launch { initializeFiscalRuntime() }
@@ -430,27 +431,21 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     fun saveFdmSettings(host: String, portText: String, provider: String) {
         val selectedProvider = when (provider) {
             FiscalFdmSettings.PROVIDER_MODULE2 -> FiscalFdmSettings.PROVIDER_MODULE2
-            FiscalFdmSettings.PROVIDER_MOCK -> if (BuildConfig.ENABLE_MOCK_FDM) FiscalFdmSettings.PROVIDER_MOCK else FiscalFdmSettings.PROVIDER_CHECKBOX
             else -> FiscalFdmSettings.PROVIDER_CHECKBOX
         }
-        val mockSelected = selectedProvider == FiscalFdmSettings.PROVIDER_MOCK
         val module2Selected = selectedProvider == FiscalFdmSettings.PROVIDER_MODULE2
-        val port = if (mockSelected) {
-            EmbeddedMockFdmContract.PORT
+        val port = portText.toIntOrNull()?.coerceIn(1, 65535) ?: 443
+        val normalizedHost = if (module2Selected && host.isBlank()) {
+            "fdm.module2.be"
         } else {
-            portText.toIntOrNull()?.coerceIn(1, 65535) ?: 443
-        }
-        val normalizedHost = when {
-            mockSelected -> EmbeddedMockFdmContract.HOST
-            module2Selected && host.isBlank() -> "fdm.module2.be"
-            else -> host.trim()
+            host.trim()
         }
         val settings = FiscalFdmSettings(
             provider = selectedProvider,
             host = normalizedHost,
             port = port,
-            path = if (module2Selected) "/graphql/" else EmbeddedMockFdmContract.PATH,
-            useTls = !mockSelected
+            path = if (module2Selected) "/graphql/" else "/graphql",
+            useTls = true
         )
         val readiness = fdmRuntime.readiness(settings)
         val previousSettings = _ui.value.fdmSettings
@@ -458,12 +453,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val mustStopAuto = runtimeBeforeSave.autoEnabled &&
             (previousSettings.provider != settings.provider || !readiness.readyForFiscalization)
         if (mustStopAuto) {
-            // Provider changes are a hard runtime boundary. Never let an already-running fiscal
-            // loop continue against a newly selected provider whose sale mapping is not enabled.
             FiscalAgentServiceController.stop(getApplication())
         }
 
-        val embeddedStatus = if (mockSelected) embeddedMockFdmServer.start() else embeddedMockFdmServer.status()
         fdmSettingsStore.save(settings)
         _ui.update {
             it.copy(
@@ -471,8 +463,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 fdmReadiness = readiness,
                 fdmMessage = when {
                     !settings.configured -> null
-                    settings.isMock && embeddedStatus.running -> "mock_embedded_ready"
-                    settings.isMock -> "mock_embedded_failed"
                     settings.isModule2 && !module2CredentialStore.configured() -> "module2_token_required"
                     settings.isModule2 -> "module2_status_ready_for_test"
                     else -> "transport_configured_mapping_gated"
@@ -480,10 +470,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 module2TokenConfigured = module2CredentialStore.configured(),
                 module2Message = null,
                 module2Status = if (module2Selected) it.module2Status else Module2StatusResult(),
-                module2TrainingSale = if (module2Selected) it.module2TrainingSale else Module2TrainingSaleResult(),
                 fdmProviderStatus = if (module2Selected) it.fdmProviderStatus else FiscalProviderStatus(),
-                mockFdmMessage = null,
-                embeddedMockFdmStatus = embeddedStatus,
                 fiscalAgentAutoRunning = if (mustStopAuto) false else it.fiscalAgentAutoRunning,
                 fiscalAgentServiceRunning = if (mustStopAuto) false else it.fiscalAgentServiceRunning,
                 fiscalAgentBusy = if (mustStopAuto) false else it.fiscalAgentBusy,
@@ -781,8 +768,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 val event = fiscalOutboxRepository.latestActivated(identity)
                     ?: error("No activated Cookit fiscal event")
                 if (module2TrainingReceiptStore.isSent(event.localEventId, event.snapshotHash)) {
-                    refreshModule2FinalizedCandidate()
-                    _ui.update {
+                                _ui.update {
                         it.copy(
                             module2TrainingSaleBusy = false,
                             module2Message = "module2_finalized_training_already_sent"
@@ -805,8 +791,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 val refreshedStatus = if (result.success) {
                     runCatchingPreservingCancellation { module2StatusClient.status(settings, bearer) }.getOrNull()
                 } else null
-                refreshModule2FinalizedCandidate()
-                _ui.update { current ->
+                        _ui.update { current ->
                     current.copy(
                         module2TrainingSaleBusy = false,
                         module2TrainingSale = result,
@@ -4801,7 +4786,6 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     it.copy(fiscalLocalDbError = error.message ?: "Lecture de la fiscal outbox impossible")
                 }
             }
-        refreshModule2FinalizedCandidate()
     }
 
     private suspend fun refreshModule2FinalizedCandidate() {

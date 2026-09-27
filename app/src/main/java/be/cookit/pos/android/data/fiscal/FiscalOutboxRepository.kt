@@ -159,14 +159,13 @@ class FiscalOutboxRepository(
     suspend fun recordRetry(
         entity: FiscalOutboxEntity,
         error: String,
-        profileOff: Boolean = false,
         nowEpochMs: Long = System.currentTimeMillis()
     ) {
-        val nextAttempt = nowEpochMs + retryDelayMs(entity.attempts + 1, profileOff)
+        val nextAttempt = nowEpochMs + retryDelayMs(entity.attempts + 1)
         dao.recordAttempt(
             localDbId = entity.localDbId,
             nowEpochMs = nowEpochMs,
-            status = if (profileOff) FiscalOutboxEntity.STATUS_BLOCKED_PROFILE_OFF else FiscalOutboxEntity.STATUS_RETRY,
+            status = FiscalOutboxEntity.STATUS_RETRY,
             nextAttemptAtEpochMs = nextAttempt,
             error = error.take(1000)
         )
@@ -212,7 +211,9 @@ class FiscalOutboxRepository(
         val bookingDate = Instant.ofEpochMilli(nowEpochMs).atZone(ZoneOffset.UTC).toLocalDate().toString()
 
         val snapshot = linkedMapOf<String, Any?>(
-            "schema" to "cookit.android.fiscal.sale.v2",
+            "schema" to "cookit.android.fiscal.intent.v3",
+            "authority" to "cookit_cloud",
+            "payload_role" to "queue_intent_only",
             "local_event_id" to localEventId,
             "runtime_id" to identity.runtimeId,
             "terminal_id" to identity.terminalId,
@@ -234,19 +235,9 @@ class FiscalOutboxRepository(
                 "amount_minor" to amountMinor,
                 "currency" to "EUR"
             ),
-            "lines" to lines.map { line ->
-                linkedMapOf<String, Any?>(
-                    "product_id" to line.productId,
-                    "name" to line.name,
-                    "department_id" to line.departmentId,
-                    "department_name" to line.departmentName,
-                    "quantity" to line.quantity,
-                    "unit_price_minor" to line.unitPriceMinor,
-                    "line_total_minor" to line.lineTotalMinor,
-                    "vat_rate" to line.vatRate,
-                    "vat_label" to line.vatLabel
-                )
-            },
+            // No VAT, priceChanges, departments or fiscal transaction lines are
+            // built on Android anymore. Cloud reloads the authoritative order
+            // and freezes the provider request after settlement.
             "totals" to linkedMapOf(
                 "gross_minor" to amountMinor,
                 "currency" to "EUR"
@@ -277,8 +268,7 @@ class FiscalOutboxRepository(
 
     private fun moneyMinor(amount: Double): Long = (amount * 100.0).roundToLong()
 
-    private fun retryDelayMs(attempt: Int, profileOff: Boolean): Long {
-        if (profileOff) return 15L * 60L * 1000L
+    private fun retryDelayMs(attempt: Int): Long {
         val seconds = when (attempt.coerceAtLeast(1)) {
             1 -> 5L
             2 -> 15L

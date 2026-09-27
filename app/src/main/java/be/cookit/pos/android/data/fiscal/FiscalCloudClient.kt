@@ -2,6 +2,7 @@ package be.cookit.pos.android.data.fiscal
 
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.CookitApiException
+import be.cookit.pos.android.domain.FiscalRuntimeIdentity
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -33,13 +34,16 @@ class FiscalCloudClient {
 
     suspend fun queueOrder(
         token: String,
-        entity: FiscalOutboxEntity
+        entity: FiscalOutboxEntity,
+        identity: FiscalRuntimeIdentity
     ): FiscalCloudQueueResult = withContext(Dispatchers.IO) {
         val body = JSONObject()
             .put("idempotency_key", entity.idempotencyKey)
-            .put("runtime_id", entity.runtimeId)
-            .put("source_terminal_id", entity.terminalId)
+            .put("runtime_id", identity.runtimeId)
+            .put("device_id", identity.deviceId)
+            .put("source_terminal_id", identity.terminalId)
             .put("source_channel", "android_pos")
+            .put("pos_sw_version", BuildConfig.VERSION_NAME)
             .put("local_event_id", entity.localEventId)
             .put("local_snapshot_hash", entity.snapshotHash)
 

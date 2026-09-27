@@ -768,12 +768,15 @@ class FiscalAgentForegroundService : Service() {
     }
 
     private fun normalizedSettings(stored: FiscalFdmSettings): FiscalFdmSettings =
-        if (BuildConfig.ENABLE_MOCK_FDM && stored.isMock) {
+        if (stored.isMock) {
+            // Legacy embedded mock was retired by the authority cutover.
+            // Certification now exercises the real Module2/Pracsys transport.
             stored.copy(
-                host = EmbeddedMockFdmContract.HOST,
-                port = EmbeddedMockFdmContract.PORT,
-                path = EmbeddedMockFdmContract.PATH,
-                useTls = false
+                provider = FiscalFdmSettings.PROVIDER_MODULE2,
+                host = "fdm.module2.be",
+                port = 443,
+                path = "/graphql/",
+                useTls = true
             )
         } else {
             stored
