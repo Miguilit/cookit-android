@@ -715,10 +715,6 @@ class FiscalAgentForegroundService : Service() {
         }
     }
 
-else {
-            stored
-        }
-
     private fun publishIdle(message: String, notification: String) {
         stateStore.setServiceStatus(true, false, message)
         updateNotification(notification)
