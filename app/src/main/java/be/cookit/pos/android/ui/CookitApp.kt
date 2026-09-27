@@ -3252,6 +3252,7 @@ private fun SettingsScreen(
                         Spacer(Modifier.width(6.dp))
                         Text(fiscalUi.openCenter)
                     }
+                }
             }
         }
 
@@ -4473,7 +4474,6 @@ private fun FiscalityScreen(
                             fontSize = 10.sp
                         )
                     }
-                }
                 }
             }
         }
