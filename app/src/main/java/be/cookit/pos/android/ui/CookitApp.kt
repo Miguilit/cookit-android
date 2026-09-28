@@ -2,10 +2,15 @@ package be.cookit.pos.android.ui
 
 import android.app.Activity
 import android.Manifest
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.PowerManager
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -33,6 +38,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallClient
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
@@ -45,6 +56,83 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private tailrec fun Context.findCookitActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findCookitActivity()
+    else -> null
+}
+
+private fun waitForGoogleCodeScannerModule(
+    moduleClient: ModuleInstallClient,
+    scanner: GmsBarcodeScanner,
+    remainingChecks: Int,
+    onReady: () -> Unit,
+    onFailure: (Throwable?) -> Unit
+) {
+    moduleClient.areModulesAvailable(scanner)
+        .addOnSuccessListener { availability ->
+            if (availability.areModulesAvailable()) {
+                onReady()
+            } else if (remainingChecks <= 0) {
+                onFailure(null)
+            } else {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    waitForGoogleCodeScannerModule(
+                        moduleClient = moduleClient,
+                        scanner = scanner,
+                        remainingChecks = remainingChecks - 1,
+                        onReady = onReady,
+                        onFailure = onFailure
+                    )
+                }, 500L)
+            }
+        }
+        .addOnFailureListener { error -> onFailure(error) }
+}
+
+private fun ensureGoogleCodeScannerReady(
+    context: Context,
+    scanner: GmsBarcodeScanner,
+    onPreparing: () -> Unit,
+    onReady: () -> Unit,
+    onFailure: (Throwable?) -> Unit
+) {
+    val moduleClient = ModuleInstall.getClient(context)
+    moduleClient.areModulesAvailable(scanner)
+        .addOnSuccessListener { availability ->
+            if (availability.areModulesAvailable()) {
+                onReady()
+                return@addOnSuccessListener
+            }
+
+            onPreparing()
+            val request = ModuleInstallRequest.newBuilder()
+                .addApi(scanner)
+                .build()
+
+            moduleClient.installModules(request)
+                .addOnSuccessListener { response ->
+                    if (response.areModulesAlreadyInstalled()) {
+                        onReady()
+                    } else {
+                        waitForGoogleCodeScannerModule(
+                            moduleClient = moduleClient,
+                            scanner = scanner,
+                            remainingChecks = 60,
+                            onReady = onReady,
+                            onFailure = onFailure
+                        )
+                    }
+                }
+                .addOnFailureListener { error -> onFailure(error) }
+        }
+        .addOnFailureListener { error ->
+            // Some certified devices can launch the scanner even when ModuleInstall availability fails.
+            Log.w("CookitCustomerQr", "Unable to query Google Code Scanner module", error)
+            onReady()
+        }
+}
 
 private fun roundedCashTotalForUi(amount: Double): Double {
     val cents = kotlin.math.round(amount * 100.0).toInt()
@@ -1955,8 +2043,17 @@ private fun CustomerIdentitySection(
     loyalty: LoyaltySummary?
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
-    val scanner = remember(activity) { activity?.let { GmsBarcodeScanning.getClient(it) } }
+    val activity = remember(context) { context.findCookitActivity() }
+    val scanner = remember(activity) {
+        activity?.let { host ->
+            val options = GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            GmsBarcodeScanning.getClient(host, options)
+        }
+    }
+    var scannerPreparing by remember { mutableStateOf(false) }
     val attached = state.selectedCustomer ?: loyalty?.customer?.let { customer ->
         PosCustomer(
             id = customer.id,
@@ -2029,24 +2126,48 @@ private fun CustomerIdentitySection(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    if (scanner == null) {
-                        vm.reportCustomerScanFailure(t.customerQrInvalid)
+                    val currentScanner = scanner
+                    if (currentScanner == null) {
+                        vm.reportCustomerScanFailure(t.customerQrScannerUnavailable)
                     } else {
-                        scanner.startScan()
-                            .addOnSuccessListener { barcode ->
-                                val raw = barcode.rawValue.orEmpty()
-                                if (raw.isBlank()) vm.reportCustomerScanFailure()
-                                else vm.resolveCustomerQr(raw)
+                        ensureGoogleCodeScannerReady(
+                            context = context,
+                            scanner = currentScanner,
+                            onPreparing = { scannerPreparing = true },
+                            onReady = {
+                                scannerPreparing = false
+                                currentScanner.startScan()
+                                    .addOnSuccessListener { barcode ->
+                                        val raw = barcode.rawValue.orEmpty()
+                                        if (raw.isBlank()) {
+                                            vm.reportCustomerScanFailure(t.customerQrInvalid)
+                                        } else {
+                                            vm.resolveCustomerQr(raw)
+                                        }
+                                    }
+                                    .addOnCanceledListener { scannerPreparing = false }
+                                    .addOnFailureListener { error ->
+                                        scannerPreparing = false
+                                        Log.e("CookitCustomerQr", "Google Code Scanner failed", error)
+                                        vm.reportCustomerScanFailure(t.customerQrScannerUnavailable)
+                                    }
+                            },
+                            onFailure = { error ->
+                                scannerPreparing = false
+                                if (error != null) {
+                                    Log.e("CookitCustomerQr", "Unable to prepare Google Code Scanner", error)
+                                }
+                                vm.reportCustomerScanFailure(t.customerQrScannerUnavailable)
                             }
-                            .addOnFailureListener { vm.reportCustomerScanFailure() }
+                        )
                     }
                 },
-                enabled = !state.customerLookupBusy && !state.commercialBusy,
+                enabled = !state.customerLookupBusy && !state.commercialBusy && !scannerPreparing,
                 modifier = Modifier.weight(1f)
             ) {
                 Icon(Icons.Default.QrCodeScanner, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
-                Text(t.scanCustomerQr, fontWeight = FontWeight.Bold)
+                Text(if (scannerPreparing) t.customerQrScannerPreparing else t.scanCustomerQr, fontWeight = FontWeight.Bold)
             }
             if (attached != null) {
                 OutlinedButton(
