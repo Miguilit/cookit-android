@@ -298,6 +298,21 @@ data class LoyaltySummary(
     val customerRequired: Boolean = false
 )
 
+data class PosCustomer(
+    val id: Long,
+    val name: String,
+    val phone: String = "",
+    val phoneCode: String = "",
+    val email: String = "",
+    val deliveryAddress: String = ""
+)
+
+data class CustomerQrResolution(
+    val contractVersion: String = "",
+    val customer: PosCustomer,
+    val loyalty: LoyaltySummary? = null
+)
+
 data class LoyaltyMutationResult(
     val success: Boolean,
     val operation: String,

@@ -903,11 +903,77 @@ class CookitHttpClient {
         }
     }
 
+    suspend fun customers(token: String, search: String = ""): List<PosCustomer> = withContext(Dispatchers.IO) {
+        val query = search.trim().takeIf { it.length >= 2 }
+        val path = if (query == null) {
+            "pos/customers"
+        } else {
+            "pos/customers?search=${URLEncoder.encode(query, StandardCharsets.UTF_8.toString())}"
+        }
+        val json = request(path, token = token)
+        val array = findArrayDeep(json, setOf("customers", "data")) ?: JSONArray()
+        buildList {
+            for (index in 0 until array.length()) {
+                val row = array.optJSONObject(index) ?: continue
+                parsePosCustomer(row)?.let(::add)
+            }
+        }
+    }
+
+    suspend fun resolveCustomerQr(
+        token: String,
+        payload: String,
+        subtotal: Double? = null
+    ): CustomerQrResolution = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("payload", payload.trim())
+        subtotal?.takeIf { it >= 0.0 }?.let { body.put("subtotal", it) }
+
+        val json = request(
+            "pos/customers/resolve-qr",
+            method = "POST",
+            token = token,
+            body = body
+        )
+        val data = json.optJSONObject("data") ?: json
+        val customer = parsePosCustomer(data.optJSONObject("customer") ?: JSONObject())
+            ?: throw CookitApiException(200, "Customer QR resolved without customer data.")
+
+        CustomerQrResolution(
+            contractVersion = data.optText("contract_version") ?: "",
+            customer = customer,
+            loyalty = data.optJSONObject("loyalty")?.let(::parseLoyaltySummary)
+        )
+    }
+
+    suspend fun customerLoyaltySummary(
+        token: String,
+        customerId: Long,
+        subtotal: Double? = null
+    ): LoyaltySummary = withContext(Dispatchers.IO) {
+        val suffix = subtotal
+            ?.takeIf { it >= 0.0 }
+            ?.let { "?subtotal=${URLEncoder.encode(it.toString(), StandardCharsets.UTF_8.toString())}" }
+            .orEmpty()
+        val json = request("pos/loyalty/customers/$customerId/summary$suffix", token = token)
+        parseLoyaltySummary(json.optJSONObject("data") ?: json)
+    }
+
+    suspend fun updateOrderCustomer(token: String, orderId: Long, customerId: Long?) = withContext(Dispatchers.IO) {
+        request(
+            "pos/orders/$orderId",
+            method = "PUT",
+            token = token,
+            body = JSONObject().put("customer_id", customerId ?: JSONObject.NULL)
+        )
+        Unit
+    }
+
     suspend fun createOrder(
         token: String,
         type: OrderType,
         lines: List<CartLine>,
         tableId: Long? = null,
+        customerId: Long? = null,
         customerName: String? = null,
         customerPhone: String? = null,
         deliveryAddress: String? = null,
@@ -954,6 +1020,8 @@ class CookitHttpClient {
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.let { body.put("client_order_uuid", it) }
+
+        customerId?.takeIf { it > 0L }?.let { body.put("customer_id", it) }
 
         val customer = JSONObject()
         customerName?.trim()?.takeIf { it.isNotEmpty() }?.let { customer.put("name", it) }
@@ -1358,6 +1426,19 @@ class CookitHttpClient {
                     ?: 0.0,
                 grandTotal = grandTotal
             )
+        )
+    }
+
+    private fun parsePosCustomer(obj: JSONObject?): PosCustomer? {
+        obj ?: return null
+        val id = obj.longAny("id", "customer_id") ?: return null
+        return PosCustomer(
+            id = id,
+            name = obj.optText("name", "full_name") ?: "",
+            phone = obj.optText("phone", "phone_number") ?: "",
+            phoneCode = obj.optText("phone_code", "phone_country_code") ?: "",
+            email = obj.optText("email") ?: "",
+            deliveryAddress = obj.optText("delivery_address", "address") ?: ""
         )
     }
 

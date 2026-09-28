@@ -23,6 +23,9 @@
         android:label="Cookit POS"
         android:theme="@style/Theme.CookitAndroid"
         android:usesCleartextTraffic="false">
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
         <service
             android:name=".service.FiscalAgentForegroundService"
             android:exported="false"

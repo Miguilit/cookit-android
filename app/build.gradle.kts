@@ -36,8 +36,8 @@ android {
         applicationId = "be.cookit.pos.android"
         minSdk = 26
         targetSdk = 37
-        versionCode = 77
-        versionName = "0.15.0.42"
+        versionCode = 78
+        versionName = "0.15.0.43"
 
         buildConfigField(
             "String",
@@ -94,6 +94,9 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+
+    // Customer identity: Google Code Scanner UI (QR) without direct camera permission handling.
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     // CookitPad parity: native Star Micronics provider.
     implementation("com.starmicronics:stario10:1.13.0")

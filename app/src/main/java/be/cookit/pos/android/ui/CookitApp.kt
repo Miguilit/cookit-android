@@ -1,5 +1,6 @@
 package be.cookit.pos.android.ui
 
+import android.app.Activity
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
@@ -32,6 +33,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import be.cookit.pos.android.BuildConfig
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeStateStore
@@ -1946,6 +1948,203 @@ private fun SummaryLine(label: String, amount: Double, muted: Boolean = false) {
 }
 
 @Composable
+private fun CustomerIdentitySection(
+    state: PosUiState,
+    vm: CookitPosViewModel,
+    t: UiStrings,
+    loyalty: LoyaltySummary?
+) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val scanner = remember(activity) { activity?.let { GmsBarcodeScanning.getClient(it) } }
+    val attached = state.selectedCustomer ?: loyalty?.customer?.let { customer ->
+        PosCustomer(
+            id = customer.id,
+            name = customer.name,
+            phone = customer.phone
+        )
+    }
+    val errorText = state.customerLookupError?.let { raw ->
+        when (raw) {
+            "session_expired" -> t.sessionExpired
+            "customer_search_min" -> t.customerSearchMin
+            "customer_not_found" -> t.noCustomersFound
+            "customer_qr_invalid" -> t.customerQrInvalid
+            "customer_locked_by_loyalty" -> t.customerLockedByLoyalty
+            else -> raw
+        }
+    }
+
+    CommercialSection(title = t.customerBenefits) {
+        if (attached != null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = CookitSoftGreen,
+                border = BorderStroke(1.dp, CookitGreen.copy(alpha = 0.22f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(shape = RoundedCornerShape(12.dp), color = Color.White) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            tint = CookitGreen,
+                            modifier = Modifier.padding(9.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            attached.name.ifBlank { "#${attached.id}" },
+                            fontWeight = FontWeight.Black,
+                            color = CookitInk
+                        )
+                        attached.phone.takeIf { it.isNotBlank() }?.let {
+                            Text(it, color = CookitMuted, fontSize = 12.sp)
+                        }
+                        attached.email.takeIf { it.isNotBlank() }?.let {
+                            Text(it, color = CookitMuted, fontSize = 12.sp)
+                        }
+                    }
+                    loyalty?.points?.takeIf { it.enabled }?.let { points ->
+                        Surface(shape = RoundedCornerShape(10.dp), color = Color.White) {
+                            Text(
+                                "${points.availablePoints} pts",
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                color = CookitGreen,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            Text(t.scanCustomerQrHelp, color = CookitMuted, fontSize = 13.sp)
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    if (scanner == null) {
+                        vm.reportCustomerScanFailure(t.customerQrInvalid)
+                    } else {
+                        scanner.startScan()
+                            .addOnSuccessListener { barcode ->
+                                val raw = barcode.rawValue.orEmpty()
+                                if (raw.isBlank()) vm.reportCustomerScanFailure()
+                                else vm.resolveCustomerQr(raw)
+                            }
+                            .addOnFailureListener { vm.reportCustomerScanFailure() }
+                    }
+                },
+                enabled = !state.customerLookupBusy && !state.commercialBusy,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text(t.scanCustomerQr, fontWeight = FontWeight.Bold)
+            }
+            if (attached != null) {
+                OutlinedButton(
+                    onClick = vm::clearSelectedCustomer,
+                    enabled = !state.customerLookupBusy && !state.commercialBusy,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.PersonOff, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(t.removeCustomer, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = state.customerSearchQuery,
+            onValueChange = vm::updateCustomerSearchQuery,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(t.searchCustomer) },
+            placeholder = { Text(t.searchCustomerHint) },
+            singleLine = true,
+            enabled = !state.customerLookupBusy && !state.commercialBusy,
+            trailingIcon = {
+                IconButton(
+                    onClick = vm::searchCustomers,
+                    enabled = !state.customerLookupBusy && state.customerSearchQuery.trim().length >= 2
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = t.searchCustomer)
+                }
+            }
+        )
+
+        if (state.customerLookupBusy) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+
+        errorText?.let { message ->
+            Text(
+                message,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        state.customerSearchResults.forEach { customer ->
+            Surface(
+                onClick = { vm.selectCustomer(customer) },
+                enabled = !state.customerLookupBusy && !state.commercialBusy,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = CookitCanvas,
+                border = BorderStroke(1.dp, CookitLine)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.PersonSearch, contentDescription = null, tint = CookitOrange)
+                    Spacer(Modifier.width(9.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(customer.name.ifBlank { "#${customer.id}" }, fontWeight = FontWeight.Bold)
+                        val secondary = listOf(customer.phone, customer.email)
+                            .filter { it.isNotBlank() }
+                            .joinToString(" • ")
+                        if (secondary.isNotBlank()) {
+                            Text(secondary, color = CookitMuted, fontSize = 12.sp)
+                        }
+                    }
+                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = CookitMuted)
+                }
+            }
+        }
+
+        if (attached == null) {
+            HorizontalDivider(color = CookitLine)
+            Text(t.customerBenefitsHint, color = CookitMuted, fontSize = 12.sp)
+            OutlinedTextField(
+                value = state.deliveryCustomerName,
+                onValueChange = vm::updateDeliveryCustomerName,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(t.customerName) },
+                singleLine = true,
+                enabled = !state.commercialBusy
+            )
+            OutlinedTextField(
+                value = state.deliveryCustomerPhone,
+                onValueChange = vm::updateDeliveryCustomerPhone,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(t.customerPhone) },
+                singleLine = true,
+                enabled = !state.commercialBusy
+            )
+        }
+    }
+}
+
+@Composable
 private fun CommercialToolsDialog(
     state: PosUiState,
     vm: CookitPosViewModel,
@@ -1955,6 +2154,7 @@ private fun CommercialToolsDialog(
     val capabilities = state.certificationCapabilities
     val commercial = state.commercialSnapshot
     val loyalty = state.loyaltySummary
+    val customer = loyalty?.customer
 
     var discountType by remember(state.commercialSheetOpen, commercial?.discount?.type) {
         mutableStateOf(commercial?.discount?.type?.takeIf { it == "fixed" || it == "percent" } ?: "fixed")
@@ -2093,27 +2293,9 @@ private fun CommercialToolsDialog(
                         }
                     }
 
-                    if (!hasRemoteOrder) {
-                        CommercialSection(title = t.customerBenefits) {
-                            Text(t.customerBenefitsHint, color = CookitMuted, fontSize = 13.sp)
-                            OutlinedTextField(
-                                value = state.deliveryCustomerName,
-                                onValueChange = vm::updateDeliveryCustomerName,
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text(t.customerName) },
-                                singleLine = true,
-                                enabled = !state.commercialBusy
-                            )
-                            OutlinedTextField(
-                                value = state.deliveryCustomerPhone,
-                                onValueChange = vm::updateDeliveryCustomerPhone,
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text(t.customerPhone) },
-                                singleLine = true,
-                                enabled = !state.commercialBusy
-                            )
-                        }
+                    CustomerIdentitySection(state = state, vm = vm, t = t, loyalty = loyalty)
 
+                    if (!hasRemoteOrder) {
                         CommercialSection(title = t.prepareOrder) {
                             Text(t.prepareOrderHelp, color = CookitMuted, fontSize = 13.sp)
                             Button(
@@ -2132,31 +2314,6 @@ private fun CommercialToolsDialog(
                             }
                         }
                     } else {
-                        val customer = loyalty?.customer
-                        val customerDisplayName = customer?.name?.takeIf { it.isNotBlank() }
-                            ?: state.deliveryCustomerName.takeIf { it.isNotBlank() }
-                        val customerDisplayPhone = customer?.phone?.takeIf { it.isNotBlank() }
-                            ?: state.deliveryCustomerPhone.takeIf { it.isNotBlank() }
-                        CommercialSection(title = t.customerBenefits) {
-                            if (customerDisplayName != null || customerDisplayPhone != null) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Person, null, tint = CookitOrange)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(customerDisplayName ?: customer?.let { "#${it.id}" }.orEmpty(), fontWeight = FontWeight.Black)
-                                        customerDisplayPhone?.let { Text(it, color = CookitMuted, fontSize = 12.sp) }
-                                    }
-                                    TextButton(onClick = vm::refreshCommercialTools, enabled = !state.commercialBusy) {
-                                        Icon(Icons.Default.Refresh, null)
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(t.refreshBenefits)
-                                    }
-                                }
-                            } else {
-                                Text(t.customerRequired, color = CookitMuted, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-
                         if (capabilities.manualDiscount) {
                             CommercialSection(title = t.manualDiscount) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

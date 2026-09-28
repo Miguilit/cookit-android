@@ -118,6 +118,11 @@ data class PosUiState(
     val commercialMessage: String? = null,
     val commercialSnapshot: CommercialSnapshot? = null,
     val loyaltySummary: LoyaltySummary? = null,
+    val selectedCustomer: PosCustomer? = null,
+    val customerSearchQuery: String = "",
+    val customerSearchResults: List<PosCustomer> = emptyList(),
+    val customerLookupBusy: Boolean = false,
+    val customerLookupError: String? = null,
     val kots: List<KotTicket> = emptyList(),
     val dashboard: be.cookit.pos.android.domain.DashboardSnapshot? = null,
     val deliveryExecutives: List<be.cookit.pos.android.domain.DeliveryExecutive> = emptyList(),
@@ -1871,6 +1876,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                             _ui.value.draftOrderType,
                             _ui.value.draftCart,
                             _ui.value.draftTableId,
+                            customerId = _ui.value.selectedCustomer?.id,
                             customerName = _ui.value.deliveryCustomerName.takeIf { it.isNotBlank() },
                             customerPhone = _ui.value.deliveryCustomerPhone.takeIf { it.isNotBlank() },
                             deliveryAddress = _ui.value.deliveryAddress.takeIf { it.isNotBlank() },
@@ -1988,6 +1994,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     commercialMessage = null,
                     commercialSnapshot = null,
                     loyaltySummary = null,
+                    selectedCustomer = null,
+                    customerSearchQuery = "",
+                    customerSearchResults = emptyList(),
+                    customerLookupBusy = false,
+                    customerLookupError = null,
                     checkoutMessage = "sent_to_kitchen"
                 )
             }
@@ -2003,6 +2014,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     _ui.value.draftOrderType,
                     _ui.value.draftCart,
                     _ui.value.draftTableId,
+                    customerId = _ui.value.selectedCustomer?.id,
                     customerName = _ui.value.deliveryCustomerName.takeIf { it.isNotBlank() },
                     customerPhone = _ui.value.deliveryCustomerPhone.takeIf { it.isNotBlank() },
                     deliveryAddress = _ui.value.deliveryAddress.takeIf { it.isNotBlank() },
@@ -2037,6 +2049,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         commercialMessage = null,
                         commercialSnapshot = null,
                         loyaltySummary = null,
+                        selectedCustomer = null,
+                        customerSearchQuery = "",
+                        customerSearchResults = emptyList(),
+                        customerLookupBusy = false,
+                        customerLookupError = null,
                         orders = freshOrders,
                         kots = freshKots,
                         online = true
@@ -2138,6 +2155,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 openedOrderCode = code ?: it.openedOrderCode ?: "#${remote.orderId}",
                 commercialSnapshot = remote.commercial,
                 loyaltySummary = loyalty,
+                selectedCustomer = remote.customerId?.let { customerId ->
+                    PosCustomer(
+                        id = customerId,
+                        name = remote.customerName ?: loyalty?.customer?.name.orEmpty(),
+                        phone = remote.customerPhone ?: loyalty?.customer?.phone.orEmpty()
+                    )
+                },
                 deliveryCustomerName = remote.customerName ?: it.deliveryCustomerName,
                 deliveryCustomerPhone = remote.customerPhone ?: it.deliveryCustomerPhone,
                 commercialError = null
@@ -2187,6 +2211,13 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         checkoutMessage = null,
                         commercialSnapshot = remote.commercial,
                         loyaltySummary = loyalty,
+                        selectedCustomer = remote.customerId?.let { customerId ->
+                            PosCustomer(
+                                id = customerId,
+                                name = remote.customerName ?: loyalty?.customer?.name.orEmpty(),
+                                phone = remote.customerPhone ?: loyalty?.customer?.phone.orEmpty()
+                            )
+                        },
                         commercialError = null,
                         commercialMessage = null,
                         deliveryCustomerName = remote.customerName ?: it.deliveryCustomerName,
@@ -2249,6 +2280,203 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun updateCustomerSearchQuery(value: String) {
+        _ui.update {
+            it.copy(
+                customerSearchQuery = value.take(120),
+                customerSearchResults = emptyList(),
+                customerLookupError = null
+            )
+        }
+    }
+
+    fun searchCustomers() {
+        val currentToken = token ?: run {
+            _ui.update { it.copy(customerLookupError = "session_expired") }
+            return
+        }
+        val query = _ui.value.customerSearchQuery.trim()
+        if (query.length < 2) {
+            _ui.update { it.copy(customerLookupError = "customer_search_min") }
+            return
+        }
+
+        _ui.update { it.copy(customerLookupBusy = true, customerLookupError = null) }
+        viewModelScope.launch {
+            runCatching { api.customers(currentToken, query) }
+                .onSuccess { customers ->
+                    _ui.update {
+                        it.copy(
+                            customerLookupBusy = false,
+                            customerSearchResults = customers,
+                            customerLookupError = if (customers.isEmpty()) "customer_not_found" else null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update {
+                        it.copy(
+                            customerLookupBusy = false,
+                            customerLookupError = readableError(error)
+                        )
+                    }
+                }
+        }
+    }
+
+    fun resolveCustomerQr(payload: String) {
+        val currentToken = token ?: run {
+            _ui.update { it.copy(customerLookupError = "session_expired") }
+            return
+        }
+        if (payload.isBlank()) {
+            _ui.update { it.copy(customerLookupError = "customer_qr_invalid") }
+            return
+        }
+        if (customerChangeLocked()) {
+            _ui.update { it.copy(customerLookupError = "customer_locked_by_loyalty") }
+            return
+        }
+
+        _ui.update { it.copy(customerLookupBusy = true, customerLookupError = null) }
+        viewModelScope.launch {
+            runCatching { api.resolveCustomerQr(currentToken, payload) }
+                .onSuccess { resolved -> attachCustomer(resolved.customer, resolved.loyalty) }
+                .onFailure { error ->
+                    _ui.update {
+                        it.copy(
+                            customerLookupBusy = false,
+                            customerLookupError = if (error is CookitApiException && error.statusCode == 422) {
+                                "customer_qr_invalid"
+                            } else {
+                                readableError(error)
+                            }
+                        )
+                    }
+                }
+        }
+    }
+
+    fun reportCustomerScanFailure(message: String? = null) {
+        _ui.update {
+            it.copy(
+                customerLookupBusy = false,
+                customerLookupError = message?.takeIf { value -> value.isNotBlank() } ?: "customer_qr_invalid"
+            )
+        }
+    }
+
+    fun selectCustomer(customer: PosCustomer) {
+        if (customerChangeLocked()) {
+            _ui.update { it.copy(customerLookupError = "customer_locked_by_loyalty") }
+            return
+        }
+        attachCustomer(customer, null)
+    }
+
+    fun clearSelectedCustomer() {
+        if (customerChangeLocked()) {
+            _ui.update { it.copy(customerLookupError = "customer_locked_by_loyalty") }
+            return
+        }
+        val currentToken = token
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId
+        if (currentToken == null || orderId == null) {
+            _ui.update {
+                it.copy(
+                    selectedCustomer = null,
+                    loyaltySummary = null,
+                    customerSearchQuery = "",
+                    customerSearchResults = emptyList(),
+                    customerLookupBusy = false,
+                    customerLookupError = null,
+                    deliveryCustomerName = "",
+                    deliveryCustomerPhone = ""
+                )
+            }
+            return
+        }
+
+        _ui.update { it.copy(customerLookupBusy = true, customerLookupError = null) }
+        viewModelScope.launch {
+            runCatching {
+                api.updateOrderCustomer(currentToken, orderId, null)
+                refreshCommercialOrderState(currentToken, orderId)
+            }.onSuccess {
+                _ui.update {
+                    it.copy(
+                        customerLookupBusy = false,
+                        selectedCustomer = null,
+                        customerSearchResults = emptyList(),
+                        customerSearchQuery = "",
+                        customerLookupError = null,
+                        deliveryCustomerName = "",
+                        deliveryCustomerPhone = ""
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        customerLookupBusy = false,
+                        customerLookupError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
+    private fun attachCustomer(customer: PosCustomer, preloadedLoyalty: LoyaltySummary?) {
+        val currentToken = token ?: run {
+            _ui.update { it.copy(customerLookupBusy = false, customerLookupError = "session_expired") }
+            return
+        }
+        val orderId = _ui.value.resumedRemoteOrderId ?: _ui.value.pendingRemoteOrderId
+
+        _ui.update { it.copy(customerLookupBusy = true, customerLookupError = null) }
+        viewModelScope.launch {
+            runCatching {
+                if (orderId != null) {
+                    api.updateOrderCustomer(currentToken, orderId, customer.id)
+                    refreshCommercialOrderState(currentToken, orderId)
+                    null
+                } else {
+                    preloadedLoyalty ?: runCatchingPreservingCancellation {
+                        api.customerLoyaltySummary(currentToken, customer.id)
+                    }.getOrNull()
+                }
+            }.onSuccess { draftLoyalty ->
+                _ui.update { state ->
+                    state.copy(
+                        customerLookupBusy = false,
+                        selectedCustomer = customer,
+                        loyaltySummary = if (orderId == null) draftLoyalty else state.loyaltySummary,
+                        customerSearchResults = emptyList(),
+                        customerSearchQuery = "",
+                        customerLookupError = null,
+                        deliveryCustomerName = customer.name.takeIf { it.isNotBlank() } ?: state.deliveryCustomerName,
+                        deliveryCustomerPhone = customer.phone.takeIf { it.isNotBlank() } ?: state.deliveryCustomerPhone,
+                        deliveryAddress = customer.deliveryAddress.takeIf { it.isNotBlank() } ?: state.deliveryAddress
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        customerLookupBusy = false,
+                        customerLookupError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
+    private fun customerChangeLocked(): Boolean {
+        val order = _ui.value.loyaltySummary?.order ?: return false
+        return order.loyaltyPointsRedeemed > 0 ||
+            order.loyaltyDiscountAmount > 0.0001 ||
+            order.stampDiscountAmount > 0.0001 ||
+            order.freeStampItemCount > 0
+    }
+
     fun prepareCommercialDraft() {
         val state = _ui.value
         if (state.demoMode || state.draftCart.isEmpty()) return
@@ -2276,6 +2504,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val intentKey = buildString {
             append(state.draftOrderType.name)
             append('|').append(state.draftTableId ?: 0L)
+            append('|customer:').append(state.selectedCustomer?.id ?: 0L)
             append('|').append(state.deliveryCustomerName.trim())
             append('|').append(state.deliveryCustomerPhone.trim())
             append('|').append(state.deliveryAddress.trim())
@@ -2304,6 +2533,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     type = _ui.value.draftOrderType,
                     lines = _ui.value.draftCart,
                     tableId = _ui.value.draftTableId,
+                    customerId = _ui.value.selectedCustomer?.id,
                     customerName = _ui.value.deliveryCustomerName.takeIf { it.isNotBlank() },
                     customerPhone = _ui.value.deliveryCustomerPhone.takeIf { it.isNotBlank() },
                     deliveryAddress = _ui.value.deliveryAddress.takeIf { it.isNotBlank() },
@@ -2790,6 +3020,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 commercialMessage = null,
                 commercialSnapshot = null,
                 loyaltySummary = null,
+                    selectedCustomer = null,
+                    customerSearchQuery = "",
+                    customerSearchResults = emptyList(),
+                    customerLookupBusy = false,
+                    customerLookupError = null,
                 deliveryCustomerName = "",
                 deliveryCustomerPhone = "",
                 deliveryAddress = "",
@@ -2842,6 +3077,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 commercialMessage = null,
                 commercialSnapshot = null,
                 loyaltySummary = null,
+                    selectedCustomer = null,
+                    customerSearchQuery = "",
+                    customerSearchResults = emptyList(),
+                    customerLookupBusy = false,
+                    customerLookupError = null,
                 orders = if (freshOrders.isEmpty()) it.orders else freshOrders,
                 kots = freshKots,
                 lastCashChange = cashChange,
