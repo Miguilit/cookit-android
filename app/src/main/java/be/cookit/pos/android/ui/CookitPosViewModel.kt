@@ -2504,7 +2504,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val intentKey = buildString {
             append(state.draftOrderType.name)
             append('|').append(state.draftTableId ?: 0L)
-            append('|customer:').append(state.selectedCustomer?.id ?: 0L)
+            append("|customer:").append(state.selectedCustomer?.id ?: 0L)
             append('|').append(state.deliveryCustomerName.trim())
             append('|').append(state.deliveryCustomerPhone.trim())
             append('|').append(state.deliveryAddress.trim())
