@@ -224,6 +224,22 @@ class CookitHttpClient {
                 )
             }
 
+        val canUpdateOrders =
+            cloudPermissions.any { permission ->
+                permission.equals(
+                    "Update Order",
+                    ignoreCase = true
+                )
+            }
+
+        val canRefundPayments =
+            cloudPermissions.any { permission ->
+                permission.equals(
+                    "Refund Payments",
+                    ignoreCase = true
+                )
+            }
+
         PlatformSnapshot(
             user = UserSession(
                 id = userObj?.optLong("id", 0L) ?: 0L,
@@ -240,7 +256,11 @@ class CookitHttpClient {
                     canApproveCashRegister =
                         canApproveCashRegister,
                     canViewCashRegisterReports =
-                        canViewCashRegisterReports
+                        canViewCashRegisterReports,
+                    canUpdateOrders =
+                        canUpdateOrders,
+                    canRefundPayments =
+                        canRefundPayments
                 ),
             certificationCapabilities = certificationCapabilities
         )
@@ -1228,6 +1248,49 @@ class CookitHttpClient {
                 body = JSONObject().put("payments", payments)
             )
         }
+        Unit
+    }
+
+    suspend fun orderCancelReasons(token: String): List<be.cookit.pos.android.domain.OrderCancelReason> = withContext(Dispatchers.IO) {
+        val json = request("pos/kot-cancel-reasons", token = token)
+        val array = json.optJSONArray("data") ?: JSONArray()
+
+        buildList {
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val id = obj.longAny("id") ?: continue
+                val reason = obj.optText("reason")?.trim().orEmpty()
+                if (reason.isBlank()) continue
+                add(
+                    be.cookit.pos.android.domain.OrderCancelReason(
+                        id = id,
+                        reason = reason,
+                        cancelOrder = obj.optBoolean("cancel_order", false),
+                        cancelKot = obj.optBoolean("cancel_kot", false)
+                    )
+                )
+            }
+        }
+    }
+
+    suspend fun cancelOrder(
+        token: String,
+        orderId: Long,
+        cancelReasonId: Long?,
+        cancelReasonText: String?
+    ) = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+        cancelReasonId?.let { body.put("cancel_reason_id", it) }
+        cancelReasonText?.trim()?.takeIf { it.isNotBlank() }?.let {
+            body.put("cancel_reason_text", it)
+        }
+
+        request(
+            "pos/orders/$orderId/cancel",
+            method = "POST",
+            token = token,
+            body = body
+        )
         Unit
     }
 

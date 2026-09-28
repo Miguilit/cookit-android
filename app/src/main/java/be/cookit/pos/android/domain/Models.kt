@@ -128,6 +128,13 @@ data class PosOrder(
     val deliveryExecutiveId: Long? = null
 )
 
+data class OrderCancelReason(
+    val id: Long,
+    val reason: String,
+    val cancelOrder: Boolean,
+    val cancelKot: Boolean
+)
+
 data class DashboardSalesPoint(
     val date: String,
     val total: Double
@@ -569,5 +576,7 @@ data class NativePolicy(
     val canViewKds: Boolean,
     val canViewDelivery: Boolean,
     val canApproveCashRegister: Boolean = false,
-    val canViewCashRegisterReports: Boolean = false
+    val canViewCashRegisterReports: Boolean = false,
+    val canUpdateOrders: Boolean = false,
+    val canRefundPayments: Boolean = false
 )

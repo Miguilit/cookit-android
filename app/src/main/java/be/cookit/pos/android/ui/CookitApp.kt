@@ -267,6 +267,17 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
             ) { ScreenContent(screen, state, vm, t, onNavigate = { screen = it }) }
         }
     }
+
+    if (state.orderCancelDialogOpen) {
+        OrderCancelDialog(
+            state = state,
+            t = t,
+            onSelectReason = vm::selectOrderCancelReason,
+            onReasonTextChange = vm::setOrderCancelReasonText,
+            onConfirm = vm::confirmOrderCancel,
+            onDismiss = vm::closeOrderCancel
+        )
+    }
 }
 
 @Composable
@@ -570,7 +581,13 @@ private fun ScreenContent(
             inboundOrders = state.orders.filter { it.unread },
             onReadInbound = vm::markInboundRead
         )
-        Screen.ORDERS -> OrdersScreen(state, vm::openOrderForPos, vm::createKotForOrder, t)
+        Screen.ORDERS -> OrdersScreen(
+            state = state,
+            onOpen = vm::openOrderForPos,
+            onCreateKot = vm::createKotForOrder,
+            onCancelOrder = vm::openOrderCancel,
+            t = t
+        )
         Screen.CASH -> CashScreen(state, vm, t)
         Screen.DASHBOARD -> DashboardScreen(state, vm, t)
         Screen.KDS -> KdsScreen(state, t, vm::advanceKitchenTicket)
@@ -2871,6 +2888,7 @@ private fun OrdersScreen(
     state: PosUiState,
     onOpen: (PosOrder) -> Unit,
     onCreateKot: (PosOrder) -> Unit,
+    onCancelOrder: (PosOrder) -> Unit,
     t: UiStrings
 ) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
@@ -2881,7 +2899,12 @@ private fun OrdersScreen(
             Spacer(Modifier.height(8.dp))
             Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
                 Text(
-                    if (error == "kot_create_failed") t.kotCreateFailed else error,
+                    when (error) {
+                        "kot_create_failed" -> t.kotCreateFailed
+                        "permission_denied" -> t.cancelOrderFailed
+                        "cancel_not_allowed" -> t.cancelOrderHelp
+                        else -> error
+                    },
                     Modifier.padding(10.dp),
                     color = MaterialTheme.colorScheme.onErrorContainer
                 )
@@ -2896,6 +2919,10 @@ private fun OrdersScreen(
                 val cancelled = settlement in setOf("cancelled", "canceled") || order.remoteStatus.lowercase(Locale.ROOT) in setOf("cancelled", "canceled")
                 val hasKot = state.kots.any { it.orderId == order.id }
                 val kotBusy = order.id in state.orderKotBusyIds
+                val operational = order.remoteStatus.lowercase(Locale.ROOT)
+                val canCancel = state.policy.canUpdateOrders &&
+                    !paid && !cancelled &&
+                    operational in setOf("placed", "draft")
 
                 Card(
                     modifier = Modifier
@@ -2932,15 +2959,30 @@ private fun OrdersScreen(
                                 color = CookitMuted,
                                 fontSize = 12.sp
                             )
-                            if (!cancelled && !hasKot) {
+                            if ((!cancelled && !hasKot) || canCancel) {
                                 Spacer(Modifier.height(8.dp))
-                                OutlinedButton(
-                                    onClick = { onCreateKot(order) },
-                                    enabled = !kotBusy,
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    if (kotBusy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    else Text(t.createKot, fontWeight = FontWeight.Bold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (!cancelled && !hasKot) {
+                                        OutlinedButton(
+                                            onClick = { onCreateKot(order) },
+                                            enabled = !kotBusy,
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            if (kotBusy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                            else Text(t.createKot, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    if (canCancel) {
+                                        OutlinedButton(
+                                            onClick = { onCancelOrder(order) },
+                                            enabled = !state.orderCancelBusy,
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Default.Cancel, null)
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(t.cancelOrder, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2979,6 +3021,103 @@ private fun OrdersScreen(
     }
 }
 
+
+@Composable
+private fun OrderCancelDialog(
+    state: PosUiState,
+    t: UiStrings,
+    onSelectReason: (Long?) -> Unit,
+    onReasonTextChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val target = state.orderCancelTarget ?: return
+    val hasReason = state.orderCancelReasonId != null || state.orderCancelReasonText.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = { if (!state.orderCancelBusy) onDismiss() },
+        icon = { Icon(Icons.Default.Cancel, contentDescription = null) },
+        title = { Text(t.cancelOrder, fontWeight = FontWeight.Black) },
+        text = {
+            Column(
+                modifier = Modifier.widthIn(min = 360.dp, max = 620.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(target.code, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                Text(t.cancelOrderHelp, color = CookitMuted, fontSize = 13.sp)
+
+                if (state.orderCancelBusy && state.orderCancelReasons.isEmpty()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(t.refresh, color = CookitMuted)
+                    }
+                } else {
+                    Text(t.cancelReason, fontWeight = FontWeight.Bold)
+                    state.orderCancelReasons.forEach { reason ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !state.orderCancelBusy) { onSelectReason(reason.id) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = state.orderCancelReasonId == reason.id,
+                                onClick = { onSelectReason(reason.id) },
+                                enabled = !state.orderCancelBusy
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(reason.reason)
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = state.orderCancelReasonText,
+                    onValueChange = onReasonTextChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.orderCancelBusy,
+                    label = { Text(t.otherCancelReason) },
+                    minLines = 2,
+                    maxLines = 4
+                )
+
+                state.orderCancelError?.let { error ->
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Text(
+                            if (error == "cancel_reason_required") t.cancelReasonRequired else error.ifBlank { t.cancelOrderFailed },
+                            Modifier.fillMaxWidth().padding(10.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                enabled = hasReason && !state.orderCancelBusy,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                if (state.orderCancelBusy) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(t.confirmCancelOrder, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !state.orderCancelBusy) {
+                Text(t.close)
+            }
+        }
+    )
+}
 
 private fun relativeAge(minutes: Int): String = when {
     minutes < 1 -> "à l'instant"

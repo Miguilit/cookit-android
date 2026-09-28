@@ -168,7 +168,14 @@ data class UiStrings(
     val pointsApplied: String,
     val pointsRemoved: String,
     val rewardApplied: String,
-    val sessionExpired: String
+    val sessionExpired: String,
+    val cancelOrder: String,
+    val cancelOrderHelp: String,
+    val cancelReason: String,
+    val otherCancelReason: String,
+    val confirmCancelOrder: String,
+    val cancelReasonRequired: String,
+    val cancelOrderFailed: String
 )
 
 fun strings(language: AppLanguage): UiStrings = when (language) {
@@ -226,7 +233,10 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Fidélité indisponible pour cette commande.", refreshBenefits="Actualiser les avantages", close="Fermer",
         orderPrepared="Commande préparée sur Cookit.", discountApplied="Remise appliquée.", discountCleared="Remise supprimée.", lineDiscountApplied="Remise article appliquée.", lineDiscountCleared="Remise article supprimée.", tipApplied="Pourboire mis à jour.",
         pointsApplied="Points appliqués.", pointsRemoved="Points restaurés.", rewardApplied="Récompense appliquée.",
-        sessionExpired="Session Cookit expirée. Reconnectez-vous."
+        sessionExpired="Session Cookit expirée. Reconnectez-vous.",
+        cancelOrder="Annuler la commande", cancelOrderHelp="Disponible uniquement avant paiement. Un motif est obligatoire.",
+        cancelReason="Motif d’annulation", otherCancelReason="Autre motif", confirmCancelOrder="Confirmer l’annulation",
+        cancelReasonRequired="Choisissez un motif ou saisissez une explication.", cancelOrderFailed="Impossible d’annuler la commande."
     )
     AppLanguage.NL -> UiStrings(
         home="Start", pos="POS", orders="Bestellingen", kitchen="Keuken", delivery="Levering",
@@ -282,7 +292,10 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Loyaliteit is niet beschikbaar voor deze bestelling.", refreshBenefits="Voordelen vernieuwen", close="Sluiten",
         orderPrepared="Bestelling voorbereid in Cookit.", discountApplied="Korting toegepast.", discountCleared="Korting verwijderd.", lineDiscountApplied="Artikelkorting toegepast.", lineDiscountCleared="Artikelkorting verwijderd.", tipApplied="Fooi bijgewerkt.",
         pointsApplied="Punten toegepast.", pointsRemoved="Punten hersteld.", rewardApplied="Beloning toegepast.",
-        sessionExpired="De Cookit-sessie is verlopen. Meld u opnieuw aan."
+        sessionExpired="De Cookit-sessie is verlopen. Meld u opnieuw aan.",
+        cancelOrder="Bestelling annuleren", cancelOrderHelp="Alleen beschikbaar vóór betaling. Een reden is verplicht.",
+        cancelReason="Reden van annulering", otherCancelReason="Andere reden", confirmCancelOrder="Annulering bevestigen",
+        cancelReasonRequired="Kies een reden of voer een toelichting in.", cancelOrderFailed="Bestelling annuleren mislukt."
     )
     AppLanguage.EN -> UiStrings(
         home="Home", pos="POS", orders="Orders", kitchen="Kitchen", delivery="Delivery",
@@ -338,7 +351,10 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Loyalty is unavailable for this order.", refreshBenefits="Refresh benefits", close="Close",
         orderPrepared="Order prepared in Cookit.", discountApplied="Discount applied.", discountCleared="Discount removed.", lineDiscountApplied="Line discount applied.", lineDiscountCleared="Line discount removed.", tipApplied="Tip updated.",
         pointsApplied="Points applied.", pointsRemoved="Points restored.", rewardApplied="Reward applied.",
-        sessionExpired="Your Cookit session has expired. Sign in again."
+        sessionExpired="Your Cookit session has expired. Sign in again.",
+        cancelOrder="Cancel order", cancelOrderHelp="Available only before payment. A reason is required.",
+        cancelReason="Cancellation reason", otherCancelReason="Other reason", confirmCancelOrder="Confirm cancellation",
+        cancelReasonRequired="Choose a reason or enter an explanation.", cancelOrderFailed="Unable to cancel order."
     )
     AppLanguage.DE -> UiStrings(
         home="Start", pos="POS", orders="Bestellungen", kitchen="Küche", delivery="Lieferung",
@@ -394,7 +410,10 @@ fun strings(language: AppLanguage): UiStrings = when (language) {
         loyaltyUnavailable="Treuevorteile sind für diese Bestellung nicht verfügbar.", refreshBenefits="Vorteile aktualisieren", close="Schließen",
         orderPrepared="Bestellung in Cookit vorbereitet.", discountApplied="Rabatt angewendet.", discountCleared="Rabatt entfernt.", lineDiscountApplied="Positionsrabatt angewendet.", lineDiscountCleared="Positionsrabatt entfernt.", tipApplied="Trinkgeld aktualisiert.",
         pointsApplied="Punkte angewendet.", pointsRemoved="Punkte wiederhergestellt.", rewardApplied="Belohnung angewendet.",
-        sessionExpired="Die Cookit-Sitzung ist abgelaufen. Bitte melden Sie sich erneut an."
+        sessionExpired="Die Cookit-Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+        cancelOrder="Bestellung stornieren", cancelOrderHelp="Nur vor der Zahlung verfügbar. Ein Grund ist erforderlich.",
+        cancelReason="Stornierungsgrund", otherCancelReason="Anderer Grund", confirmCancelOrder="Stornierung bestätigen",
+        cancelReasonRequired="Wählen Sie einen Grund oder geben Sie eine Erklärung ein.", cancelOrderFailed="Bestellung konnte nicht storniert werden."
     )
 }
 

@@ -105,6 +105,13 @@ data class PosUiState(
     val openedOrderCode: String? = null,
     val orderLoadBusy: Boolean = false,
     val orderLoadError: String? = null,
+    val orderCancelDialogOpen: Boolean = false,
+    val orderCancelTarget: PosOrder? = null,
+    val orderCancelReasons: List<be.cookit.pos.android.domain.OrderCancelReason> = emptyList(),
+    val orderCancelReasonId: Long? = null,
+    val orderCancelReasonText: String = "",
+    val orderCancelBusy: Boolean = false,
+    val orderCancelError: String? = null,
     val certificationCapabilities: NativeCertificationCapabilities = NativeCertificationCapabilities(),
     val modifierDialogOpen: Boolean = false,
     val modifierBusy: Boolean = false,
@@ -1732,6 +1739,119 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
         _ui.update { it.copy(deliveryDetailsOpen = false, deliveryConfigError = null) }
+    }
+
+    fun openOrderCancel(order: PosOrder) {
+        val state = _ui.value
+        if (!state.policy.canUpdateOrders) {
+            _ui.update { it.copy(orderLoadError = "permission_denied") }
+            return
+        }
+
+        val operational = order.remoteStatus.lowercase(java.util.Locale.ROOT)
+        val settlement = order.settlementStatus.lowercase(java.util.Locale.ROOT)
+        if (operational !in setOf("placed", "draft") || settlement in setOf("paid", "completed", "payment_due", "billed", "refunded", "canceled", "cancelled")) {
+            _ui.update { it.copy(orderLoadError = "cancel_not_allowed") }
+            return
+        }
+
+        val currentToken = token ?: return
+        _ui.update {
+            it.copy(
+                orderCancelDialogOpen = true,
+                orderCancelTarget = order,
+                orderCancelReasons = emptyList(),
+                orderCancelReasonId = null,
+                orderCancelReasonText = "",
+                orderCancelBusy = true,
+                orderCancelError = null
+            )
+        }
+
+        viewModelScope.launch {
+            runCatching { api.orderCancelReasons(currentToken).filter { reason -> reason.cancelOrder } }
+                .onSuccess { reasons ->
+                    _ui.update { it.copy(orderCancelReasons = reasons, orderCancelBusy = false, orderCancelError = null) }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(orderCancelBusy = false, orderCancelError = readableError(error)) }
+                }
+        }
+    }
+
+    fun closeOrderCancel() {
+        if (_ui.value.orderCancelBusy) return
+        _ui.update {
+            it.copy(
+                orderCancelDialogOpen = false,
+                orderCancelTarget = null,
+                orderCancelReasons = emptyList(),
+                orderCancelReasonId = null,
+                orderCancelReasonText = "",
+                orderCancelError = null
+            )
+        }
+    }
+
+    fun selectOrderCancelReason(reasonId: Long?) {
+        _ui.update { it.copy(orderCancelReasonId = reasonId, orderCancelError = null) }
+    }
+
+    fun setOrderCancelReasonText(value: String) {
+        _ui.update { it.copy(orderCancelReasonText = value.take(500), orderCancelError = null) }
+    }
+
+    fun confirmOrderCancel() {
+        val currentToken = token ?: return
+        val state = _ui.value
+        val order = state.orderCancelTarget ?: return
+        val freeText = state.orderCancelReasonText.trim().takeIf { it.isNotBlank() }
+
+        if (state.orderCancelReasonId == null && freeText == null) {
+            _ui.update { it.copy(orderCancelError = "cancel_reason_required") }
+            return
+        }
+        if (state.orderCancelBusy) return
+
+        viewModelScope.launch {
+            _ui.update { it.copy(orderCancelBusy = true, orderCancelError = null) }
+            runCatching {
+                api.cancelOrder(
+                    token = currentToken,
+                    orderId = order.id,
+                    cancelReasonId = state.orderCancelReasonId,
+                    cancelReasonText = freeText
+                )
+                val freshOrders = api.orders(currentToken, _ui.value.user.branchId)
+                val freshTables = api.tables(currentToken)
+                val freshKots = api.kots(currentToken)
+                Triple(freshOrders, freshTables, freshKots)
+            }.onSuccess { (orders, tables, kots) ->
+                knownOrderIds.addAll(orders.map { it.id })
+                _ui.update {
+                    it.copy(
+                        orders = orders,
+                        tables = tables,
+                        kots = kots,
+                        orderCancelDialogOpen = false,
+                        orderCancelTarget = null,
+                        orderCancelReasons = emptyList(),
+                        orderCancelReasonId = null,
+                        orderCancelReasonText = "",
+                        orderCancelBusy = false,
+                        orderCancelError = null,
+                        orderLoadError = null
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        orderCancelBusy = false,
+                        orderCancelError = readableError(error)
+                    )
+                }
+            }
+        }
     }
 
     fun createKotForOrder(order: PosOrder) {
