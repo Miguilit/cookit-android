@@ -148,7 +148,51 @@ data class OrderHistoryPayment(
     val id: Long,
     val method: String,
     val amount: Double,
-    val status: String? = null
+    val status: String? = null,
+    val refundedAmount: Double = 0.0,
+    val wasteAmount: Double = 0.0,
+    val hasProcessedRefund: Boolean = false
+)
+
+data class RefundReasonOption(
+    val id: Long,
+    val reason: String
+)
+
+data class RefundPaymentContext(
+    val id: Long,
+    val paymentMethod: String,
+    val amount: Double,
+    val remainingRefundable: Double,
+    val customerRefundedAmount: Double = 0.0,
+    val wasteAmount: Double = 0.0,
+    val hasProcessedRefund: Boolean = false,
+    val canCustomerRefund: Boolean = false,
+    val canWaste: Boolean = false,
+    val blockers: List<String> = emptyList()
+)
+
+data class OrderRefundContext(
+    val orderId: Long,
+    val orderNumber: String,
+    val payments: List<RefundPaymentContext>,
+    val reasons: List<RefundReasonOption>,
+    val fiscalCorrectionRequired: Boolean = false,
+    val loyaltyReversalRequired: Boolean = false,
+    val contract: String = ""
+)
+
+data class RefundProcessResult(
+    val id: Long,
+    val paymentId: Long,
+    val orderId: Long,
+    val refundType: String,
+    val partialRefundType: String?,
+    val amount: Double,
+    val status: String,
+    val reason: String?,
+    val fiscalAction: String?,
+    val loyaltyAction: String?
 )
 
 data class OrderHistorySplit(

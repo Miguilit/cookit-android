@@ -656,7 +656,10 @@ class CookitHttpClient {
                     id = row.longAny("id") ?: i.toLong(),
                     method = row.optText("payment_method", "method") ?: "—",
                     amount = row.doubleAny("amount") ?: 0.0,
-                    status = row.optText("status", "payment_status")
+                    status = row.optText("status", "payment_status"),
+                    refundedAmount = row.doubleAny("refunded_amount") ?: 0.0,
+                    wasteAmount = row.doubleAny("waste_amount") ?: 0.0,
+                    hasProcessedRefund = row.optBoolean("has_processed_refund", false)
                 ))
             }
         }
@@ -703,6 +706,93 @@ class CookitHttpClient {
             payments = payments,
             splits = splits,
             fiscal = fiscal
+        )
+    }
+
+    suspend fun orderRefundContext(token: String, orderId: Long): OrderRefundContext = withContext(Dispatchers.IO) {
+        val root = request("pos/orders/$orderId/refund-context", token = token)
+        val obj = root.optJSONObject("data") ?: root
+        val paymentsJson = obj.optJSONArray("payments") ?: JSONArray()
+        val reasonsJson = obj.optJSONArray("reasons") ?: JSONArray()
+
+        val payments = buildList {
+            for (i in 0 until paymentsJson.length()) {
+                val row = paymentsJson.optJSONObject(i) ?: continue
+                val blockersJson = row.optJSONArray("blockers") ?: JSONArray()
+                val blockers = buildList {
+                    for (j in 0 until blockersJson.length()) {
+                        blockersJson.optString(j).takeIf { it.isNotBlank() }?.let(::add)
+                    }
+                }
+                add(
+                    RefundPaymentContext(
+                        id = row.longAny("id") ?: continue,
+                        paymentMethod = row.optText("payment_method") ?: "—",
+                        amount = row.doubleAny("amount") ?: 0.0,
+                        remainingRefundable = row.doubleAny("remaining_refundable") ?: 0.0,
+                        customerRefundedAmount = row.doubleAny("customer_refunded_amount") ?: 0.0,
+                        wasteAmount = row.doubleAny("waste_amount") ?: 0.0,
+                        hasProcessedRefund = row.optBoolean("has_processed_refund", false),
+                        canCustomerRefund = row.optBoolean("can_customer_refund", false),
+                        canWaste = row.optBoolean("can_waste", false),
+                        blockers = blockers
+                    )
+                )
+            }
+        }
+
+        val reasons = buildList {
+            for (i in 0 until reasonsJson.length()) {
+                val row = reasonsJson.optJSONObject(i) ?: continue
+                add(
+                    RefundReasonOption(
+                        id = row.longAny("id") ?: continue,
+                        reason = row.optText("reason") ?: "—"
+                    )
+                )
+            }
+        }
+
+        OrderRefundContext(
+            orderId = obj.longAny("order_id") ?: orderId,
+            orderNumber = obj.optText("order_number") ?: orderId.toString(),
+            payments = payments,
+            reasons = reasons,
+            fiscalCorrectionRequired = obj.optBoolean("fiscal_correction_required", false),
+            loyaltyReversalRequired = obj.optBoolean("loyalty_reversal_required", false),
+            contract = obj.optText("contract") ?: ""
+        )
+    }
+
+    suspend fun processPaymentRefund(
+        token: String,
+        paymentId: Long,
+        refundReasonId: Long,
+        refundType: String,
+        partialRefundType: String?,
+        amount: Double?,
+        notes: String?
+    ): RefundProcessResult = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("refund_reason_id", refundReasonId)
+            .put("refund_type", refundType)
+        partialRefundType?.takeIf { it.isNotBlank() }?.let { body.put("partial_refund_type", it) }
+        amount?.let { body.put("amount", it) }
+        notes?.trim()?.takeIf { it.isNotBlank() }?.let { body.put("notes", it) }
+
+        val root = request("pos/payments/$paymentId/refund", method = "POST", token = token, body = body)
+        val obj = root.optJSONObject("data") ?: root
+        RefundProcessResult(
+            id = obj.longAny("id") ?: 0L,
+            paymentId = obj.longAny("payment_id") ?: paymentId,
+            orderId = obj.longAny("order_id") ?: 0L,
+            refundType = obj.optText("refund_type") ?: refundType,
+            partialRefundType = obj.optText("partial_refund_type"),
+            amount = obj.doubleAny("amount") ?: amount ?: 0.0,
+            status = obj.optText("status") ?: "processed",
+            reason = obj.optText("reason"),
+            fiscalAction = obj.optText("fiscal_action"),
+            loyaltyAction = obj.optText("loyalty_action")
         )
     }
 

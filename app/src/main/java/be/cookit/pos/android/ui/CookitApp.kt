@@ -283,7 +283,22 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
         OrderHistoryDialog(
             state = state,
             onReprint = vm::reprintOrderHistory,
+            onRefund = vm::openOrderRefund,
             onDismiss = vm::closeOrderHistory
+        )
+    }
+
+    if (state.orderRefundDialogOpen) {
+        OrderRefundDialog(
+            state = state,
+            onSelectPayment = vm::selectOrderRefundPayment,
+            onSelectReason = vm::selectOrderRefundReason,
+            onSelectType = vm::setOrderRefundType,
+            onSelectPartialType = vm::setOrderRefundPartialType,
+            onAmountChange = vm::setOrderRefundAmountText,
+            onNotesChange = vm::setOrderRefundNotes,
+            onConfirm = vm::confirmOrderRefund,
+            onDismiss = vm::closeOrderRefund
         )
     }
 }
@@ -3049,6 +3064,7 @@ private fun OrdersScreen(
 private fun OrderHistoryDialog(
     state: PosUiState,
     onReprint: (String, Long?) -> Unit,
+    onRefund: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val hs = orderHistoryStrings(state.language)
@@ -3109,13 +3125,54 @@ private fun OrderHistoryDialog(
                             }
                         }
                         item {
+                            val rs = refundStrings(state.language)
                             Text(hs.payments, fontWeight = FontWeight.Black, fontSize = 18.sp)
                             if (detail.payments.isEmpty()) Text(hs.noPayments, color = CookitMuted)
                             detail.payments.forEach { payment ->
-                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                    Text(payment.method.replace('_', ' ').uppercase(Locale.getDefault()), Modifier.weight(1f))
-                                    Text(String.format(Locale.FRANCE, "%.2f €", payment.amount), fontWeight = FontWeight.Bold)
+                                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                    Row(Modifier.fillMaxWidth()) {
+                                        Text(payment.method.replace('_', ' ').uppercase(Locale.getDefault()), Modifier.weight(1f))
+                                        Text(String.format(Locale.FRANCE, "%.2f €", payment.amount), fontWeight = FontWeight.Bold)
+                                    }
+                                    if (payment.refundedAmount > 0.0) {
+                                        Text(
+                                            "${rs.refunded}: ${String.format(Locale.FRANCE, "%.2f €", payment.refundedAmount)}",
+                                            color = CookitGreen,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    if (payment.wasteAmount > 0.0) {
+                                        Text(
+                                            "${rs.writtenOff}: ${String.format(Locale.FRANCE, "%.2f €", payment.wasteAmount)}",
+                                            color = CookitMuted,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
+                            }
+                            if (state.policy.canRefundPayments && detail.payments.isNotEmpty()) {
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = onRefund,
+                                    enabled = !state.orderHistoryBusy && !state.orderHistoryPrintBusy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Undo, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(rs.refund)
+                                }
+                            }
+                            state.orderRefundMessage?.let { message ->
+                                Spacer(Modifier.height(6.dp))
+                                val text = when (message) {
+                                    "refund_processed" -> rs.processed
+                                    "waste_processed" -> rs.wasteProcessed
+                                    "permission_denied" -> rs.notAllowed
+                                    else -> message
+                                }
+                                Text(text, color = CookitGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
                         detail.fiscal?.let { fiscal ->
@@ -3171,6 +3228,273 @@ private fun OrderHistoryDialog(
                                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.width(8.dp)); Text(hs.printing)
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrderRefundDialog(
+    state: PosUiState,
+    onSelectPayment: (Long) -> Unit,
+    onSelectReason: (Long) -> Unit,
+    onSelectType: (String) -> Unit,
+    onSelectPartialType: (String) -> Unit,
+    onAmountChange: (String) -> Unit,
+    onNotesChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val rs = refundStrings(state.language)
+    val context = state.orderRefundContext
+    val selectedPayment = context?.payments?.firstOrNull { it.id == state.orderRefundPaymentId }
+    val selectedReason = context?.reasons?.firstOrNull { it.id == state.orderRefundReasonId }
+    var reasonExpanded by remember(state.orderRefundDialogOpen, context?.orderId) { mutableStateOf(false) }
+
+    fun blockerText(code: String): String = when (code) {
+        "fiscal_correction_required" -> rs.fiscalBlocked
+        "loyalty_reversal_required" -> rs.loyaltyBlocked
+        "refund_already_processed" -> rs.alreadyProcessed
+        "payment_required" -> rs.paymentRequired
+        "refund_reason_required" -> rs.reasonRequired
+        "refund_amount_invalid" -> rs.amountInvalid
+        "refund_not_allowed", "permission_denied" -> rs.notAllowed
+        else -> code
+    }
+
+    val operationAllowed = when (state.orderRefundType) {
+        "waste" -> selectedPayment?.canWaste == true
+        else -> selectedPayment?.canCustomerRefund == true
+    }
+    val confirmEnabled = !state.orderRefundBusy &&
+        selectedPayment != null &&
+        selectedReason != null &&
+        operationAllowed &&
+        (state.orderRefundType != "partial" || state.orderRefundAmountText.toDoubleOrNull()?.let { it > 0.0 } == true)
+
+    Dialog(
+        onDismissRequest = { if (!state.orderRefundBusy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.78f).fillMaxHeight(0.86f),
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White
+        ) {
+            Column(Modifier.fillMaxSize().padding(22.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Undo, contentDescription = null, tint = CookitOrange)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(rs.title, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                        context?.let { Text(it.orderNumber, color = CookitMuted, fontSize = 13.sp) }
+                    }
+                    TextButton(onClick = onDismiss, enabled = !state.orderRefundBusy) { Text(rs.close) }
+                }
+                HorizontalDivider(color = CookitLine)
+                Spacer(Modifier.height(12.dp))
+
+                when {
+                    state.orderRefundBusy && context == null -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    }
+                    context == null -> {
+                        Text(state.orderRefundError?.let(::blockerText) ?: rs.notAllowed, color = MaterialTheme.colorScheme.error)
+                    }
+                    else -> {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            item {
+                                Surface(
+                                    color = CookitCanvas,
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text(rs.intro, Modifier.fillMaxWidth().padding(12.dp), color = CookitMuted, fontSize = 12.sp)
+                                }
+                            }
+
+                            item {
+                                Text(rs.payment, fontWeight = FontWeight.Black, fontSize = 17.sp)
+                                Spacer(Modifier.height(6.dp))
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    context.payments.forEach { payment ->
+                                        FilterChip(
+                                            selected = state.orderRefundPaymentId == payment.id,
+                                            onClick = { if (!state.orderRefundBusy) onSelectPayment(payment.id) },
+                                            label = {
+                                                Text(
+                                                    "${payment.paymentMethod.replace('_', ' ').uppercase(Locale.getDefault())} • ${String.format(Locale.FRANCE, "%.2f €", payment.amount)}"
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                                selectedPayment?.let { payment ->
+                                    payment.blockers.distinct()
+                                        .filter { blocker ->
+                                            state.orderRefundType != "waste" || blocker == "refund_already_processed"
+                                        }
+                                        .forEach { blocker ->
+                                            Spacer(Modifier.height(5.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = MaterialTheme.colorScheme.errorContainer
+                                            ) {
+                                                Text(
+                                                    blockerText(blocker),
+                                                    Modifier.fillMaxWidth().padding(9.dp),
+                                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                        }
+                                }
+                                selectedPayment?.let { payment ->
+                                    val method = payment.paymentMethod.lowercase(Locale.ROOT)
+                                    if (state.orderRefundType != "waste" && !method.contains("cash")) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = CookitCanvas
+                                        ) {
+                                            Text(
+                                                rs.settlementHelp,
+                                                Modifier.fillMaxWidth().padding(9.dp),
+                                                color = CookitMuted,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            item {
+                                Text(rs.refund, fontWeight = FontWeight.Black, fontSize = 17.sp)
+                                Spacer(Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf(
+                                        "full" to rs.full,
+                                        "partial" to rs.partial,
+                                        "waste" to rs.waste
+                                    ).forEach { (type, label) ->
+                                        FilterChip(
+                                            selected = state.orderRefundType == type,
+                                            onClick = { if (!state.orderRefundBusy) onSelectType(type) },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                                if (state.orderRefundType == "waste") {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(rs.wasteHelp, color = CookitMuted, fontSize = 12.sp)
+                                }
+                            }
+
+                            if (state.orderRefundType == "partial") {
+                                item {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        listOf(
+                                            "half" to rs.half,
+                                            "fixed" to rs.fixed,
+                                            "custom" to rs.custom
+                                        ).forEach { (type, label) ->
+                                            FilterChip(
+                                                selected = state.orderRefundPartialType == type,
+                                                onClick = { if (!state.orderRefundBusy) onSelectPartialType(type) },
+                                                label = { Text(label) }
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = state.orderRefundAmountText,
+                                        onValueChange = onAmountChange,
+                                        enabled = !state.orderRefundBusy && state.orderRefundPartialType != "half",
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text(rs.amount) },
+                                        singleLine = true,
+                                        suffix = { Text("€") }
+                                    )
+                                }
+                            }
+
+                            item {
+                                Text(rs.reason, fontWeight = FontWeight.Black, fontSize = 17.sp)
+                                Spacer(Modifier.height(6.dp))
+                                Box(Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { if (!state.orderRefundBusy) reasonExpanded = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(selectedReason?.reason ?: rs.chooseReason, Modifier.weight(1f))
+                                        Icon(Icons.Default.ArrowDropDown, null)
+                                    }
+                                    DropdownMenu(
+                                        expanded = reasonExpanded,
+                                        onDismissRequest = { reasonExpanded = false }
+                                    ) {
+                                        context.reasons.forEach { reason ->
+                                            DropdownMenuItem(
+                                                text = { Text(reason.reason) },
+                                                onClick = {
+                                                    onSelectReason(reason.id)
+                                                    reasonExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            item {
+                                OutlinedTextField(
+                                    value = state.orderRefundNotes,
+                                    onValueChange = onNotesChange,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !state.orderRefundBusy,
+                                    label = { Text(rs.notes) },
+                                    minLines = 2,
+                                    maxLines = 4
+                                )
+                            }
+
+                            state.orderRefundError?.let { error ->
+                                item {
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.errorContainer
+                                    ) {
+                                        Text(
+                                            blockerText(error),
+                                            Modifier.fillMaxWidth().padding(10.dp),
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            item {
+                                Button(
+                                    onClick = onConfirm,
+                                    enabled = confirmEnabled,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    if (state.orderRefundBusy) {
+                                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(rs.confirm)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                TextButton(
+                                    onClick = onDismiss,
+                                    enabled = !state.orderRefundBusy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text(rs.close) }
                             }
                         }
                     }

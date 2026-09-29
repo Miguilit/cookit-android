@@ -119,6 +119,17 @@ data class PosUiState(
     val orderHistoryError: String? = null,
     val orderHistoryPrintBusy: Boolean = false,
     val orderHistoryPrintMessage: String? = null,
+    val orderRefundDialogOpen: Boolean = false,
+    val orderRefundContext: OrderRefundContext? = null,
+    val orderRefundBusy: Boolean = false,
+    val orderRefundError: String? = null,
+    val orderRefundMessage: String? = null,
+    val orderRefundPaymentId: Long? = null,
+    val orderRefundReasonId: Long? = null,
+    val orderRefundType: String = "full",
+    val orderRefundPartialType: String = "half",
+    val orderRefundAmountText: String = "",
+    val orderRefundNotes: String = "",
     val certificationCapabilities: NativeCertificationCapabilities = NativeCertificationCapabilities(),
     val modifierDialogOpen: Boolean = false,
     val modifierBusy: Boolean = false,
@@ -1885,7 +1896,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun closeOrderHistory() {
-        if (_ui.value.orderHistoryPrintBusy) return
+        if (_ui.value.orderHistoryPrintBusy || _ui.value.orderRefundBusy) return
         _ui.update {
             it.copy(
                 orderHistoryOpen = false,
@@ -1893,7 +1904,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 orderHistoryDetail = null,
                 orderHistoryBusy = false,
                 orderHistoryError = null,
-                orderHistoryPrintMessage = null
+                orderHistoryPrintMessage = null,
+                orderRefundDialogOpen = false,
+                orderRefundContext = null,
+                orderRefundError = null,
+                orderRefundMessage = null
             )
         }
     }
@@ -1941,6 +1956,189 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
     }
+
+    fun openOrderRefund() {
+        val currentToken = token ?: return
+        val detail = _ui.value.orderHistoryDetail ?: return
+        if (! _ui.value.policy.canRefundPayments) {
+            _ui.update { it.copy(orderRefundMessage = "permission_denied") }
+            return
+        }
+
+        _ui.update {
+            it.copy(
+                orderRefundDialogOpen = true,
+                orderRefundContext = null,
+                orderRefundBusy = true,
+                orderRefundError = null,
+                orderRefundMessage = null,
+                orderRefundPaymentId = null,
+                orderRefundReasonId = null,
+                orderRefundType = "full",
+                orderRefundPartialType = "half",
+                orderRefundAmountText = "",
+                orderRefundNotes = ""
+            )
+        }
+
+        viewModelScope.launch {
+            runCatching { api.orderRefundContext(currentToken, detail.id) }
+                .onSuccess { context ->
+                    val selected = context.payments.firstOrNull { it.canCustomerRefund || it.canWaste }
+                        ?: context.payments.firstOrNull()
+                    _ui.update {
+                        it.copy(
+                            orderRefundContext = context,
+                            orderRefundBusy = false,
+                            orderRefundPaymentId = selected?.id,
+                            orderRefundAmountText = selected?.amount?.let(::formatRefundAmount).orEmpty(),
+                            orderRefundError = null
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(orderRefundBusy = false, orderRefundError = readableError(error)) }
+                }
+        }
+    }
+
+    fun closeOrderRefund() {
+        if (_ui.value.orderRefundBusy) return
+        _ui.update {
+            it.copy(
+                orderRefundDialogOpen = false,
+                orderRefundContext = null,
+                orderRefundError = null,
+                orderRefundPaymentId = null,
+                orderRefundReasonId = null,
+                orderRefundType = "full",
+                orderRefundPartialType = "half",
+                orderRefundAmountText = "",
+                orderRefundNotes = ""
+            )
+        }
+    }
+
+    fun selectOrderRefundPayment(paymentId: Long) {
+        val state = _ui.value
+        val payment = state.orderRefundContext?.payments?.firstOrNull { it.id == paymentId } ?: return
+        val amount = when (state.orderRefundType) {
+            "partial" -> if (state.orderRefundPartialType == "half") payment.amount / 2.0 else payment.amount / 2.0
+            else -> payment.amount
+        }
+        _ui.update { it.copy(orderRefundPaymentId = paymentId, orderRefundAmountText = formatRefundAmount(amount), orderRefundError = null) }
+    }
+
+    fun selectOrderRefundReason(reasonId: Long) {
+        _ui.update { it.copy(orderRefundReasonId = reasonId, orderRefundError = null) }
+    }
+
+    fun setOrderRefundType(type: String) {
+        if (type !in setOf("full", "partial", "waste")) return
+        val state = _ui.value
+        val payment = state.orderRefundContext?.payments?.firstOrNull { it.id == state.orderRefundPaymentId }
+        val partialType = if (type == "partial") "half" else state.orderRefundPartialType
+        val amount = payment?.let { if (type == "partial") it.amount / 2.0 else it.amount }
+        _ui.update {
+            it.copy(
+                orderRefundType = type,
+                orderRefundPartialType = partialType,
+                orderRefundAmountText = amount?.let(::formatRefundAmount).orEmpty(),
+                orderRefundError = null
+            )
+        }
+    }
+
+    fun setOrderRefundPartialType(type: String) {
+        if (type !in setOf("half", "fixed", "custom")) return
+        val state = _ui.value
+        val payment = state.orderRefundContext?.payments?.firstOrNull { it.id == state.orderRefundPaymentId }
+        val amountText = if (type == "half") payment?.let { formatRefundAmount(it.amount / 2.0) }.orEmpty() else state.orderRefundAmountText
+        _ui.update { it.copy(orderRefundPartialType = type, orderRefundAmountText = amountText, orderRefundError = null) }
+    }
+
+    fun setOrderRefundAmountText(value: String) {
+        _ui.update { it.copy(orderRefundAmountText = value.replace(',', '.'), orderRefundError = null) }
+    }
+
+    fun setOrderRefundNotes(value: String) {
+        _ui.update { it.copy(orderRefundNotes = value.take(1000), orderRefundError = null) }
+    }
+
+    fun confirmOrderRefund() {
+        val currentToken = token ?: return
+        val state = _ui.value
+        val detail = state.orderHistoryDetail ?: return
+        val context = state.orderRefundContext ?: return
+        val payment = context.payments.firstOrNull { it.id == state.orderRefundPaymentId }
+        val reasonId = state.orderRefundReasonId
+
+        if (payment == null) {
+            _ui.update { it.copy(orderRefundError = "payment_required") }
+            return
+        }
+        if (reasonId == null) {
+            _ui.update { it.copy(orderRefundError = "refund_reason_required") }
+            return
+        }
+
+        val type = state.orderRefundType
+        if (type == "waste") {
+            if (!payment.canWaste) {
+                _ui.update { it.copy(orderRefundError = payment.blockers.firstOrNull() ?: "refund_not_allowed") }
+                return
+            }
+        } else if (!payment.canCustomerRefund) {
+            _ui.update { it.copy(orderRefundError = payment.blockers.firstOrNull() ?: "refund_not_allowed") }
+            return
+        }
+
+        val partialAmount = if (type == "partial") state.orderRefundAmountText.toDoubleOrNull() else null
+        if (type == "partial" && (partialAmount == null || partialAmount <= 0.0)) {
+            _ui.update { it.copy(orderRefundError = "refund_amount_invalid") }
+            return
+        }
+
+        viewModelScope.launch {
+            _ui.update { it.copy(orderRefundBusy = true, orderRefundError = null) }
+            runCatching {
+                api.processPaymentRefund(
+                    token = currentToken,
+                    paymentId = payment.id,
+                    refundReasonId = reasonId,
+                    refundType = type,
+                    partialRefundType = if (type == "partial") state.orderRefundPartialType else null,
+                    amount = partialAmount,
+                    notes = state.orderRefundNotes
+                )
+                val freshDetail = api.orderHistoryDetail(currentToken, detail.id)
+                val freshOrders = api.orders(currentToken, _ui.value.user.branchId)
+                freshDetail to freshOrders
+            }.onSuccess { (freshDetail, freshOrders) ->
+                knownOrderIds.addAll(freshOrders.map { it.id })
+                _ui.update {
+                    it.copy(
+                        orderHistoryDetail = freshDetail,
+                        orders = freshOrders,
+                        orderRefundDialogOpen = false,
+                        orderRefundContext = null,
+                        orderRefundBusy = false,
+                        orderRefundError = null,
+                        orderRefundMessage = if (type == "waste") "waste_processed" else "refund_processed",
+                        orderRefundPaymentId = null,
+                        orderRefundReasonId = null,
+                        orderRefundAmountText = "",
+                        orderRefundNotes = ""
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update { it.copy(orderRefundBusy = false, orderRefundError = readableError(error)) }
+            }
+        }
+    }
+
+    private fun formatRefundAmount(value: Double): String =
+        String.format(java.util.Locale.US, "%.2f", value.coerceAtLeast(0.0))
 
     fun createKotForOrder(order: PosOrder) {
         if (order.id in _ui.value.orderKotBusyIds) return

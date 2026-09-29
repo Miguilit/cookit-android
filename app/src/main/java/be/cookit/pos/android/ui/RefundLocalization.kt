@@ -1,0 +1,117 @@
+package be.cookit.pos.android.ui
+
+import be.cookit.pos.android.domain.AppLanguage
+
+data class RefundStrings(
+    val refund: String,
+    val title: String,
+    val intro: String,
+    val payment: String,
+    val reason: String,
+    val chooseReason: String,
+    val full: String,
+    val partial: String,
+    val waste: String,
+    val wasteHelp: String,
+    val settlementHelp: String,
+    val half: String,
+    val fixed: String,
+    val custom: String,
+    val amount: String,
+    val notes: String,
+    val confirm: String,
+    val close: String,
+    val fiscalBlocked: String,
+    val loyaltyBlocked: String,
+    val alreadyProcessed: String,
+    val notAllowed: String,
+    val reasonRequired: String,
+    val paymentRequired: String,
+    val amountInvalid: String,
+    val processed: String,
+    val wasteProcessed: String,
+    val refunded: String,
+    val writtenOff: String
+)
+
+fun refundStrings(language: AppLanguage): RefundStrings = when (language) {
+    AppLanguage.FR -> RefundStrings(
+        refund = "Rembourser",
+        title = "Remboursement / perte",
+        intro = "Le remboursement est traité par Cookit Cloud. Les ventes fiscalisées ou avec fidélité active sont bloquées tant qu’une correction exacte n’est pas disponible.",
+        payment = "Paiement",
+        reason = "Motif",
+        chooseReason = "Choisir un motif",
+        full = "Complet",
+        partial = "Partiel",
+        waste = "Perte / waste",
+        wasteHelp = "Perte interne uniquement : aucun argent n’est rendu au client.",
+        settlementHelp = "Paiement carte/terminal : effectuez d’abord le remboursement sur le terminal ou PSP externe. Cookit enregistre ensuite l’opération.",
+        half = "Moitié",
+        fixed = "Montant fixe",
+        custom = "Personnalisé",
+        amount = "Montant",
+        notes = "Notes",
+        confirm = "Confirmer",
+        close = "Fermer",
+        fiscalBlocked = "Correction fiscale requise avant remboursement.",
+        loyaltyBlocked = "Réversion fidélité exacte requise avant remboursement.",
+        alreadyProcessed = "Un remboursement/perte a déjà été enregistré pour ce paiement.",
+        notAllowed = "Ce remboursement n’est pas autorisé dans l’état actuel.",
+        reasonRequired = "Choisissez un motif.",
+        paymentRequired = "Choisissez un paiement.",
+        amountInvalid = "Montant de remboursement invalide.",
+        processed = "Remboursement enregistré.",
+        wasteProcessed = "Perte enregistrée.",
+        refunded = "Remboursé",
+        writtenOff = "Perte"
+    )
+    AppLanguage.NL -> RefundStrings(
+        refund = "Terugbetalen", title = "Terugbetaling / verlies",
+        intro = "De terugbetaling wordt door Cookit Cloud verwerkt. Gefiscaliseerde verkopen of bestellingen met loyaliteitsactiviteit blijven geblokkeerd tot een exacte correctie beschikbaar is.",
+        payment = "Betaling", reason = "Reden", chooseReason = "Kies een reden",
+        full = "Volledig", partial = "Gedeeltelijk", waste = "Verlies / waste",
+        wasteHelp = "Alleen interne afschrijving: er wordt geen geld aan de klant terugbetaald.",
+        settlementHelp = "Kaart/terminalbetaling: voer eerst de terugbetaling uit op de externe terminal of PSP. Cookit registreert daarna de operatie.",
+        half = "Helft", fixed = "Vast bedrag", custom = "Aangepast", amount = "Bedrag", notes = "Notities",
+        confirm = "Bevestigen", close = "Sluiten",
+        fiscalBlocked = "Fiscale correctie vereist vóór terugbetaling.",
+        loyaltyBlocked = "Exacte loyaliteitsomkering vereist vóór terugbetaling.",
+        alreadyProcessed = "Voor deze betaling is al een terugbetaling/verlies geregistreerd.",
+        notAllowed = "Deze terugbetaling is momenteel niet toegestaan.",
+        reasonRequired = "Kies een reden.", paymentRequired = "Kies een betaling.", amountInvalid = "Ongeldig terugbetalingsbedrag.",
+        processed = "Terugbetaling geregistreerd.", wasteProcessed = "Verlies geregistreerd.", refunded = "Terugbetaald", writtenOff = "Verlies"
+    )
+    AppLanguage.EN -> RefundStrings(
+        refund = "Refund", title = "Refund / waste",
+        intro = "Refunds are processed by Cookit Cloud. Fiscalized sales or orders with Loyalty activity stay blocked until an exact correction is available.",
+        payment = "Payment", reason = "Reason", chooseReason = "Choose a reason",
+        full = "Full", partial = "Partial", waste = "Waste / write-off",
+        wasteHelp = "Internal write-off only: no money is returned to the customer.",
+        settlementHelp = "Card/terminal payment: complete the refund on the external terminal or PSP first. Cookit then records the operation.",
+        half = "Half", fixed = "Fixed amount", custom = "Custom", amount = "Amount", notes = "Notes",
+        confirm = "Confirm", close = "Close",
+        fiscalBlocked = "A fiscal correction is required before refunding this payment.",
+        loyaltyBlocked = "An exact Loyalty reversal is required before refunding this payment.",
+        alreadyProcessed = "A refund/write-off has already been recorded for this payment.",
+        notAllowed = "This refund is not allowed in the current state.",
+        reasonRequired = "Choose a reason.", paymentRequired = "Choose a payment.", amountInvalid = "Invalid refund amount.",
+        processed = "Refund recorded.", wasteProcessed = "Write-off recorded.", refunded = "Refunded", writtenOff = "Waste"
+    )
+    AppLanguage.DE -> RefundStrings(
+        refund = "Erstatten", title = "Erstattung / Verlust",
+        intro = "Erstattungen werden von Cookit Cloud verarbeitet. Fiskalisierte Verkäufe oder Bestellungen mit Loyalty-Aktivität bleiben gesperrt, bis eine exakte Korrektur verfügbar ist.",
+        payment = "Zahlung", reason = "Grund", chooseReason = "Grund wählen",
+        full = "Vollständig", partial = "Teilweise", waste = "Verlust / Waste",
+        wasteHelp = "Nur interne Abschreibung: dem Kunden wird kein Geld zurückgegeben.",
+        settlementHelp = "Karten-/Terminalzahlung: führen Sie die Erstattung zuerst am externen Terminal oder PSP durch. Cookit erfasst danach den Vorgang.",
+        half = "Hälfte", fixed = "Fester Betrag", custom = "Benutzerdefiniert", amount = "Betrag", notes = "Notizen",
+        confirm = "Bestätigen", close = "Schließen",
+        fiscalBlocked = "Vor der Erstattung ist eine fiskalische Korrektur erforderlich.",
+        loyaltyBlocked = "Vor der Erstattung ist eine exakte Loyalty-Rückbuchung erforderlich.",
+        alreadyProcessed = "Für diese Zahlung wurde bereits eine Erstattung/Abschreibung erfasst.",
+        notAllowed = "Diese Erstattung ist derzeit nicht zulässig.",
+        reasonRequired = "Wählen Sie einen Grund.", paymentRequired = "Wählen Sie eine Zahlung.", amountInvalid = "Ungültiger Erstattungsbetrag.",
+        processed = "Erstattung erfasst.", wasteProcessed = "Verlust erfasst.", refunded = "Erstattet", writtenOff = "Verlust"
+    )
+}
