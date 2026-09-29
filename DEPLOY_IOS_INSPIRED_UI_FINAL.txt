@@ -1,0 +1,12 @@
+Cookit Android 0.15.0.48 — iOS-inspired UI final pass
+
+Apply after IOS_INSPIRED_UI_P1.
+
+unzip -o CookitAndroid_0.15.0.48_IOS_INSPIRED_UI_FINAL_20260929.zip -d .
+chmod +x scripts/ios-inspired-ui-final-check.sh
+./scripts/ios-inspired-ui-final-check.sh
+git diff --check
+git status --short
+git --no-pager diff --stat
+
+Commit/push on the current update/** UI branch to trigger GitHub Actions automatically.

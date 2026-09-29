@@ -391,7 +391,7 @@ private fun SideNavigation(screen: Screen, state: PosUiState, t: UiStrings, onSe
     val mainScreens = screens.filterNot { it == settings }
 
     Surface(
-        modifier = Modifier.width(86.dp).fillMaxHeight(),
+        modifier = Modifier.width(78.dp).fillMaxHeight(),
         color = CookitSidebar
     ) {
         Column(
@@ -399,16 +399,16 @@ private fun SideNavigation(screen: Screen, state: PosUiState, t: UiStrings, onSe
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Surface(
-                modifier = Modifier.size(48.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = CookitOrange
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 25.sp)
+                    Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 23.sp)
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
 
             mainScreens.forEach { item ->
                 SideNavigationItem(
@@ -442,11 +442,11 @@ private fun SideNavigationItem(
 ) {
     Column(
         modifier = Modifier
-            .padding(horizontal = 7.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(15.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(13.dp))
             .background(if (selected) CookitSoftAccent else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp)
+            .padding(vertical = 7.dp)
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -454,9 +454,9 @@ private fun SideNavigationItem(
             iconFor(item),
             contentDescription = label,
             tint = if (selected) CookitAccent else Color(0xFFD1D7DD),
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(21.dp)
         )
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(2.dp))
         Text(
             label,
             color = if (selected) CookitInk else CookitMuted,
@@ -481,7 +481,7 @@ private fun iconFor(screen: Screen) = when (screen) {
 private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
     Surface(modifier = Modifier.statusBarsPadding(), color = CookitSidebar, shadowElevation = 0.dp) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(if (compact) 64.dp else 70.dp).padding(horizontal = 18.dp),
+            modifier = Modifier.fillMaxWidth().height(if (compact) 60.dp else 64.dp).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             RestaurantBrandMark(
@@ -489,25 +489,25 @@ private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
                 restaurantName = state.user.restaurant,
                 compact = compact
             )
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     state.user.restaurant,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = if (compact) 17.sp else 20.sp
+                    fontSize = if (compact) 16.sp else 18.sp
                 )
                 Text(
                     "${state.user.branch} • ${state.user.role.name.lowercase().replaceFirstChar { it.uppercase() }}${if (state.demoMode) " • Démo" else ""}",
                     color = CookitMuted,
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                 )
             }
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = if (state.online) CookitSoftGreen else MaterialTheme.colorScheme.errorContainer
             ) {
                 Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
@@ -519,20 +519,20 @@ private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
                         if (state.online) t.online else t.offline,
                         color = if (state.online) CookitGreen else MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
+                        fontSize = 11.sp
                     )
                 }
             }
             if (!compact) {
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 IconButton(onClick = {}) {
                     BadgedBox(
                         badge = { if (state.unreadInbound > 0) Badge { Text(state.unreadInbound.toString()) } }
                     ) { Icon(Icons.Default.Notifications, null) }
                 }
                 Surface(
-                    modifier = Modifier.size(42.dp),
-                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.size(38.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = CookitSoftOrange
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -560,8 +560,8 @@ private fun RestaurantBrandMark(
     }
 
     Surface(
-        modifier = Modifier.size(if (compact) 38.dp else 44.dp),
-        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.size(if (compact) 36.dp else 40.dp),
+        shape = RoundedCornerShape(12.dp),
         color = if (bitmap == null) CookitSoftOrange else CookitSurfaceRaised,
         border = BorderStroke(1.dp, CookitLine)
     ) {
@@ -578,7 +578,7 @@ private fun RestaurantBrandMark(
                     restaurantName.trim().firstOrNull()?.uppercase() ?: "R",
                     color = CookitOrange,
                     fontWeight = FontWeight.Black,
-                    fontSize = if (compact) 17.sp else 20.sp
+                    fontSize = if (compact) 16.sp else 18.sp
                 )
             }
         }
@@ -674,7 +674,7 @@ private fun PosScreen(
     val config = LocalConfiguration.current
     val wide = config.screenWidthDp >= 900
 
-    Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         InboundBanner(inboundCount, inboundOrders, onReadInbound)
 
         Row(
@@ -682,7 +682,7 @@ private fun PosScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(state.openedOrderCode ?: t.newOrder, fontWeight = FontWeight.Black, fontSize = 26.sp)
+            Text(state.openedOrderCode ?: t.newOrder, fontWeight = FontWeight.Black, fontSize = 22.sp)
             if (state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null) {
                 Spacer(Modifier.width(10.dp))
                 OutlinedButton(onClick = vm::startNewOrder, enabled = !state.orderLoadBusy) {
@@ -764,9 +764,9 @@ private fun PosScreen(
             }
         }
         if (wide) {
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ProductPane(
-                    modifier = Modifier.weight(1.65f),
+                    modifier = Modifier.weight(1.72f),
                     categories = categories,
                     products = products,
                     selectedCategory = selectedCategory,
@@ -776,7 +776,7 @@ private fun PosScreen(
                     modifiersEnabled = state.certificationCapabilities.modifiers
                 )
                 CartPane(
-                    modifier = Modifier.weight(0.9f),
+                    modifier = Modifier.weight(0.86f),
                     cart = cart,
                     t = t,
                     busy = state.checkoutBusy || state.commercialBusy,
@@ -1475,16 +1475,16 @@ private fun MobileCartBar(
         modifier = modifier.fillMaxWidth(),
         color = CookitSurface,
         shadowElevation = 0.dp,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, CookitLine)
     ) {
         Row(
-            Modifier.padding(12.dp),
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
                 Text("${cart.sumOf { it.quantity }} articles", color = CookitMuted, fontSize = 12.sp)
-                Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 18.sp, fontWeight = FontWeight.Black)
             }
             if (commercialEnabled) {
                 FilledTonalIconButton(
@@ -1524,16 +1524,16 @@ private fun MobileCartBar(
 private fun OrderTypeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(11.dp),
         color = if (selected) CookitSoftAccent else CookitSurface,
         border = BorderStroke(1.dp, if (selected) CookitAccent else CookitLine)
     ) {
         Text(
             label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
             color = if (selected) CookitAccent else CookitMuted,
             fontWeight = FontWeight.Bold,
-            fontSize = 12.sp
+            fontSize = 11.sp
         )
     }
 }
@@ -1550,25 +1550,32 @@ private fun ProductPane(
     modifiersEnabled: Boolean
 ) {
     Column(modifier) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(categories) { category ->
                 FilterChip(
                     selected = category.id == selectedCategory,
                     onClick = { onCategory(category.id) },
-                    label = { Text("${category.emoji} ${category.name}") }
+                    label = { Text("${category.emoji} ${category.name}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
+                    shape = RoundedCornerShape(11.dp),
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = CookitSurface,
+                        labelColor = CookitMuted,
+                        selectedContainerColor = CookitSoftAccent,
+                        selectedLabelColor = CookitAccent
+                    )
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(9.dp))
 
         val visibleProducts = products.filter {
             selectedCategory == 0L || it.categoryId == selectedCategory
         }
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 180.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 32.dp)
+            columns = GridCells.Adaptive(minSize = 160.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 22.dp)
         ) {
             items(visibleProducts, key = { it.id }) { product ->
                 ProductCard(
@@ -1592,20 +1599,20 @@ private fun ProductCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(226.dp)
+            .height(206.dp)
             .clickable { onAdd(product) },
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(15.dp),
         colors = CardDefaults.cardColors(containerColor = CookitSurface),
         border = BorderStroke(1.dp, CookitLine)
     ) {
         Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().height(142.dp)) {
+            Box(Modifier.fillMaxWidth().height(126.dp)) {
                 ProductImage(
                     product = product,
                     modifier = Modifier.fillMaxSize()
                 )
                 Surface(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                     shape = RoundedCornerShape(30.dp),
                     color = CookitAccent
                 ) {
@@ -1613,41 +1620,41 @@ private fun ProductCard(
                         Icons.Default.Add,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.padding(7.dp).size(18.dp)
+                        modifier = Modifier.padding(6.dp).size(16.dp)
                     )
                 }
                 if (modifiersEnabled && product.hasModifiers) {
                     Surface(
-                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
+                        modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
                         shape = RoundedCornerShape(999.dp),
                         color = CookitSurfaceRaised.copy(alpha = 0.96f),
                         border = BorderStroke(1.dp, CookitLine)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(Icons.Default.Tune, null, tint = CookitAccent, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(t.optionsAvailable, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(t.optionsAvailable, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                         }
                     }
                 }
             }
-            Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Text(
                     product.name,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
                     String.format(Locale.FRANCE, "%.2f €", product.price),
-                    color = CookitGreen,
+                    color = CookitInk,
                     fontWeight = FontWeight.Black,
-                    fontSize = 18.sp
+                    fontSize = 17.sp
                 )
             }
         }
@@ -1885,13 +1892,13 @@ private fun CartPane(
 ) {
     Card(
         modifier = modifier.fillMaxHeight(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(15.dp),
         colors = CardDefaults.cardColors(containerColor = CookitSurface),
         border = BorderStroke(1.dp, CookitLine)
     ) {
-        Column(Modifier.fillMaxSize().padding(18.dp)) {
+        Column(Modifier.fillMaxSize().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(t.cart, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                Text(t.cart, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.weight(1f))
                 if (!tableLabel.isNullOrBlank()) {
                     Surface(shape = RoundedCornerShape(12.dp), color = CookitCanvas) {
@@ -1899,13 +1906,13 @@ private fun CartPane(
                     }
                 }
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
             if (cart.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(t.emptyCart, color = CookitMuted)
                 }
             } else {
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(cart, key = { it.stableKey }) { line ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -1960,9 +1967,17 @@ private fun CartPane(
                                 )
                             }
                             if (!line.freeItem) {
-                                FilledTonalIconButton(onClick = { onMinus(line.stableKey) }, enabled = !locked) { Icon(Icons.Default.Remove, null) }
-                                Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
-                                FilledTonalIconButton(onClick = { onPlus(line.stableKey) }, enabled = !locked) { Icon(Icons.Default.Add, null) }
+                                FilledTonalIconButton(
+                                    onClick = { onMinus(line.stableKey) },
+                                    enabled = !locked,
+                                    modifier = Modifier.size(34.dp)
+                                ) { Icon(Icons.Default.Remove, null, modifier = Modifier.size(17.dp)) }
+                                Text("${line.quantity}", Modifier.padding(horizontal = 7.dp), fontWeight = FontWeight.Black)
+                                FilledTonalIconButton(
+                                    onClick = { onPlus(line.stableKey) },
+                                    enabled = !locked,
+                                    modifier = Modifier.size(34.dp)
+                                ) { Icon(Icons.Default.Add, null, modifier = Modifier.size(17.dp)) }
                             } else {
                                 Text("×${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black, color = CookitOrange)
                             }
@@ -2002,13 +2017,13 @@ private fun CartPane(
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = CookitLine)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(t.total, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text(t.total, fontSize = 18.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.weight(1f))
                 Text(
                     String.format(Locale.FRANCE, "%.2f €", displayTotal),
-                    fontSize = 24.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Black,
-                    color = CookitGreen
+                    color = CookitInk
                 )
             }
             Spacer(Modifier.height(12.dp))
@@ -2016,8 +2031,8 @@ private fun CartPane(
                 OutlinedButton(
                     onClick = onCommercialTools,
                     enabled = !busy && cart.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(17.dp)
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(Icons.Default.LocalOffer, null)
                     Spacer(Modifier.width(8.dp))
@@ -2029,8 +2044,8 @@ private fun CartPane(
                 OutlinedButton(
                     onClick = onSendKitchen,
                     enabled = cart.isNotEmpty() && !busy,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(17.dp)
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(Icons.Default.SoupKitchen, null)
                     Spacer(Modifier.width(8.dp))
@@ -2041,8 +2056,8 @@ private fun CartPane(
                 OutlinedButton(
                     onClick = onBillingTools,
                     enabled = !busy,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(17.dp)
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(Icons.Default.CallSplit, null)
                     Spacer(Modifier.width(8.dp))
@@ -2053,8 +2068,8 @@ private fun CartPane(
             Button(
                 onClick = onCheckout,
                 enabled = !busy && (cart.isNotEmpty() || displayTotal > 0),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                shape = RoundedCornerShape(17.dp)
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(14.dp)
             ) {
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                 else Icon(Icons.Default.Payments, null)
@@ -4019,14 +4034,14 @@ private fun MetricCard(
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = CookitSurface),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, CookitLine)
     ) {
         Column(Modifier.padding(18.dp)) {
-            Icon(icon, null, tint = CookitOrange)
-            Spacer(Modifier.height(16.dp))
+            Icon(icon, null, tint = CookitAccent)
+            Spacer(Modifier.height(12.dp))
             Text(title, color = CookitMuted, fontSize = 12.sp)
-            Text(value, fontWeight = FontWeight.Black, fontSize = 24.sp)
+            Text(value, fontWeight = FontWeight.Black, fontSize = 22.sp)
             Text(note, color = CookitGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
     }
