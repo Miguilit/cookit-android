@@ -20,11 +20,8 @@ class MainActivity : ComponentActivity() {
 
         // Dark status bar: date/time/Wi-Fi/battery remain readable on restaurant tablets.
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(Color.rgb(20, 31, 24)),
-            navigationBarStyle = SystemBarStyle.light(
-                Color.TRANSPARENT,
-                Color.rgb(20, 31, 24)
-            )
+            statusBarStyle = SystemBarStyle.dark(Color.rgb(9, 11, 14)),
+            navigationBarStyle = SystemBarStyle.dark(Color.rgb(9, 11, 14))
         )
 
         setContent {

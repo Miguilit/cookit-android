@@ -1,0 +1,12 @@
+Cookit Android — iOS-inspired visual polish P1
+
+Apply on top of the current Android 0.15.0.47 source.
+
+unzip -o CookitAndroid_0.15.0.47_IOS_INSPIRED_UI_P1_20260929.zip -d .
+chmod +x scripts/ios-inspired-ui-p1-check.sh
+./scripts/ios-inspired-ui-p1-check.sh
+git diff --check
+git status --short
+git --no-pager diff --stat
+
+This patch intentionally does NOT bump versionCode/versionName.
