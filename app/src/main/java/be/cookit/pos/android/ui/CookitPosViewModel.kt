@@ -112,6 +112,13 @@ data class PosUiState(
     val orderCancelReasonText: String = "",
     val orderCancelBusy: Boolean = false,
     val orderCancelError: String? = null,
+    val orderHistoryOpen: Boolean = false,
+    val orderHistoryTarget: PosOrder? = null,
+    val orderHistoryDetail: OrderHistoryDetail? = null,
+    val orderHistoryBusy: Boolean = false,
+    val orderHistoryError: String? = null,
+    val orderHistoryPrintBusy: Boolean = false,
+    val orderHistoryPrintMessage: String? = null,
     val certificationCapabilities: NativeCertificationCapabilities = NativeCertificationCapabilities(),
     val modifierDialogOpen: Boolean = false,
     val modifierBusy: Boolean = false,
@@ -1850,6 +1857,87 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         orderCancelError = readableError(error)
                     )
                 }
+            }
+        }
+    }
+
+    fun openOrderHistory(order: PosOrder) {
+        val currentToken = token ?: return
+        _ui.update {
+            it.copy(
+                orderHistoryOpen = true,
+                orderHistoryTarget = order,
+                orderHistoryDetail = null,
+                orderHistoryBusy = true,
+                orderHistoryError = null,
+                orderHistoryPrintMessage = null
+            )
+        }
+        viewModelScope.launch {
+            runCatching { api.orderHistoryDetail(currentToken, order.id) }
+                .onSuccess { detail ->
+                    _ui.update { it.copy(orderHistoryDetail = detail, orderHistoryBusy = false, orderHistoryError = null) }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(orderHistoryBusy = false, orderHistoryError = readableError(error)) }
+                }
+        }
+    }
+
+    fun closeOrderHistory() {
+        if (_ui.value.orderHistoryPrintBusy) return
+        _ui.update {
+            it.copy(
+                orderHistoryOpen = false,
+                orderHistoryTarget = null,
+                orderHistoryDetail = null,
+                orderHistoryBusy = false,
+                orderHistoryError = null,
+                orderHistoryPrintMessage = null
+            )
+        }
+    }
+
+    fun reprintOrderHistory(mode: String = "summary", splitId: Long? = null) {
+        val currentToken = token ?: return
+        val detail = _ui.value.orderHistoryDetail ?: return
+        if (_ui.value.orderHistoryPrintBusy) return
+        viewModelScope.launch {
+            _ui.update { it.copy(orderHistoryPrintBusy = true, orderHistoryPrintMessage = null) }
+            val rendered = runCatching { api.renderOrderReceipt(currentToken, detail.id, mode, splitId) }
+                .getOrElse { error ->
+                    _ui.update { it.copy(orderHistoryPrintBusy = false, orderHistoryPrintMessage = readableError(error)) }
+                    return@launch
+                }
+            if (rendered.printText.isBlank()) {
+                _ui.update { it.copy(orderHistoryPrintBusy = false, orderHistoryPrintMessage = "receipt_empty") }
+                return@launch
+            }
+
+            val state = _ui.value
+            if (state.hardwareMode == HardwareMode.SIMULATED) {
+                recordHardwareSimulationEvent(
+                    action = "order_reprint",
+                    detail = "${detail.id}:${rendered.mode}:${rendered.splitId ?: 0}",
+                    previewText = rendered.printText
+                )
+                _ui.update { it.copy(orderHistoryPrintBusy = false, orderHistoryPrintMessage = "receipt_printed") }
+                return@launch
+            }
+
+            val ok = when (state.printerProvider) {
+                PrinterProviderType.ESC_POS -> runCatchingPreservingCancellation {
+                    printerService.printText(state.printerHost, state.printerPort, rendered.printText, true)
+                }.getOrDefault(false)
+                PrinterProviderType.STAR -> runCatchingPreservingCancellation {
+                    starPrinterService.printText(state.starIdentifier, state.starInterface, rendered.printText, true)
+                }.getOrDefault(false)
+            }
+            _ui.update {
+                it.copy(
+                    orderHistoryPrintBusy = false,
+                    orderHistoryPrintMessage = if (ok) "receipt_printed" else "receipt_print_failed"
+                )
             }
         }
     }

@@ -625,6 +625,105 @@ class CookitHttpClient {
         }
     }
 
+    suspend fun orderHistoryDetail(token: String, orderId: Long): OrderHistoryDetail = withContext(Dispatchers.IO) {
+        val obj = request("pos/orders/$orderId/history-detail", token = token)
+        val financials = obj.optJSONObject("financials") ?: JSONObject()
+        val customerObj = obj.optJSONObject("customer")
+        val tableObj = obj.optJSONObject("table")
+        val itemsJson = obj.optJSONArray("items") ?: JSONArray()
+        val paymentsJson = obj.optJSONArray("payments") ?: JSONArray()
+        val splitsJson = obj.optJSONArray("split_bills") ?: JSONArray()
+
+        val items = buildList {
+            for (i in 0 until itemsJson.length()) {
+                val row = itemsJson.optJSONObject(i) ?: continue
+                val qty = (row.longAny("quantity", "qty") ?: 1L).toInt().coerceAtLeast(1)
+                val price = row.doubleAny("price", "unit_price") ?: 0.0
+                val amount = row.doubleAny("amount", "total") ?: (price * qty)
+                add(OrderHistoryItem(
+                    id = row.longAny("id", "order_item_id") ?: i.toLong(),
+                    name = row.optText("name", "menu_item_name", "item_name") ?: "Article",
+                    quantity = qty,
+                    unitPrice = price,
+                    amount = amount
+                ))
+            }
+        }
+        val payments = buildList {
+            for (i in 0 until paymentsJson.length()) {
+                val row = paymentsJson.optJSONObject(i) ?: continue
+                add(OrderHistoryPayment(
+                    id = row.longAny("id") ?: i.toLong(),
+                    method = row.optText("payment_method", "method") ?: "—",
+                    amount = row.doubleAny("amount") ?: 0.0,
+                    status = row.optText("status", "payment_status")
+                ))
+            }
+        }
+        val splits = buildList {
+            for (i in 0 until splitsJson.length()) {
+                val row = splitsJson.optJSONObject(i) ?: continue
+                add(OrderHistorySplit(
+                    id = row.longAny("id") ?: continue,
+                    label = row.optText("label") ?: "Part ${i + 1}",
+                    amount = row.doubleAny("amount") ?: 0.0,
+                    status = row.optText("status") ?: "pending",
+                    paymentMethod = row.optText("payment_method")
+                ))
+            }
+        }
+        val fiscalObj = obj.optJSONObject("fiscal")
+        val fiscal = fiscalObj?.let {
+            OrderFiscalSummary(
+                transactionId = it.longAny("transaction_id") ?: 0L,
+                status = it.optText("status"),
+                sequenceNumber = it.longAny("sequence_number"),
+                receiptNumber = it.optText("receipt_number"),
+                providerReference = it.optText("provider_reference")
+            )
+        }
+        val codeRaw = obj.optText("order_number", "formatted_order_number") ?: orderId.toString()
+        OrderHistoryDetail(
+            id = obj.longAny("id") ?: orderId,
+            code = if (codeRaw.startsWith("#")) codeRaw else "#$codeRaw",
+            customer = customerObj?.optText("name") ?: "Client",
+            table = tableObj?.optText("table_code", "name"),
+            operationalStatus = obj.optText("operational_status", "order_status") ?: "—",
+            settlementStatus = obj.optText("settlement_status", "status") ?: "—",
+            subtotal = financials.doubleAny("sub_total") ?: 0.0,
+            discount = financials.doubleAny("discount_amount") ?: 0.0,
+            loyaltyDiscount = financials.doubleAny("loyalty_discount_amount") ?: 0.0,
+            stampDiscount = financials.doubleAny("stamp_discount_amount") ?: 0.0,
+            tip = financials.doubleAny("tip_amount") ?: 0.0,
+            tax = financials.doubleAny("tax_total") ?: 0.0,
+            deliveryFee = financials.doubleAny("delivery_fee") ?: 0.0,
+            total = financials.doubleAny("total") ?: obj.doubleAny("grand_total", "total") ?: 0.0,
+            amountPaid = financials.doubleAny("amount_paid") ?: 0.0,
+            items = items,
+            payments = payments,
+            splits = splits,
+            fiscal = fiscal
+        )
+    }
+
+    suspend fun renderOrderReceipt(
+        token: String,
+        orderId: Long,
+        mode: String = "summary",
+        splitId: Long? = null
+    ): OrderReceiptRender = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("mode", mode)
+        if (splitId != null) body.put("split_id", splitId)
+        val obj = request("pos/orders/$orderId/receipt-render", method = "POST", token = token, body = body)
+        OrderReceiptRender(
+            orderId = obj.longAny("order_id") ?: orderId,
+            mode = obj.optText("mode") ?: mode,
+            splitId = obj.longAny("split_id"),
+            printText = obj.optText("print_text") ?: "",
+            contentSha256 = obj.optText("content_sha256")
+        )
+    }
+
     suspend fun orderDraft(token: String, orderId: Long): RemoteOrderDraft = withContext(Dispatchers.IO) {
         val json = request("pos/orders/$orderId", token = token)
 

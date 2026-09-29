@@ -135,6 +135,68 @@ data class OrderCancelReason(
     val cancelKot: Boolean
 )
 
+
+data class OrderHistoryItem(
+    val id: Long,
+    val name: String,
+    val quantity: Int,
+    val unitPrice: Double,
+    val amount: Double
+)
+
+data class OrderHistoryPayment(
+    val id: Long,
+    val method: String,
+    val amount: Double,
+    val status: String? = null
+)
+
+data class OrderHistorySplit(
+    val id: Long,
+    val label: String,
+    val amount: Double,
+    val status: String,
+    val paymentMethod: String? = null
+)
+
+data class OrderFiscalSummary(
+    val transactionId: Long,
+    val status: String?,
+    val sequenceNumber: Long?,
+    val receiptNumber: String?,
+    val providerReference: String?
+)
+
+data class OrderHistoryDetail(
+    val id: Long,
+    val code: String,
+    val customer: String,
+    val table: String?,
+    val operationalStatus: String,
+    val settlementStatus: String,
+    val subtotal: Double,
+    val discount: Double,
+    val loyaltyDiscount: Double,
+    val stampDiscount: Double,
+    val tip: Double,
+    val tax: Double,
+    val deliveryFee: Double,
+    val total: Double,
+    val amountPaid: Double,
+    val items: List<OrderHistoryItem>,
+    val payments: List<OrderHistoryPayment>,
+    val splits: List<OrderHistorySplit>,
+    val fiscal: OrderFiscalSummary?
+)
+
+data class OrderReceiptRender(
+    val orderId: Long,
+    val mode: String,
+    val splitId: Long?,
+    val printText: String,
+    val contentSha256: String? = null
+)
+
 data class DashboardSalesPoint(
     val date: String,
     val total: Double

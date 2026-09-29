@@ -278,6 +278,14 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
             onDismiss = vm::closeOrderCancel
         )
     }
+
+    if (state.orderHistoryOpen) {
+        OrderHistoryDialog(
+            state = state,
+            onReprint = vm::reprintOrderHistory,
+            onDismiss = vm::closeOrderHistory
+        )
+    }
 }
 
 @Composable
@@ -584,6 +592,7 @@ private fun ScreenContent(
         Screen.ORDERS -> OrdersScreen(
             state = state,
             onOpen = vm::openOrderForPos,
+            onHistory = vm::openOrderHistory,
             onCreateKot = vm::createKotForOrder,
             onCancelOrder = vm::openOrderCancel,
             t = t
@@ -2887,6 +2896,7 @@ private fun dashboardChange(value: Double, suffix: String): String {
 private fun OrdersScreen(
     state: PosUiState,
     onOpen: (PosOrder) -> Unit,
+    onHistory: (PosOrder) -> Unit,
     onCreateKot: (PosOrder) -> Unit,
     onCancelOrder: (PosOrder) -> Unit,
     t: UiStrings
@@ -2927,7 +2937,9 @@ private fun OrdersScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = !paid && !cancelled && !state.orderLoadBusy) { onOpen(order) },
+                        .clickable(enabled = !state.orderLoadBusy) {
+                            if (paid || cancelled) onHistory(order) else onOpen(order)
+                        },
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(18.dp),
                     border = BorderStroke(1.dp, CookitLine)
@@ -2959,6 +2971,17 @@ private fun OrdersScreen(
                                 color = CookitMuted,
                                 fontSize = 12.sp
                             )
+                            if (paid || cancelled) {
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { onHistory(order) },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.ReceiptLong, null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(orderHistoryStrings(state.language).details, fontWeight = FontWeight.Bold)
+                                }
+                            }
                             if ((!cancelled && !hasKot) || canCancel) {
                                 Spacer(Modifier.height(8.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3021,6 +3044,141 @@ private fun OrdersScreen(
     }
 }
 
+
+@Composable
+private fun OrderHistoryDialog(
+    state: PosUiState,
+    onReprint: (String, Long?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val hs = orderHistoryStrings(state.language)
+    val detail = state.orderHistoryDetail
+    Dialog(
+        onDismissRequest = { if (!state.orderHistoryPrintBusy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.88f).fillMaxHeight(0.88f),
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White
+        ) {
+            Column(Modifier.fillMaxSize().padding(22.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ReceiptLong, null, tint = CookitOrange)
+                    Spacer(Modifier.width(10.dp))
+                    Text(hs.orderDetails, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss, enabled = !state.orderHistoryPrintBusy) { Text(hs.close) }
+                }
+                HorizontalDivider(color = CookitLine)
+                Spacer(Modifier.height(12.dp))
+
+                when {
+                    state.orderHistoryBusy -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    state.orderHistoryError != null -> Text(state.orderHistoryError, color = MaterialTheme.colorScheme.error)
+                    detail == null -> Text("—", color = CookitMuted)
+                    else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        item {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(detail.code, fontSize = 22.sp, fontWeight = FontWeight.Black)
+                                    Text(listOfNotNull(detail.customer, detail.table).joinToString(" • "), color = CookitMuted)
+                                    Text("${detail.operationalStatus} • ${detail.settlementStatus}", color = CookitMuted, fontSize = 12.sp)
+                                }
+                                Text(String.format(Locale.FRANCE, "%.2f €", detail.total), fontSize = 24.sp, fontWeight = FontWeight.Black)
+                            }
+                        }
+                        item {
+                            Card(colors = CardDefaults.cardColors(containerColor = CookitCanvas), shape = RoundedCornerShape(16.dp)) {
+                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(hs.items, fontWeight = FontWeight.Black)
+                                    detail.items.forEach { item ->
+                                        Row(Modifier.fillMaxWidth()) {
+                                            Text("${item.quantity}× ${item.name}", Modifier.weight(1f))
+                                            Text(String.format(Locale.FRANCE, "%.2f €", item.amount), fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    HorizontalDivider(color = CookitLine)
+                                    Row(Modifier.fillMaxWidth()) { Text(hs.subtotal, Modifier.weight(1f)); Text(String.format(Locale.FRANCE, "%.2f €", detail.subtotal)) }
+                                    val discounts = detail.discount + detail.loyaltyDiscount + detail.stampDiscount
+                                    if (discounts > 0.0) Row(Modifier.fillMaxWidth()) { Text(hs.discounts, Modifier.weight(1f)); Text(String.format(Locale.FRANCE, "-%.2f €", discounts)) }
+                                    if (detail.tip > 0.0) Row(Modifier.fillMaxWidth()) { Text(hs.tip, Modifier.weight(1f)); Text(String.format(Locale.FRANCE, "%.2f €", detail.tip)) }
+                                    if (detail.tax > 0.0) Row(Modifier.fillMaxWidth()) { Text(hs.vat, Modifier.weight(1f)); Text(String.format(Locale.FRANCE, "%.2f €", detail.tax)) }
+                                    Row(Modifier.fillMaxWidth()) { Text(hs.paidAmount, Modifier.weight(1f), fontWeight = FontWeight.Bold); Text(String.format(Locale.FRANCE, "%.2f €", detail.amountPaid), fontWeight = FontWeight.Bold) }
+                                }
+                            }
+                        }
+                        item {
+                            Text(hs.payments, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            if (detail.payments.isEmpty()) Text(hs.noPayments, color = CookitMuted)
+                            detail.payments.forEach { payment ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                    Text(payment.method.replace('_', ' ').uppercase(Locale.getDefault()), Modifier.weight(1f))
+                                    Text(String.format(Locale.FRANCE, "%.2f €", payment.amount), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        detail.fiscal?.let { fiscal ->
+                            item {
+                                Card(colors = CardDefaults.cardColors(containerColor = CookitSoftGreen), shape = RoundedCornerShape(14.dp)) {
+                                    Column(Modifier.padding(12.dp)) {
+                                        Text(hs.fiscalReceipt, fontWeight = FontWeight.Black)
+                                        Text("TX ${fiscal.transactionId} • ${fiscal.status ?: "—"}")
+                                        fiscal.receiptNumber?.let { Text("${hs.receiptNumber}: $it") }
+                                        fiscal.providerReference?.let { Text(it, color = CookitMuted, fontSize = 11.sp) }
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Text(hs.reprint, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            Button(
+                                onClick = { onReprint("summary", null) },
+                                enabled = !state.orderHistoryPrintBusy,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Print, null); Spacer(Modifier.width(8.dp)); Text(hs.reprintSummary)
+                            }
+                            if (detail.splits.any { it.status.lowercase(Locale.ROOT) == "paid" }) {
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { onReprint("individual", null) },
+                                    enabled = !state.orderHistoryPrintBusy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text(hs.reprintAllSplits) }
+                                detail.splits.filter { it.status.lowercase(Locale.ROOT) == "paid" }.forEach { split ->
+                                    TextButton(
+                                        onClick = { onReprint("single", split.id) },
+                                        enabled = !state.orderHistoryPrintBusy,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("${hs.reprintSplit} • ${split.label} • ${String.format(Locale.FRANCE, "%.2f €", split.amount)}") }
+                                }
+                            }
+                            state.orderHistoryPrintMessage?.let { msg ->
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    when (msg) {
+                                        "receipt_printed" -> hs.printed
+                                        "receipt_print_failed", "receipt_empty" -> hs.printFailed
+                                        else -> msg
+                                    },
+                                    color = if (msg == "receipt_printed") CookitGreen else MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (state.orderHistoryPrintBusy) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp)); Text(hs.printing)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun OrderCancelDialog(
