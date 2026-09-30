@@ -1,0 +1,14 @@
+Cookit Android 0.15.0.50 / versionCode 85
+AdvancedSet UC221 partial-unit line discount
+
+Base expected: 0.15.0.49 / versionCode 84 with final dark UI + P3B.2.
+
+Changed:
+- Models.kt: commercial line-adjustment quantity metadata
+- CookitHttpClient.kt: sends optional discount.quantity and reads active quantity
+- CookitPosViewModel.kt: validates/passes selected quantity
+- Localization.kt: FR/NL/EN/DE quantity labels
+- CookitApp.kt: +/- quantity selector + All action for aggregate lines
+- app/build.gradle.kts: version 0.15.0.50 / code 85
+
+Install over the existing app. Do not uninstall and do not clear app/Room data.

@@ -349,12 +349,26 @@ data class CommercialTotals(
     val grandTotal: Double = 0.0
 )
 
+data class CommercialLineAdjustment(
+    val id: Long = 0L,
+    val orderItemId: Long = 0L,
+    val type: String = "",
+    val value: Double = 0.0,
+    val amount: Double = 0.0,
+    val baseAmount: Double = 0.0,
+    val effectiveAmount: Double = 0.0,
+    val lineQuantity: Int? = null,
+    val appliedQuantity: Int? = null,
+    val quantityScope: String? = null
+)
+
 data class CommercialSnapshot(
     val contractVersion: String = "",
     val orderId: Long = 0L,
     val discount: CommercialDiscountState = CommercialDiscountState(),
     val tip: CommercialTipState = CommercialTipState(),
     val loyalty: CommercialLoyaltyState = CommercialLoyaltyState(),
+    val lineAdjustments: List<CommercialLineAdjustment> = emptyList(),
     val totals: CommercialTotals = CommercialTotals()
 )
 

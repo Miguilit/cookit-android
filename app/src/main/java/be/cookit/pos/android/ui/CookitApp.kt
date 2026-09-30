@@ -2368,6 +2368,37 @@ private fun CommercialToolsDialog(
     var lineDiscountType by remember(state.commercialSheetOpen) { mutableStateOf("percent") }
     var lineDiscountText by remember(state.commercialSheetOpen) { mutableStateOf("50") }
 
+    val selectedLine = lineDiscountCandidates.firstOrNull {
+        it.remoteLineId == selectedLineId
+    }
+    val selectedLineAdjustment = commercial?.lineAdjustments?.firstOrNull {
+        it.orderItemId == selectedLineId
+    }
+    var lineDiscountQuantity by remember(state.commercialSheetOpen, selectedLineId) {
+        mutableIntStateOf(1)
+    }
+
+    LaunchedEffect(
+        selectedLineId,
+        selectedLine?.quantity,
+        selectedLineAdjustment?.id,
+        selectedLineAdjustment?.appliedQuantity
+    ) {
+        val maxQuantity = selectedLine?.quantity?.coerceAtLeast(1) ?: 1
+        lineDiscountQuantity = (selectedLineAdjustment?.appliedQuantity ?: 1)
+            .coerceIn(1, maxQuantity)
+
+        selectedLineAdjustment?.let { adjustment ->
+            adjustment.type
+                .takeIf { it == "fixed" || it == "percent" }
+                ?.let { lineDiscountType = it }
+
+            adjustment.value
+                .takeIf { it > 0.0 }
+                ?.let { lineDiscountText = String.format(Locale.US, "%.2f", it) }
+        }
+    }
+
     var tipText by remember(state.commercialSheetOpen, commercial?.tip?.amount) {
         mutableStateOf(
             commercial?.tip?.amount
@@ -2581,6 +2612,60 @@ private fun CommercialToolsDialog(
                                     )
                                 }
 
+                                selectedLine?.takeIf { it.quantity > 1 }?.let { line ->
+                                    Text(
+                                        t.lineDiscountUnits,
+                                        color = CookitMuted,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                lineDiscountQuantity =
+                                                    (lineDiscountQuantity - 1).coerceAtLeast(1)
+                                            },
+                                            enabled = !state.commercialBusy && lineDiscountQuantity > 1,
+                                            contentPadding = PaddingValues(horizontal = 12.dp)
+                                        ) {
+                                            Icon(Icons.Default.Remove, contentDescription = null)
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = CookitSurface,
+                                            border = BorderStroke(1.dp, CookitLine)
+                                        ) {
+                                            Text(
+                                                "$lineDiscountQuantity / ${line.quantity}",
+                                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                lineDiscountQuantity =
+                                                    (lineDiscountQuantity + 1).coerceAtMost(line.quantity)
+                                            },
+                                            enabled = !state.commercialBusy && lineDiscountQuantity < line.quantity,
+                                            contentPadding = PaddingValues(horizontal = 12.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null)
+                                        }
+
+                                        TextButton(
+                                            onClick = { lineDiscountQuantity = line.quantity },
+                                            enabled = !state.commercialBusy && lineDiscountQuantity != line.quantity
+                                        ) {
+                                            Text(t.lineDiscountAllUnits, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     FilterChip(
                                         selected = lineDiscountType == "fixed",
@@ -2612,13 +2697,16 @@ private fun CommercialToolsDialog(
                                                 vm.applyLineDiscount(
                                                     lineId,
                                                     lineDiscountType,
-                                                    lineDiscountValue ?: 0.0
+                                                    lineDiscountValue ?: 0.0,
+                                                    lineDiscountQuantity
                                                 )
                                             }
                                         },
                                         enabled = !state.commercialBusy &&
                                             selectedLineId != null &&
                                             (lineDiscountValue ?: 0.0) > 0.0 &&
+                                            lineDiscountQuantity >= 1 &&
+                                            lineDiscountQuantity <= (selectedLine?.quantity ?: 1) &&
                                             (lineDiscountType != "percent" || (lineDiscountValue ?: 0.0) <= 100.0),
                                         modifier = Modifier.weight(1f)
                                     ) {

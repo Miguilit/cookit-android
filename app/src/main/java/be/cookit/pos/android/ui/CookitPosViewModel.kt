@@ -1984,8 +1984,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             runCatching { api.orderRefundContext(currentToken, detail.id) }
                 .onSuccess { context ->
-                    val selected = context.payments.firstOrNull { it.canCustomerRefund || it.canWaste }
-                        ?: context.payments.firstOrNull()
+                    val selected = context.payments.firstOrNull {
+                        it.canFullCustomerRefund || it.canPartialCustomerRefund || it.canWaste
+                    } ?: context.payments.firstOrNull()
                     _ui.update {
                         it.copy(
                             orderRefundContext = context,
@@ -2083,14 +2084,23 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         val type = state.orderRefundType
+        val fullBlockers = payment.fullRefundBlockers.filterNot {
+            it == "fiscal_partial_refund_not_supported" ||
+                it == "loyalty_partial_refund_not_supported"
+        }
+        val fullFallbackEligible = !payment.hasProcessedRefund &&
+            payment.amount > 0.0 &&
+            payment.fiscalFullRefundSupported &&
+            payment.loyaltyFullReversalSupported &&
+            fullBlockers.isEmpty()
         val allowed = when (type) {
-            "full" -> payment.canFullCustomerRefund
+            "full" -> payment.canFullCustomerRefund || fullFallbackEligible
             "partial" -> payment.canPartialCustomerRefund
             "waste" -> payment.canWaste
             else -> false
         }
         val blockers = when (type) {
-            "full" -> payment.fullRefundBlockers
+            "full" -> fullBlockers
             "partial" -> payment.partialRefundBlockers
             "waste" -> payment.blockers.filter { it == "refund_already_processed" }
             else -> payment.blockers
@@ -3008,22 +3018,42 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun applyLineDiscount(orderItemId: Long, type: String, value: Double) {
+    fun applyLineDiscount(
+        orderItemId: Long,
+        type: String,
+        value: Double,
+        quantity: Int? = null
+    ) {
         if (!_ui.value.certificationCapabilities.manualDiscount) return
         if (value <= 0.0 || (type == "percent" && value > 100.0)) return
-        mutateLineDiscount(orderItemId, type, value, "line_discount_applied")
+
+        val line = _ui.value.draftCart.firstOrNull {
+            it.remoteLineId == orderItemId && !it.freeItem
+        } ?: return
+
+        val normalizedQuantity = quantity ?: line.quantity
+        if (normalizedQuantity !in 1..line.quantity) return
+
+        mutateLineDiscount(
+            orderItemId,
+            type,
+            value,
+            "line_discount_applied",
+            normalizedQuantity
+        )
     }
 
     fun clearLineDiscount(orderItemId: Long) {
         if (!_ui.value.certificationCapabilities.manualDiscount) return
-        mutateLineDiscount(orderItemId, null, 0.0, "line_discount_cleared")
+        mutateLineDiscount(orderItemId, null, 0.0, "line_discount_cleared", null)
     }
 
     private fun mutateLineDiscount(
         orderItemId: Long,
         type: String?,
         value: Double,
-        successMessage: String
+        successMessage: String,
+        quantity: Int?
     ) {
         val currentToken = token ?: return
         val state = _ui.value
@@ -3041,7 +3071,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     orderId = orderId,
                     orderItemId = orderItemId,
                     type = type,
-                    value = value
+                    value = value,
+                    quantity = quantity
                 )
 
                 // Never infer the new line total locally. Reload the authoritative order and

@@ -1329,7 +1329,8 @@ class CookitHttpClient {
         orderId: Long,
         orderItemId: Long,
         type: String?,
-        value: Double
+        value: Double,
+        quantity: Int? = null
     ) = withContext(Dispatchers.IO) {
         val normalizedType = type
             ?.trim()
@@ -1342,6 +1343,11 @@ class CookitHttpClient {
             JSONObject()
                 .put("type", normalizedType)
                 .put("value", value.coerceAtLeast(0.0))
+                .apply {
+                    quantity
+                        ?.takeIf { it > 0 }
+                        ?.let { put("quantity", it) }
+                }
         }
 
         request(
@@ -1656,6 +1662,27 @@ class CookitHttpClient {
             ?: rawOrder?.doubleAny("total")
             ?: fallbackTotal
 
+        val lineAdjustmentsJson = source.optJSONArray("line_adjustments") ?: JSONArray()
+        val lineAdjustments = buildList {
+            for (index in 0 until lineAdjustmentsJson.length()) {
+                val row = lineAdjustmentsJson.optJSONObject(index) ?: continue
+                add(
+                    CommercialLineAdjustment(
+                        id = row.longAny("id") ?: 0L,
+                        orderItemId = row.longAny("order_item_id") ?: 0L,
+                        type = row.optText("type") ?: "",
+                        value = row.doubleAny("value") ?: 0.0,
+                        amount = row.doubleAny("amount") ?: 0.0,
+                        baseAmount = row.doubleAny("base_amount") ?: 0.0,
+                        effectiveAmount = row.doubleAny("effective_amount") ?: 0.0,
+                        lineQuantity = row.optInt("line_quantity", -1).takeIf { it > 0 },
+                        appliedQuantity = row.optInt("applied_quantity", -1).takeIf { it > 0 },
+                        quantityScope = row.optText("quantity_scope")?.takeIf { it.isNotBlank() }
+                    )
+                )
+            }
+        }
+
         return CommercialSnapshot(
             contractVersion = source.optText("contract_version") ?: "a4.1",
             orderId = source.longAny("order_id", "id") ?: orderId,
@@ -1684,6 +1711,7 @@ class CookitHttpClient {
                     ?: 0.0,
                 stampDiscountEmbeddedInItems = loyaltyObject?.optBoolean("stamp_discount_embedded_in_items", true) ?: true
             ),
+            lineAdjustments = lineAdjustments,
             totals = CommercialTotals(
                 subTotal = subTotal,
                 chargesTotal = totalsObject?.optDouble("charges_total", 0.0)
