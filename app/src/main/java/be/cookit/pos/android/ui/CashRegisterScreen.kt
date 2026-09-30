@@ -62,15 +62,17 @@ import be.cookit.pos.android.domain.CashMovement
 import kotlinx.coroutines.delay
 import java.util.Locale
 
-private val CashOrange = Color(0xFFF97316)
+private val CashOrange = Color(0xFFF47A24)
 private val CashInk = Color(0xFFF4F7FA)
-private val CashOrangeSoft = Color(0xFFFFF3E8)
-private val CashGreen = Color(0xFF15803D)
-private val CashGreenSoft = Color(0xFFEAF7EE)
-private val CashBlueSoft = Color(0xFFEAF3FF)
-private val CashCanvas = Color(0xFFF7F8FA)
-private val CashLine = Color(0xFFE6E8EC)
-private val CashMuted = Color(0xFF68707C)
+private val CashSurface = Color(0xFF15191E)
+private val CashSurfaceRaised = Color(0xFF1D2228)
+private val CashOrangeSoft = Color(0xFF2D211A)
+private val CashGreen = Color(0xFF39C77A)
+private val CashGreenSoft = Color(0xFF14271D)
+private val CashBlueSoft = Color(0xFF102A34)
+private val CashCanvas = Color(0xFF090B0E)
+private val CashLine = Color(0xFF2A3037)
+private val CashMuted = Color(0xFF9EA7B0)
 
 private data class CashManagerStrings(
     val managerTitle: String,
@@ -782,7 +784,7 @@ fun PremiumCashRegisterScreen(
                             20.dp
                         ),
                     color =
-                        Color.White,
+                        CashSurfaceRaised,
                     border =
                         BorderStroke(
                             1.dp,
@@ -1313,7 +1315,7 @@ fun PremiumCashRegisterScreen(
                 colors =
                     CardDefaults.cardColors(
                         containerColor =
-                            Color.White
+                            CashSurface
                     ),
                 border =
                     BorderStroke(
@@ -1470,7 +1472,7 @@ fun PremiumCashRegisterScreen(
                     colors =
                         CardDefaults.cardColors(
                             containerColor =
-                                Color.White
+                                CashSurface
                         ),
                     border =
                         BorderStroke(
@@ -2195,7 +2197,7 @@ private fun HardwareSimulationPreviewDialog(
                             14.dp
                         ),
                     color =
-                        Color.White,
+                        CashSurfaceRaised,
                     border =
                         BorderStroke(
                             1.dp,
@@ -2904,7 +2906,7 @@ private fun CashRegisterOpening(
             colors =
                 CardDefaults.cardColors(
                     containerColor =
-                        Color.White
+                        CashSurface
                 ),
             border =
                 BorderStroke(
@@ -3090,7 +3092,7 @@ private fun CashMetric(
                     if (emphasized) {
                         CashOrangeSoft
                     } else {
-                        Color.White
+                        CashSurface
                     }
             ),
         border =
@@ -3197,7 +3199,7 @@ private fun CashMovementRow(
         colors =
             CardDefaults.cardColors(
                 containerColor =
-                    Color.White
+                    CashSurface
             ),
         border =
             BorderStroke(
@@ -3507,7 +3509,7 @@ private fun ClosingDialog(
             colors =
                 CardDefaults.cardColors(
                     containerColor =
-                        Color.White
+                        CashSurface
                 ),
             shape =
                 RoundedCornerShape(

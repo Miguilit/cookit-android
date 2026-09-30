@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -326,11 +327,15 @@ private fun LoginScreen(
                     Surface(
                         modifier = Modifier.size(54.dp),
                         shape = RoundedCornerShape(18.dp),
-                        color = CookitOrange
+                        color = CookitSurfaceRaised,
+                        border = BorderStroke(1.dp, CookitLine)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 30.sp)
-                        }
+                        Image(
+                            painter = painterResource(be.cookit.pos.android.R.drawable.cookit_logo_mark),
+                            contentDescription = "Cookit",
+                            modifier = Modifier.fillMaxSize().padding(6.dp),
+                            contentScale = ContentScale.Fit
+                        )
                     }
                     Spacer(Modifier.width(14.dp))
                     Column {
@@ -401,11 +406,15 @@ private fun SideNavigation(screen: Screen, state: PosUiState, t: UiStrings, onSe
             Surface(
                 modifier = Modifier.size(44.dp),
                 shape = RoundedCornerShape(14.dp),
-                color = CookitOrange
+                color = CookitSurfaceRaised,
+                border = BorderStroke(1.dp, CookitLine)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 23.sp)
-                }
+                Image(
+                    painter = painterResource(be.cookit.pos.android.R.drawable.cookit_logo_mark),
+                    contentDescription = "Cookit",
+                    modifier = Modifier.fillMaxSize().padding(5.dp),
+                    contentScale = ContentScale.Fit
+                )
             }
 
             Spacer(Modifier.height(10.dp))

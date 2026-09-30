@@ -1,0 +1,24 @@
+Cookit Android 0.15.0.50 — Cash dark + Cookit logo
+
+Apply on top of 0.15.0.49:
+
+unzip -o CookitAndroid_0.15.0.50_CASH_DARK_LOGO_FINAL_20260930.zip -d .
+chmod +x scripts/ios-inspired-ui-cash-logo-final-check.sh
+./scripts/ios-inspired-ui-cash-logo-final-check.sh
+git diff --check
+git status --short
+git --no-pager diff --stat
+
+Then:
+
+git add app/build.gradle.kts \
+  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt \
+  app/src/main/java/be/cookit/pos/android/ui/CashRegisterScreen.kt \
+  app/src/main/res/drawable-nodpi/cookit_logo_mark.png \
+  docs/IOS_INSPIRED_UI_CASH_LOGO_FINAL.md \
+  scripts/ios-inspired-ui-cash-logo-final-check.sh \
+  DEPLOY_IOS_INSPIRED_UI_CASH_LOGO_FINAL.txt
+
+git diff --cached --check
+git commit -m "Cookit Android 0.15.0.50: harmonize cash UI and install Cookit mark"
+git push
