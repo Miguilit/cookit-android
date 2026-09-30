@@ -3288,18 +3288,42 @@ private fun OrderRefundDialog(
 
     fun blockerText(code: String): String = when (code) {
         "fiscal_correction_required" -> rs.fiscalBlocked
+        "fiscal_full_refund_unsupported" -> rs.fiscalFullUnsupported
+        "fiscal_partial_refund_not_supported" -> rs.fiscalPartialUnsupported
+        "fiscal_refund_pending" -> rs.fiscalPending
+        "fiscal_refund_failed" -> rs.fiscalFailed
         "loyalty_reversal_required" -> rs.loyaltyBlocked
+        "loyalty_partial_refund_not_supported" -> rs.loyaltyPartialUnsupported
         "refund_already_processed" -> rs.alreadyProcessed
         "payment_required" -> rs.paymentRequired
         "refund_reason_required" -> rs.reasonRequired
         "refund_amount_invalid" -> rs.amountInvalid
         "refund_not_allowed", "permission_denied" -> rs.notAllowed
-        else -> code
+        else -> rs.notAllowed
     }
 
+    val fullBlockers = selectedPayment?.fullRefundBlockers.orEmpty().filterNot {
+        it == "fiscal_partial_refund_not_supported" ||
+            it == "loyalty_partial_refund_not_supported"
+    }
+    val selectedBlockers = when (state.orderRefundType) {
+        "full" -> fullBlockers
+        "partial" -> selectedPayment?.partialRefundBlockers.orEmpty()
+        "waste" -> selectedPayment?.blockers.orEmpty().filter { it == "refund_already_processed" }
+        else -> selectedPayment?.blockers.orEmpty()
+    }
+    val fullFallbackEligible = selectedPayment?.let { payment ->
+        !payment.hasProcessedRefund &&
+            payment.amount > 0.0 &&
+            payment.fiscalFullRefundSupported &&
+            payment.loyaltyFullReversalSupported &&
+            fullBlockers.isEmpty()
+    } == true
     val operationAllowed = when (state.orderRefundType) {
+        "full" -> selectedPayment?.canFullCustomerRefund == true || fullFallbackEligible
+        "partial" -> selectedPayment?.canPartialCustomerRefund == true
         "waste" -> selectedPayment?.canWaste == true
-        else -> selectedPayment?.canCustomerRefund == true
+        else -> false
     }
     val confirmEnabled = !state.orderRefundBusy &&
         selectedPayment != null &&
@@ -3365,25 +3389,35 @@ private fun OrderRefundDialog(
                                         )
                                     }
                                 }
+                                selectedBlockers.firstOrNull()?.let { blocker ->
+                                    Spacer(Modifier.height(5.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.errorContainer
+                                    ) {
+                                        Text(
+                                            blockerText(blocker),
+                                            Modifier.fillMaxWidth().padding(9.dp),
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
                                 selectedPayment?.let { payment ->
-                                    payment.blockers.distinct()
-                                        .filter { blocker ->
-                                            state.orderRefundType != "waste" || blocker == "refund_already_processed"
+                                    if (state.orderRefundType == "full" && payment.fiscalRefundStatus in setOf("queued", "claimed", "submitted")) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = CookitCanvas
+                                        ) {
+                                            Text(
+                                                rs.fiscalPending,
+                                                Modifier.fillMaxWidth().padding(9.dp),
+                                                color = CookitMuted,
+                                                fontSize = 12.sp
+                                            )
                                         }
-                                        .forEach { blocker ->
-                                            Spacer(Modifier.height(5.dp))
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = MaterialTheme.colorScheme.errorContainer
-                                            ) {
-                                                Text(
-                                                    blockerText(blocker),
-                                                    Modifier.fillMaxWidth().padding(9.dp),
-                                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                                    fontSize = 12.sp
-                                                )
-                                            }
-                                        }
+                                    }
                                 }
                                 selectedPayment?.let { payment ->
                                     val method = payment.paymentMethod.lowercase(Locale.ROOT)
@@ -3479,6 +3513,10 @@ private fun OrderRefundDialog(
                                             )
                                         }
                                     }
+                                }
+                                if (selectedReason == null) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(rs.reasonRequired, color = CookitMuted, fontSize = 11.sp)
                                 }
                             }
 

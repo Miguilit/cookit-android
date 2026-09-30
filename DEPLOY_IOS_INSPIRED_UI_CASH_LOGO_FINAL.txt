@@ -1,8 +1,8 @@
-Cookit Android 0.15.0.50 — Cash dark + Cookit logo
+Cookit Android 0.15.0.49 — Cash dark + Cookit logo + P3B.2 preserved
 
-Apply on top of 0.15.0.49:
+Apply on top of functional baseline 0.15.0.49 / versionCode 84:
 
-unzip -o CookitAndroid_0.15.0.50_CASH_DARK_LOGO_FINAL_20260930.zip -d .
+unzip -o CookitAndroid_0.15.0.49_CASH_DARK_LOGO_P3B2_MERGED_20260930.zip -d .
 chmod +x scripts/ios-inspired-ui-cash-logo-final-check.sh
 ./scripts/ios-inspired-ui-cash-logo-final-check.sh
 git diff --check
@@ -20,5 +20,5 @@ git add app/build.gradle.kts \
   DEPLOY_IOS_INSPIRED_UI_CASH_LOGO_FINAL.txt
 
 git diff --cached --check
-git commit -m "Cookit Android 0.15.0.50: harmonize cash UI and install Cookit mark"
+git commit -m "Cookit Android 0.15.0.49: merge dark UI with P3B.2 refund contract"
 git push

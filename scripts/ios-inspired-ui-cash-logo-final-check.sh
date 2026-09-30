@@ -7,11 +7,11 @@ LOGO="app/src/main/res/drawable-nodpi/cookit_logo_mark.png"
 BUILD="app/build.gradle.kts"
 
 echo "======================================================"
-echo " COOKIT — CASH DARK + LOGO FINAL CHECK"
+echo " COOKIT — CASH DARK + LOGO + P3B.2 MERGE CHECK"
 echo "======================================================"
 
-grep -q 'versionCode = 85' "$BUILD"
-grep -q 'versionName = "0.15.0.50"' "$BUILD"
+grep -q 'versionCode = 84' "$BUILD"
+grep -q 'versionName = "0.15.0.49"' "$BUILD"
 echo "VERSION_METADATA=yes"
 
 test -s "$LOGO"
@@ -40,5 +40,24 @@ if [ "$WHITE_COUNT" -ne 1 ]; then
 fi
 
 echo "CASH_DARK_SURFACES=yes"
+
+# P3B.2 functional guards: do not regress the refund capability split.
+grep -q 'selectedPayment?.fullRefundBlockers.orEmpty()' "$APP"
+grep -q 'selectedPayment?.partialRefundBlockers.orEmpty()' "$APP"
+grep -q 'selectedPayment?.canFullCustomerRefund == true' "$APP"
+grep -q 'selectedPayment?.canPartialCustomerRefund == true' "$APP"
+grep -q 'payment.fiscalFullRefundSupported' "$APP"
+grep -q 'payment.loyaltyFullReversalSupported' "$APP"
+grep -q '"fiscal_partial_refund_not_supported" -> rs.fiscalPartialUnsupported' "$APP"
+grep -q '"loyalty_partial_refund_not_supported" -> rs.loyaltyPartialUnsupported' "$APP"
+if grep -q 'else -> code' "$APP"; then
+  echo "FAIL: raw backend blocker code can leak to the UI"
+  exit 1
+fi
+if grep -q 'payment.blockers.distinct()' "$APP"; then
+  echo "FAIL: generic blockers loop would reintroduce P3B.2 regression"
+  exit 1
+fi
+echo "P3B2_REFUND_CONTRACT_PRESERVED=yes"
 echo "BUSINESS_LOGIC_SCOPE_GUARD=yes"
 echo "CASH_LOGO_FINAL_CHECK=PASS"
