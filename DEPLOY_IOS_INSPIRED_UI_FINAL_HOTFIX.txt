@@ -1,0 +1,22 @@
+Cookit Android 0.15.0.49 — iOS-inspired UI final hotfix
+
+Apply on top of 0.15.0.48 UI FINAL.
+
+unzip -o CookitAndroid_0.15.0.49_IOS_INSPIRED_UI_HOTFIX_20260930.zip -d .
+chmod +x scripts/ios-inspired-ui-final-hotfix-check.sh
+./scripts/ios-inspired-ui-final-hotfix-check.sh
+git diff --check
+git status --short
+git --no-pager diff --stat
+
+Suggested commit:
+git add app/build.gradle.kts \
+  app/src/main/java/be/cookit/pos/android/ui/CookitApp.kt \
+  app/src/main/java/be/cookit/pos/android/ui/CashRegisterScreen.kt \
+  docs/IOS_INSPIRED_UI_FINAL_HOTFIX.md \
+  scripts/ios-inspired-ui-final-hotfix-check.sh \
+  DEPLOY_IOS_INSPIRED_UI_FINAL_HOTFIX.txt
+
+git diff --cached --check
+git commit -m "Cookit Android 0.15.0.49: fix dark UI titles dialogs and bottom insets"
+git push

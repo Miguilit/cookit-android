@@ -63,6 +63,7 @@ import kotlinx.coroutines.delay
 import java.util.Locale
 
 private val CashOrange = Color(0xFFF97316)
+private val CashInk = Color(0xFFF4F7FA)
 private val CashOrangeSoft = Color(0xFFFFF3E8)
 private val CashGreen = Color(0xFF15803D)
 private val CashGreenSoft = Color(0xFFEAF7EE)
@@ -957,7 +958,8 @@ fun PremiumCashRegisterScreen(
                     Text(
                         s.title,
                         fontSize = 30.sp,
-                        fontWeight = FontWeight.Black
+                        fontWeight = FontWeight.Black,
+                        color = CashInk
                     )
 
                     Text(
@@ -2821,7 +2823,8 @@ private fun CashRegisterOpening(
             s.openingTitle,
             fontSize = 30.sp,
             fontWeight =
-                FontWeight.Black
+                FontWeight.Black,
+            color = CashInk
         )
 
         Text(
