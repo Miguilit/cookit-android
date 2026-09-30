@@ -168,8 +168,16 @@ data class RefundPaymentContext(
     val wasteAmount: Double = 0.0,
     val hasProcessedRefund: Boolean = false,
     val canCustomerRefund: Boolean = false,
+    val canFullCustomerRefund: Boolean = false,
+    val canPartialCustomerRefund: Boolean = false,
     val canWaste: Boolean = false,
-    val blockers: List<String> = emptyList()
+    val blockers: List<String> = emptyList(),
+    val fullRefundBlockers: List<String> = emptyList(),
+    val partialRefundBlockers: List<String> = emptyList(),
+    val fiscalFullRefundSupported: Boolean = false,
+    val loyaltyFullReversalSupported: Boolean = false,
+    val fiscalRefundTransactionId: Long? = null,
+    val fiscalRefundStatus: String? = null
 )
 
 data class OrderRefundContext(
@@ -192,7 +200,9 @@ data class RefundProcessResult(
     val status: String,
     val reason: String?,
     val fiscalAction: String?,
-    val loyaltyAction: String?
+    val loyaltyAction: String?,
+    val fiscalTransactionId: Long? = null,
+    val fiscalStatus: String? = null
 )
 
 data class OrderHistorySplit(

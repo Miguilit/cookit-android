@@ -2083,13 +2083,20 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         val type = state.orderRefundType
-        if (type == "waste") {
-            if (!payment.canWaste) {
-                _ui.update { it.copy(orderRefundError = payment.blockers.firstOrNull() ?: "refund_not_allowed") }
-                return
-            }
-        } else if (!payment.canCustomerRefund) {
-            _ui.update { it.copy(orderRefundError = payment.blockers.firstOrNull() ?: "refund_not_allowed") }
+        val allowed = when (type) {
+            "full" -> payment.canFullCustomerRefund
+            "partial" -> payment.canPartialCustomerRefund
+            "waste" -> payment.canWaste
+            else -> false
+        }
+        val blockers = when (type) {
+            "full" -> payment.fullRefundBlockers
+            "partial" -> payment.partialRefundBlockers
+            "waste" -> payment.blockers.filter { it == "refund_already_processed" }
+            else -> payment.blockers
+        }
+        if (!allowed) {
+            _ui.update { it.copy(orderRefundError = blockers.firstOrNull() ?: "refund_not_allowed") }
             return
         }
 
@@ -2102,7 +2109,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _ui.update { it.copy(orderRefundBusy = true, orderRefundError = null) }
             runCatching {
-                api.processPaymentRefund(
+                var outcome = api.processPaymentRefund(
                     token = currentToken,
                     paymentId = payment.id,
                     refundReasonId = reasonId,
@@ -2111,10 +2118,36 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     amount = partialAmount,
                     notes = state.orderRefundNotes
                 )
+
+                // P3B full fiscal refunds are two-phase: Cookit Cloud first queues
+                // one immutable prepared correction, then the foreground fiscal agent
+                // claims/submits/ACKs it. Repeating the exact request is idempotent and
+                // finalizes the business refund only after the correction is fiscalized.
+                if (type == "full" && outcome.status == "fiscal_pending") {
+                    var attempts = 0
+                    while (outcome.status == "fiscal_pending" && attempts < 30) {
+                        attempts += 1
+                        delay(2_000)
+                        outcome = api.processPaymentRefund(
+                            token = currentToken,
+                            paymentId = payment.id,
+                            refundReasonId = reasonId,
+                            refundType = type,
+                            partialRefundType = null,
+                            amount = null,
+                            notes = state.orderRefundNotes
+                        )
+                    }
+                }
+
+                if (outcome.status == "fiscal_pending") {
+                    throw IllegalStateException("fiscal_refund_pending")
+                }
+
                 val freshDetail = api.orderHistoryDetail(currentToken, detail.id)
                 val freshOrders = api.orders(currentToken, _ui.value.user.branchId)
-                freshDetail to freshOrders
-            }.onSuccess { (freshDetail, freshOrders) ->
+                Triple(freshDetail, freshOrders, outcome)
+            }.onSuccess { (freshDetail, freshOrders, outcome) ->
                 knownOrderIds.addAll(freshOrders.map { it.id })
                 _ui.update {
                     it.copy(

@@ -724,6 +724,15 @@ class CookitHttpClient {
                         blockersJson.optString(j).takeIf { it.isNotBlank() }?.let(::add)
                     }
                 }
+                fun stringList(name: String): List<String> {
+                    val array = row.optJSONArray(name) ?: JSONArray()
+                    return buildList {
+                        for (k in 0 until array.length()) {
+                            array.optString(k).takeIf { it.isNotBlank() }?.let(::add)
+                        }
+                    }
+                }
+
                 add(
                     RefundPaymentContext(
                         id = row.longAny("id") ?: continue,
@@ -734,8 +743,16 @@ class CookitHttpClient {
                         wasteAmount = row.doubleAny("waste_amount") ?: 0.0,
                         hasProcessedRefund = row.optBoolean("has_processed_refund", false),
                         canCustomerRefund = row.optBoolean("can_customer_refund", false),
+                        canFullCustomerRefund = row.optBoolean("can_full_customer_refund", row.optBoolean("can_customer_refund", false)),
+                        canPartialCustomerRefund = row.optBoolean("can_partial_customer_refund", row.optBoolean("can_customer_refund", false)),
                         canWaste = row.optBoolean("can_waste", false),
-                        blockers = blockers
+                        blockers = blockers,
+                        fullRefundBlockers = stringList("full_refund_blockers"),
+                        partialRefundBlockers = stringList("partial_refund_blockers"),
+                        fiscalFullRefundSupported = row.optBoolean("fiscal_full_refund_supported", false),
+                        loyaltyFullReversalSupported = row.optBoolean("loyalty_full_reversal_supported", false),
+                        fiscalRefundTransactionId = row.longAny("fiscal_refund_transaction_id"),
+                        fiscalRefundStatus = row.optText("fiscal_refund_status")
                     )
                 )
             }
@@ -792,7 +809,9 @@ class CookitHttpClient {
             status = obj.optText("status") ?: "processed",
             reason = obj.optText("reason"),
             fiscalAction = obj.optText("fiscal_action"),
-            loyaltyAction = obj.optText("loyalty_action")
+            loyaltyAction = obj.optText("loyalty_action"),
+            fiscalTransactionId = obj.longAny("fiscal_transaction_id"),
+            fiscalStatus = obj.optText("fiscal_status")
         )
     }
 

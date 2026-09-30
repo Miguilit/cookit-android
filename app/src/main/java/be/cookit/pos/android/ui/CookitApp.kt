@@ -247,7 +247,7 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
         Scaffold(
             topBar = { TopBar(state = state, t = t, compact = true) },
             bottomBar = {
-                NavigationBar(containerColor = CookitSurface) {
+                NavigationBar {
                     mobileScreens(state.policy).forEach {
                         NavigationBarItem(
                             selected = screen == it,
@@ -319,7 +319,7 @@ private fun LoginScreen(
         Card(
             modifier = Modifier.widthIn(max = 460.dp).padding(24.dp),
             shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(containerColor = CookitSurface)
+            colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(Modifier.padding(30.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -391,24 +391,24 @@ private fun SideNavigation(screen: Screen, state: PosUiState, t: UiStrings, onSe
     val mainScreens = screens.filterNot { it == settings }
 
     Surface(
-        modifier = Modifier.width(78.dp).fillMaxHeight(),
-        color = CookitSidebar
+        modifier = Modifier.width(88.dp).fillMaxHeight(),
+        color = Color(0xFF152019)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Surface(
-                modifier = Modifier.size(44.dp),
-                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = CookitOrange
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 23.sp)
+                    Text("C", color = Color.White, fontWeight = FontWeight.Black, fontSize = 25.sp)
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
 
             mainScreens.forEach { item ->
                 SideNavigationItem(
@@ -442,24 +442,24 @@ private fun SideNavigationItem(
 ) {
     Column(
         modifier = Modifier
-            .padding(horizontal = 6.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(13.dp))
-            .background(if (selected) CookitSoftAccent else Color.Transparent)
+            .padding(horizontal = 7.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(15.dp))
+            .background(if (selected) Color.White.copy(alpha = 0.13f) else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(vertical = 7.dp)
+            .padding(vertical = 8.dp)
             .fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
             iconFor(item),
             contentDescription = label,
-            tint = if (selected) CookitAccent else Color(0xFFD1D7DD),
-            modifier = Modifier.size(21.dp)
+            tint = if (selected) CookitOrange else Color(0xFFD7DDD9),
+            modifier = Modifier.size(22.dp)
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(3.dp))
         Text(
             label,
-            color = if (selected) CookitInk else CookitMuted,
+            color = if (selected) Color.White else Color(0xFFB9C0BC),
             fontSize = 9.sp,
             maxLines = 1
         )
@@ -479,9 +479,9 @@ private fun iconFor(screen: Screen) = when (screen) {
 
 @Composable
 private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
-    Surface(modifier = Modifier.statusBarsPadding(), color = CookitSidebar, shadowElevation = 0.dp) {
+    Surface(modifier = Modifier.statusBarsPadding(), color = Color.White, shadowElevation = 1.dp) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(if (compact) 60.dp else 64.dp).padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().height(if (compact) 68.dp else 78.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             RestaurantBrandMark(
@@ -489,25 +489,25 @@ private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
                 restaurantName = state.user.restaurant,
                 compact = compact
             )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     state.user.restaurant,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = if (compact) 16.sp else 18.sp
+                    fontSize = if (compact) 17.sp else 20.sp
                 )
                 Text(
                     "${state.user.branch} • ${state.user.role.name.lowercase().replaceFirstChar { it.uppercase() }}${if (state.demoMode) " • Démo" else ""}",
                     color = CookitMuted,
-                    fontSize = 11.sp
+                    fontSize = 12.sp
                 )
             }
             Surface(
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = if (state.online) CookitSoftGreen else MaterialTheme.colorScheme.errorContainer
             ) {
                 Row(
-                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
@@ -519,20 +519,20 @@ private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
                         if (state.online) t.online else t.offline,
                         color = if (state.online) CookitGreen else MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp
+                        fontSize = 12.sp
                     )
                 }
             }
             if (!compact) {
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
                 IconButton(onClick = {}) {
                     BadgedBox(
                         badge = { if (state.unreadInbound > 0) Badge { Text(state.unreadInbound.toString()) } }
                     ) { Icon(Icons.Default.Notifications, null) }
                 }
                 Surface(
-                    modifier = Modifier.size(38.dp),
-                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.size(42.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = CookitSoftOrange
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -560,9 +560,9 @@ private fun RestaurantBrandMark(
     }
 
     Surface(
-        modifier = Modifier.size(if (compact) 36.dp else 40.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = if (bitmap == null) CookitSoftOrange else CookitSurfaceRaised,
+        modifier = Modifier.size(if (compact) 38.dp else 44.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = if (bitmap == null) CookitSoftOrange else Color.White,
         border = BorderStroke(1.dp, CookitLine)
     ) {
         if (bitmap != null) {
@@ -578,7 +578,7 @@ private fun RestaurantBrandMark(
                     restaurantName.trim().firstOrNull()?.uppercase() ?: "R",
                     color = CookitOrange,
                     fontWeight = FontWeight.Black,
-                    fontSize = if (compact) 16.sp else 18.sp
+                    fontSize = if (compact) 17.sp else 20.sp
                 )
             }
         }
@@ -635,8 +635,8 @@ private fun InboundBanner(count: Int, orders: List<PosOrder>, onRead: () -> Unit
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        color = CookitSurfaceRaised,
-        border = BorderStroke(1.dp, CookitOrange.copy(alpha = 0.55f))
+        color = Color(0xFFFFF7E8),
+        border = BorderStroke(1.dp, Color(0xFFFFD99A))
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(12.dp), color = CookitOrange) {
@@ -674,7 +674,7 @@ private fun PosScreen(
     val config = LocalConfiguration.current
     val wide = config.screenWidthDp >= 900
 
-    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         InboundBanner(inboundCount, inboundOrders, onReadInbound)
 
         Row(
@@ -682,7 +682,7 @@ private fun PosScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(state.openedOrderCode ?: t.newOrder, fontWeight = FontWeight.Black, fontSize = 22.sp)
+            Text(state.openedOrderCode ?: t.newOrder, fontWeight = FontWeight.Black, fontSize = 26.sp)
             if (state.resumedRemoteOrderId != null || state.pendingRemoteOrderId != null) {
                 Spacer(Modifier.width(10.dp))
                 OutlinedButton(onClick = vm::startNewOrder, enabled = !state.orderLoadBusy) {
@@ -764,9 +764,9 @@ private fun PosScreen(
             }
         }
         if (wide) {
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 ProductPane(
-                    modifier = Modifier.weight(1.72f),
+                    modifier = Modifier.weight(1.65f),
                     categories = categories,
                     products = products,
                     selectedCategory = selectedCategory,
@@ -776,7 +776,7 @@ private fun PosScreen(
                     modifiersEnabled = state.certificationCapabilities.modifiers
                 )
                 CartPane(
-                    modifier = Modifier.weight(0.86f),
+                    modifier = Modifier.weight(0.9f),
                     cart = cart,
                     t = t,
                     busy = state.checkoutBusy || state.commercialBusy,
@@ -1021,17 +1021,17 @@ private fun PaymentChoice(
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
-        color = if (selected) CookitSoftAccent else CookitSurface,
-        border = BorderStroke(1.dp, if (selected) CookitAccent else CookitLine)
+        color = if (selected) CookitSoftOrange else Color.White,
+        border = BorderStroke(1.dp, if (selected) CookitOrange else CookitLine)
     ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = if (selected) CookitAccent else CookitMuted)
+            Icon(icon, null, tint = if (selected) CookitOrange else CookitMuted)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.ExtraBold)
                 Text(subtitle, color = CookitMuted, fontSize = 12.sp)
             }
-            if (selected) Icon(Icons.Default.CheckCircle, null, tint = CookitAccent)
+            if (selected) Icon(Icons.Default.CheckCircle, null, tint = CookitOrange)
         }
     }
 }
@@ -1068,9 +1068,9 @@ private fun BillingToolsDialog(
                 .fillMaxWidth(0.9f)
                 .fillMaxHeight(0.9f)
                 .widthIn(max = 980.dp),
-            shape = RoundedCornerShape(22.dp),
-            color = CookitSurface,
-            shadowElevation = 0.dp
+            shape = RoundedCornerShape(26.dp),
+            color = Color.White,
+            shadowElevation = 18.dp
         ) {
             Column(Modifier.fillMaxSize().padding(22.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1444,8 +1444,8 @@ private fun BillingMetric(label: String, amount: Double, modifier: Modifier = Mo
 private fun BillingSection(title: String, content: @Composable ColumnScope.() -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = CookitSurfaceRaised,
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
         border = BorderStroke(1.dp, CookitLine)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1473,18 +1473,17 @@ private fun MobileCartBar(
     val total = canonicalTotal?.takeIf { it >= 0.0 } ?: lineTotal
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = CookitSurface,
-        shadowElevation = 0.dp,
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, CookitLine)
+        color = Color.White,
+        shadowElevation = 10.dp,
+        shape = RoundedCornerShape(20.dp)
     ) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
                 Text("${cart.sumOf { it.quantity }} articles", color = CookitMuted, fontSize = 12.sp)
-                Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text(String.format(Locale.FRANCE, "%.2f €", total), fontSize = 20.sp, fontWeight = FontWeight.Black)
             }
             if (commercialEnabled) {
                 FilledTonalIconButton(
@@ -1524,16 +1523,16 @@ private fun MobileCartBar(
 private fun OrderTypeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(11.dp),
-        color = if (selected) CookitSoftAccent else CookitSurface,
-        border = BorderStroke(1.dp, if (selected) CookitAccent else CookitLine)
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) CookitSoftOrange else Color.White,
+        border = BorderStroke(1.dp, if (selected) CookitOrange else CookitLine)
     ) {
         Text(
             label,
-            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
-            color = if (selected) CookitAccent else CookitMuted,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            color = if (selected) CookitOrange else CookitMuted,
             fontWeight = FontWeight.Bold,
-            fontSize = 11.sp
+            fontSize = 12.sp
         )
     }
 }
@@ -1550,32 +1549,25 @@ private fun ProductPane(
     modifiersEnabled: Boolean
 ) {
     Column(modifier) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(categories) { category ->
                 FilterChip(
                     selected = category.id == selectedCategory,
                     onClick = { onCategory(category.id) },
-                    label = { Text("${category.emoji} ${category.name}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                    shape = RoundedCornerShape(11.dp),
-                    colors = FilterChipDefaults.filterChipColors(
-                        containerColor = CookitSurface,
-                        labelColor = CookitMuted,
-                        selectedContainerColor = CookitSoftAccent,
-                        selectedLabelColor = CookitAccent
-                    )
+                    label = { Text("${category.emoji} ${category.name}") }
                 )
             }
         }
-        Spacer(Modifier.height(9.dp))
+        Spacer(Modifier.height(12.dp))
 
         val visibleProducts = products.filter {
             selectedCategory == 0L || it.categoryId == selectedCategory
         }
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 160.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 22.dp)
+            columns = GridCells.Adaptive(minSize = 180.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 32.dp)
         ) {
             items(visibleProducts, key = { it.id }) { product ->
                 ProductCard(
@@ -1599,62 +1591,62 @@ private fun ProductCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(206.dp)
+            .height(226.dp)
             .clickable { onAdd(product) },
-        shape = RoundedCornerShape(15.dp),
-        colors = CardDefaults.cardColors(containerColor = CookitSurface),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, CookitLine)
     ) {
         Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().height(126.dp)) {
+            Box(Modifier.fillMaxWidth().height(142.dp)) {
                 ProductImage(
                     product = product,
                     modifier = Modifier.fillMaxSize()
                 )
                 Surface(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
                     shape = RoundedCornerShape(30.dp),
-                    color = CookitAccent
+                    color = CookitOrange
                 ) {
                     Icon(
                         Icons.Default.Add,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.padding(6.dp).size(16.dp)
+                        modifier = Modifier.padding(7.dp).size(18.dp)
                     )
                 }
                 if (modifiersEnabled && product.hasModifiers) {
                     Surface(
-                        modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
                         shape = RoundedCornerShape(999.dp),
-                        color = CookitSurfaceRaised.copy(alpha = 0.96f),
+                        color = Color.White.copy(alpha = 0.94f),
                         border = BorderStroke(1.dp, CookitLine)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Tune, null, tint = CookitAccent, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Tune, null, tint = CookitOrange, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(t.optionsAvailable, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                            Text(t.optionsAvailable, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                         }
                     }
                 }
             }
-            Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 14.dp, vertical = 10.dp)) {
                 Text(
                     product.name,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
                     String.format(Locale.FRANCE, "%.2f €", product.price),
-                    color = CookitInk,
+                    color = CookitGreen,
                     fontWeight = FontWeight.Black,
-                    fontSize = 17.sp
+                    fontSize = 18.sp
                 )
             }
         }
@@ -1717,7 +1709,7 @@ private fun ModifierSelectionDialog(
                 .fillMaxWidth(0.92f)
                 .widthIn(max = 640.dp),
             shape = RoundedCornerShape(26.dp),
-            colors = CardDefaults.cardColors(containerColor = CookitSurface)
+            colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(
                 modifier = Modifier
@@ -1892,13 +1884,12 @@ private fun CartPane(
 ) {
     Card(
         modifier = modifier.fillMaxHeight(),
-        shape = RoundedCornerShape(15.dp),
-        colors = CardDefaults.cardColors(containerColor = CookitSurface),
-        border = BorderStroke(1.dp, CookitLine)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
-        Column(Modifier.fillMaxSize().padding(14.dp)) {
+        Column(Modifier.fillMaxSize().padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(t.cart, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                Text(t.cart, fontSize = 22.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.weight(1f))
                 if (!tableLabel.isNullOrBlank()) {
                     Surface(shape = RoundedCornerShape(12.dp), color = CookitCanvas) {
@@ -1906,13 +1897,13 @@ private fun CartPane(
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(14.dp))
             if (cart.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(t.emptyCart, color = CookitMuted)
                 }
             } else {
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(cart, key = { it.stableKey }) { line ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -1967,17 +1958,9 @@ private fun CartPane(
                                 )
                             }
                             if (!line.freeItem) {
-                                FilledTonalIconButton(
-                                    onClick = { onMinus(line.stableKey) },
-                                    enabled = !locked,
-                                    modifier = Modifier.size(34.dp)
-                                ) { Icon(Icons.Default.Remove, null, modifier = Modifier.size(17.dp)) }
-                                Text("${line.quantity}", Modifier.padding(horizontal = 7.dp), fontWeight = FontWeight.Black)
-                                FilledTonalIconButton(
-                                    onClick = { onPlus(line.stableKey) },
-                                    enabled = !locked,
-                                    modifier = Modifier.size(34.dp)
-                                ) { Icon(Icons.Default.Add, null, modifier = Modifier.size(17.dp)) }
+                                FilledTonalIconButton(onClick = { onMinus(line.stableKey) }, enabled = !locked) { Icon(Icons.Default.Remove, null) }
+                                Text("${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black)
+                                FilledTonalIconButton(onClick = { onPlus(line.stableKey) }, enabled = !locked) { Icon(Icons.Default.Add, null) }
                             } else {
                                 Text("×${line.quantity}", Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Black, color = CookitOrange)
                             }
@@ -2017,13 +2000,13 @@ private fun CartPane(
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = CookitLine)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(t.total, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text(t.total, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.weight(1f))
                 Text(
                     String.format(Locale.FRANCE, "%.2f €", displayTotal),
-                    fontSize = 22.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Black,
-                    color = CookitInk
+                    color = CookitGreen
                 )
             }
             Spacer(Modifier.height(12.dp))
@@ -2031,8 +2014,8 @@ private fun CartPane(
                 OutlinedButton(
                     onClick = onCommercialTools,
                     enabled = !busy && cart.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                    shape = RoundedCornerShape(14.dp)
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(17.dp)
                 ) {
                     Icon(Icons.Default.LocalOffer, null)
                     Spacer(Modifier.width(8.dp))
@@ -2044,8 +2027,8 @@ private fun CartPane(
                 OutlinedButton(
                     onClick = onSendKitchen,
                     enabled = cart.isNotEmpty() && !busy,
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                    shape = RoundedCornerShape(14.dp)
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(17.dp)
                 ) {
                     Icon(Icons.Default.SoupKitchen, null)
                     Spacer(Modifier.width(8.dp))
@@ -2056,8 +2039,8 @@ private fun CartPane(
                 OutlinedButton(
                     onClick = onBillingTools,
                     enabled = !busy,
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                    shape = RoundedCornerShape(14.dp)
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(17.dp)
                 ) {
                     Icon(Icons.Default.CallSplit, null)
                     Spacer(Modifier.width(8.dp))
@@ -2068,8 +2051,8 @@ private fun CartPane(
             Button(
                 onClick = onCheckout,
                 enabled = !busy && (cart.isNotEmpty() || displayTotal > 0),
-                modifier = Modifier.fillMaxWidth().height(50.dp),
-                shape = RoundedCornerShape(14.dp)
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(17.dp)
             ) {
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
                 else Icon(Icons.Default.Payments, null)
@@ -2797,8 +2780,8 @@ private fun CommercialSection(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = CookitSurfaceRaised,
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
         border = BorderStroke(1.dp, CookitLine)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2817,7 +2800,7 @@ private fun DeliveryOrderDialog(
     androidx.compose.ui.window.Dialog(onDismissRequest = vm::dismissDeliveryDetails) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(24.dp)
         ) {
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -2972,7 +2955,7 @@ private fun OrdersScreen(
                         .clickable(enabled = !state.orderLoadBusy) {
                             if (paid || cancelled) onHistory(order) else onOpen(order)
                         },
-                    colors = CardDefaults.cardColors(containerColor = CookitSurface),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
                     shape = RoundedCornerShape(18.dp),
                     border = BorderStroke(1.dp, CookitLine)
                 ) {
@@ -3274,7 +3257,12 @@ private fun OrderRefundDialog(
 
     fun blockerText(code: String): String = when (code) {
         "fiscal_correction_required" -> rs.fiscalBlocked
+        "fiscal_full_refund_unsupported" -> rs.fiscalFullUnsupported
+        "fiscal_partial_refund_not_supported" -> rs.fiscalPartialUnsupported
+        "fiscal_refund_pending" -> rs.fiscalPending
+        "fiscal_refund_failed" -> rs.fiscalFailed
         "loyalty_reversal_required" -> rs.loyaltyBlocked
+        "loyalty_partial_refund_not_supported" -> rs.loyaltyPartialUnsupported
         "refund_already_processed" -> rs.alreadyProcessed
         "payment_required" -> rs.paymentRequired
         "refund_reason_required" -> rs.reasonRequired
@@ -3283,9 +3271,17 @@ private fun OrderRefundDialog(
         else -> code
     }
 
+    val selectedBlockers = when (state.orderRefundType) {
+        "full" -> selectedPayment?.fullRefundBlockers.orEmpty()
+        "partial" -> selectedPayment?.partialRefundBlockers.orEmpty()
+        "waste" -> selectedPayment?.blockers.orEmpty().filter { it == "refund_already_processed" }
+        else -> selectedPayment?.blockers.orEmpty()
+    }
     val operationAllowed = when (state.orderRefundType) {
+        "full" -> selectedPayment?.canFullCustomerRefund == true
+        "partial" -> selectedPayment?.canPartialCustomerRefund == true
         "waste" -> selectedPayment?.canWaste == true
-        else -> selectedPayment?.canCustomerRefund == true
+        else -> false
     }
     val confirmEnabled = !state.orderRefundBusy &&
         selectedPayment != null &&
@@ -3349,25 +3345,35 @@ private fun OrderRefundDialog(
                                         )
                                     }
                                 }
+                                selectedBlockers.distinct().forEach { blocker ->
+                                    Spacer(Modifier.height(5.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MaterialTheme.colorScheme.errorContainer
+                                    ) {
+                                        Text(
+                                            blockerText(blocker),
+                                            Modifier.fillMaxWidth().padding(9.dp),
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
                                 selectedPayment?.let { payment ->
-                                    payment.blockers.distinct()
-                                        .filter { blocker ->
-                                            state.orderRefundType != "waste" || blocker == "refund_already_processed"
+                                    if (state.orderRefundType == "full" && payment.fiscalRefundStatus in setOf("queued", "claimed", "submitted")) {
+                                        Spacer(Modifier.height(6.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = CookitCanvas
+                                        ) {
+                                            Text(
+                                                rs.fiscalPending,
+                                                Modifier.fillMaxWidth().padding(9.dp),
+                                                color = CookitMuted,
+                                                fontSize = 12.sp
+                                            )
                                         }
-                                        .forEach { blocker ->
-                                            Spacer(Modifier.height(5.dp))
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = MaterialTheme.colorScheme.errorContainer
-                                            ) {
-                                                Text(
-                                                    blockerText(blocker),
-                                                    Modifier.fillMaxWidth().padding(9.dp),
-                                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                                    fontSize = 12.sp
-                                                )
-                                            }
-                                        }
+                                    }
                                 }
                                 selectedPayment?.let { payment ->
                                     val method = payment.paymentMethod.lowercase(Locale.ROOT)
@@ -3698,7 +3704,7 @@ private fun KotTicketCard(
     }
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = CookitSurface),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(1.dp, CookitLine)
     ) {
@@ -3778,7 +3784,7 @@ private fun DeliveryScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrin
             ) {
                 items(state.deliveryOrders, key = { it.id }) { order ->
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = CookitSurface),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
                         shape = RoundedCornerShape(20.dp),
                         border = BorderStroke(1.dp, CookitLine)
                     ) {
@@ -3821,7 +3827,7 @@ private fun DeliveryScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStrin
 @Composable
 private fun OperationalOrderCard(order: PosOrder, accent: Color) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = CookitSurface),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(20.dp),
         border = BorderStroke(1.dp, CookitLine)
     ) {
@@ -3866,7 +3872,7 @@ private fun EmptyOperationalState(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = CookitSurface),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(22.dp)
     ) {
         Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -3948,7 +3954,7 @@ private fun DashboardScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStri
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(
                 modifier = Modifier.weight(2f),
-                colors = CardDefaults.cardColors(containerColor = CookitSurface),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(22.dp),
                 border = BorderStroke(1.dp, CookitLine)
             ) {
@@ -3963,7 +3969,7 @@ private fun DashboardScreen(state: PosUiState, vm: CookitPosViewModel, t: UiStri
 
             Card(
                 modifier = Modifier.weight(1f),
-                colors = CardDefaults.cardColors(containerColor = CookitSurface),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
                 shape = RoundedCornerShape(22.dp),
                 border = BorderStroke(1.dp, CookitLine)
             ) {
@@ -4033,15 +4039,15 @@ private fun MetricCard(
 ) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = CookitSurface),
-        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(22.dp),
         border = BorderStroke(1.dp, CookitLine)
     ) {
         Column(Modifier.padding(18.dp)) {
-            Icon(icon, null, tint = CookitAccent)
-            Spacer(Modifier.height(12.dp))
+            Icon(icon, null, tint = CookitOrange)
+            Spacer(Modifier.height(16.dp))
             Text(title, color = CookitMuted, fontSize = 12.sp)
-            Text(value, fontWeight = FontWeight.Black, fontSize = 22.sp)
+            Text(value, fontWeight = FontWeight.Black, fontSize = 24.sp)
             Text(note, color = CookitGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         }
     }
@@ -4097,7 +4103,7 @@ private fun SettingsScreen(
         Text(if (state.demoMode) "Mode démo local" else t.settingsHelp, color = CookitMuted)
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(18.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -4127,7 +4133,7 @@ private fun SettingsScreen(
         val fiscalUi = fiscalStrings(state.language)
         val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured
         if (fiscalAvailable) Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(18.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -4172,7 +4178,7 @@ private fun SettingsScreen(
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(18.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5017,7 +5023,7 @@ private fun FiscalityScreen(
         Text("${state.user.branch} • ${fs.centerSubtitle}", color = CookitMuted)
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5075,7 +5081,7 @@ private fun FiscalityScreen(
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5199,7 +5205,7 @@ private fun FiscalityScreen(
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5386,7 +5392,7 @@ private fun FiscalityScreen(
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5439,7 +5445,7 @@ private fun FiscalityScreen(
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5472,7 +5478,7 @@ private fun FiscalityScreen(
             }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5561,7 +5567,7 @@ private fun FiscalityScreen(
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(20.dp),
             border = BorderStroke(1.dp, CookitLine)
         ) {
@@ -5671,7 +5677,7 @@ private fun SettingsRow(
     locked: Boolean = false
 ) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = CookitSurface),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, CookitLine)
     ) {
@@ -5695,7 +5701,7 @@ private fun PlaceholderScreen(title: String, subtitle: String) {
     Box(Modifier.fillMaxSize().padding(20.dp)) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = CookitSurface),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
             shape = RoundedCornerShape(24.dp)
         ) {
             Column(Modifier.padding(26.dp)) {
