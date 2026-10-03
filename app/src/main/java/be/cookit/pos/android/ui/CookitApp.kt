@@ -862,6 +862,16 @@ private fun PosScreen(
         )
     }
 
+    if (state.choiceDialogOpen) {
+        ChoiceMenuSelectionDialog(
+            state = state,
+            t = t,
+            onDismiss = vm::dismissChoiceMenuDialog,
+            onToggle = vm::toggleChoiceMenuOption,
+            onConfirm = vm::confirmChoiceMenuSelection
+        )
+    }
+
     if (state.commercialSheetOpen) {
         CommercialToolsDialog(
             state = state,
@@ -1606,6 +1616,17 @@ private fun ProductCard(
     t: UiStrings,
     modifiersEnabled: Boolean
 ) {
+    val isChoiceMenu =
+        product.requiresConfiguration &&
+            product.commercialType.equals(
+                "COMPOSITE_MENU",
+                ignoreCase = true
+            ) &&
+            product.compositionType.equals(
+                "CHOICE_MENU",
+                ignoreCase = true
+            )
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1633,7 +1654,10 @@ private fun ProductCard(
                         modifier = Modifier.padding(6.dp).size(16.dp)
                     )
                 }
-                if (modifiersEnabled && product.hasModifiers) {
+                if (
+                    isChoiceMenu ||
+                    (modifiersEnabled && product.hasModifiers)
+                ) {
                     Surface(
                         modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
                         shape = RoundedCornerShape(999.dp),
@@ -1705,6 +1729,516 @@ private fun ProductImage(product: Product, modifier: Modifier = Modifier.size(62
             )
         } else {
             Box(contentAlignment = Alignment.Center) { Text(product.emoji, fontSize = 26.sp) }
+        }
+    }
+}
+
+@Composable
+private fun ChoiceMenuSelectionDialog(
+    state: PosUiState,
+    t: UiStrings,
+    onDismiss: () -> Unit,
+    onToggle: (Long, Long) -> Unit,
+    onConfirm: () -> Unit
+) {
+    val product = state.choiceProduct ?: return
+    val composition = product.composition
+    val groups = composition?.groups.orEmpty()
+
+    val selectedDelta = groups.sumOf { group ->
+        val selectedIds =
+            state.selectedChoiceOptionIds[
+                group.id
+            ].orEmpty()
+
+        group.options
+            .filter { it.id in selectedIds }
+            .sumOf { it.priceDelta }
+    }
+
+    val configuredTotal =
+        product.price + selectedDelta
+
+    val validSelection =
+        composition != null &&
+            composition.isActive &&
+            groups.isNotEmpty() &&
+            groups.all { group ->
+                val selectedIds =
+                    state.selectedChoiceOptionIds[
+                        group.id
+                    ].orEmpty()
+
+                val validIds =
+                    selectedIds.filter { optionId ->
+                        group.options.any { option ->
+                            option.id == optionId &&
+                                option.available
+                        }
+                    }
+
+                validIds.size == selectedIds.size &&
+                    validIds.size >= group.minSelect &&
+                    validIds.size <= group.maxSelect
+            }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties =
+            DialogProperties(
+                usePlatformDefaultWidth = false
+            )
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .widthIn(max = 680.dp),
+            shape = RoundedCornerShape(26.dp),
+            colors =
+                CardDefaults.cardColors(
+                    containerColor = CookitSurface
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement =
+                    Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    verticalAlignment =
+                        Alignment.CenterVertically
+                ) {
+                    Column(
+                        Modifier.weight(1f)
+                    ) {
+                        Text(
+                            t.chooseOptions,
+                            fontSize = 22.sp,
+                            fontWeight =
+                                FontWeight.Black
+                        )
+                        Text(
+                            product.name,
+                            color = CookitMuted,
+                            fontWeight =
+                                FontWeight.SemiBold
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDismiss
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = null
+                        )
+                    }
+                }
+
+                if (
+                    composition == null ||
+                    !composition.isActive ||
+                    groups.isEmpty()
+                ) {
+                    Text(
+                        t.optionsLoadFailed,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .error,
+                        fontWeight =
+                            FontWeight.SemiBold
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 500.dp)
+                            .verticalScroll(
+                                rememberScrollState()
+                            ),
+                        verticalArrangement =
+                            Arrangement.spacedBy(18.dp)
+                    ) {
+                        groups.forEach { group ->
+                            val selectedIds =
+                                state
+                                    .selectedChoiceOptionIds[
+                                        group.id
+                                    ]
+                                    .orEmpty()
+
+                            Column(
+                                verticalArrangement =
+                                    Arrangement.spacedBy(
+                                        8.dp
+                                    )
+                            ) {
+                                Row(
+                                    modifier =
+                                        Modifier.fillMaxWidth(),
+                                    verticalAlignment =
+                                        Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        group.name,
+                                        fontWeight =
+                                            FontWeight.Black,
+                                        fontSize = 16.sp,
+                                        modifier =
+                                            Modifier.weight(1f)
+                                    )
+
+                                    Surface(
+                                        shape =
+                                            RoundedCornerShape(
+                                                999.dp
+                                            ),
+                                        color =
+                                            if (
+                                                selectedIds.size >=
+                                                group.minSelect &&
+                                                selectedIds.size <=
+                                                group.maxSelect
+                                            ) {
+                                                CookitSoftAccent
+                                            } else {
+                                                CookitSoftOrange
+                                            }
+                                    ) {
+                                        Text(
+                                            "${selectedIds.size}/${group.maxSelect}",
+                                            modifier =
+                                                Modifier.padding(
+                                                    horizontal =
+                                                        8.dp,
+                                                    vertical =
+                                                        3.dp
+                                                ),
+                                            color =
+                                                if (
+                                                    selectedIds.size >=
+                                                    group.minSelect &&
+                                                    selectedIds.size <=
+                                                    group.maxSelect
+                                                ) {
+                                                    CookitAccent
+                                                } else {
+                                                    CookitOrange
+                                                },
+                                            fontWeight =
+                                                FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
+                                    if (
+                                        group.minSelect > 0
+                                    ) {
+                                        Spacer(
+                                            Modifier.width(6.dp)
+                                        )
+                                        Surface(
+                                            shape =
+                                                RoundedCornerShape(
+                                                    999.dp
+                                                ),
+                                            color =
+                                                CookitSoftOrange
+                                        ) {
+                                            Text(
+                                                t.requiredOption,
+                                                modifier =
+                                                    Modifier.padding(
+                                                        horizontal =
+                                                            8.dp,
+                                                        vertical =
+                                                            3.dp
+                                                    ),
+                                                color =
+                                                    CookitOrange,
+                                                fontWeight =
+                                                    FontWeight.Bold,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                }
+
+                                group.options.forEach {
+                                    option ->
+
+                                    val selected =
+                                        option.id in
+                                            selectedIds
+
+                                    val capacityAvailable =
+                                        group.maxSelect == 1 ||
+                                            selected ||
+                                            selectedIds.size <
+                                                group.maxSelect
+
+                                    val enabled =
+                                        option.available &&
+                                            capacityAvailable
+
+                                    Surface(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable(
+                                                enabled =
+                                                    enabled
+                                            ) {
+                                                onToggle(
+                                                    group.id,
+                                                    option.id
+                                                )
+                                            },
+                                        shape =
+                                            RoundedCornerShape(
+                                                15.dp
+                                            ),
+                                        color =
+                                            if (selected) {
+                                                CookitSoftOrange
+                                            } else {
+                                                CookitCanvas
+                                            },
+                                        border =
+                                            BorderStroke(
+                                                1.dp,
+                                                if (selected) {
+                                                    CookitOrange
+                                                } else {
+                                                    CookitLine
+                                                }
+                                            )
+                                    ) {
+                                        Row(
+                                            modifier =
+                                                Modifier.padding(
+                                                    horizontal =
+                                                        12.dp,
+                                                    vertical =
+                                                        10.dp
+                                                ),
+                                            verticalAlignment =
+                                                Alignment
+                                                    .CenterVertically
+                                        ) {
+                                            if (
+                                                group.maxSelect ==
+                                                1
+                                            ) {
+                                                RadioButton(
+                                                    selected =
+                                                        selected,
+                                                    onClick = {
+                                                        if (
+                                                            enabled
+                                                        ) {
+                                                            onToggle(
+                                                                group.id,
+                                                                option.id
+                                                            )
+                                                        }
+                                                    },
+                                                    enabled =
+                                                        enabled
+                                                )
+                                            } else {
+                                                Checkbox(
+                                                    checked =
+                                                        selected,
+                                                    onCheckedChange = {
+                                                        if (
+                                                            enabled
+                                                        ) {
+                                                            onToggle(
+                                                                group.id,
+                                                                option.id
+                                                            )
+                                                        }
+                                                    },
+                                                    enabled =
+                                                        enabled
+                                                )
+                                            }
+
+                                            Spacer(
+                                                Modifier.width(6.dp)
+                                            )
+
+                                            Column(
+                                                Modifier.weight(1f)
+                                            ) {
+                                                Text(
+                                                    option.name,
+                                                    color =
+                                                        if (
+                                                            option.available
+                                                        ) {
+                                                            CookitInk
+                                                        } else {
+                                                            CookitMuted
+                                                        },
+                                                    fontWeight =
+                                                        FontWeight
+                                                            .SemiBold
+                                                )
+
+                                                if (
+                                                    !option.available
+                                                ) {
+                                                    Text(
+                                                        t.offline,
+                                                        color =
+                                                            CookitMuted,
+                                                        fontSize =
+                                                            10.sp
+                                                    )
+                                                }
+                                            }
+
+                                            Text(
+                                                if (
+                                                    option.priceDelta >
+                                                    0.0001
+                                                ) {
+                                                    String.format(
+                                                        Locale.FRANCE,
+                                                        "+%.2f €",
+                                                        option.priceDelta
+                                                    )
+                                                } else {
+                                                    t.included
+                                                },
+                                                color =
+                                                    if (
+                                                        option.priceDelta >
+                                                        0.0001
+                                                    ) {
+                                                        CookitGreen
+                                                    } else {
+                                                        CookitMuted
+                                                    },
+                                                fontWeight =
+                                                    FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Surface(
+                        modifier =
+                            Modifier.fillMaxWidth(),
+                        shape =
+                            RoundedCornerShape(16.dp),
+                        color = CookitCanvas,
+                        border =
+                            BorderStroke(
+                                1.dp,
+                                CookitLine
+                            )
+                    ) {
+                        Row(
+                            modifier =
+                                Modifier.padding(
+                                    horizontal = 14.dp,
+                                    vertical = 12.dp
+                                ),
+                            verticalAlignment =
+                                Alignment.CenterVertically
+                        ) {
+                            Text(
+                                t.total,
+                                color = CookitMuted,
+                                fontWeight =
+                                    FontWeight.SemiBold,
+                                modifier =
+                                    Modifier.weight(1f)
+                            )
+
+                            Text(
+                                String.format(
+                                    Locale.FRANCE,
+                                    "%.2f €",
+                                    configuredTotal
+                                ),
+                                color = CookitGreen,
+                                fontSize = 20.sp,
+                                fontWeight =
+                                    FontWeight.Black
+                            )
+                        }
+                    }
+                }
+
+                state.choiceError?.let { error ->
+                    val message =
+                        when (error) {
+                            "required" ->
+                                t.modifierRequired
+
+                            "configuration_unavailable" ->
+                                t.optionsLoadFailed
+
+                            else ->
+                                t.optionsLoadFailed
+                        }
+
+                    Text(
+                        message,
+                        color =
+                            MaterialTheme
+                                .colorScheme
+                                .error,
+                        fontWeight =
+                            FontWeight.SemiBold
+                    )
+                }
+
+                Row(
+                    modifier =
+                        Modifier.fillMaxWidth(),
+                    horizontalArrangement =
+                        Arrangement.spacedBy(
+                            10.dp,
+                            Alignment.End
+                        )
+                ) {
+                    TextButton(
+                        onClick = onDismiss
+                    ) {
+                        Text(t.cancel)
+                    }
+
+                    Button(
+                        onClick = onConfirm,
+                        enabled = validSelection
+                    ) {
+                        Icon(
+                            Icons.Default.AddShoppingCart,
+                            contentDescription = null,
+                            modifier =
+                                Modifier.size(18.dp)
+                        )
+                        Spacer(
+                            Modifier.width(7.dp)
+                        )
+                        Text(
+                            t.confirmOptions,
+                            fontWeight =
+                                FontWeight.Black
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1944,6 +2478,80 @@ private fun CartPane(
                                         }
                                     }
                                 }
+                                if (
+                                    line.compositionSelection
+                                        .isNotEmpty()
+                                ) {
+                                    Spacer(
+                                        Modifier.height(3.dp)
+                                    )
+
+                                    line.compositionSelection
+                                        .sortedBy {
+                                            it.groupId
+                                        }
+                                        .forEach {
+                                            selectedGroup ->
+
+                                            val group =
+                                                line.product
+                                                    .composition
+                                                    ?.groups
+                                                    ?.firstOrNull {
+                                                        it.id ==
+                                                            selectedGroup
+                                                                .groupId
+                                                    }
+
+                                            val selectedNames =
+                                                selectedGroup
+                                                    .optionIds
+                                                    .distinct()
+                                                    .sorted()
+                                                    .map {
+                                                        optionId ->
+
+                                                        group
+                                                            ?.options
+                                                            ?.firstOrNull {
+                                                                it.id ==
+                                                                    optionId
+                                                            }
+                                                            ?.name
+                                                            ?: "#$optionId"
+                                                    }
+
+                                            if (
+                                                selectedNames
+                                                    .isNotEmpty()
+                                            ) {
+                                                Text(
+                                                    "${
+                                                        group
+                                                            ?.name
+                                                            ?: "Options"
+                                                    }: ${
+                                                        selectedNames
+                                                            .joinToString(
+                                                                ", "
+                                                            )
+                                                    }",
+                                                    color =
+                                                        CookitMuted,
+                                                    fontSize =
+                                                        12.sp,
+                                                    fontWeight =
+                                                        FontWeight
+                                                            .SemiBold,
+                                                    maxLines = 2,
+                                                    overflow =
+                                                        TextOverflow
+                                                            .Ellipsis
+                                                )
+                                            }
+                                        }
+                                }
+
                                 if (line.modifiers.isNotEmpty()) {
                                     Spacer(Modifier.height(3.dp))
                                     line.modifiers.forEach { modifier ->

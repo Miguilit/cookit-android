@@ -122,18 +122,44 @@ class OfflineBootstrapStore(context: Context) {
         emoji = json.optString("emoji")
     )
 
-    private fun encodeProduct(product: Product) = JSONObject()
-        .put("id", product.id)
-        .put("category_id", product.categoryId)
-        .put("name", product.name)
-        .put("description", product.description)
-        .put("price", product.price)
-        .put("emoji", product.emoji)
-        .put("available", product.available)
-        .putNullable("image_url", product.imageUrl)
-        .putNullable("vat_rate", product.vatRate)
-        .putNullable("vat_label", product.vatLabel)
-        .put("has_modifiers", product.hasModifiers)
+    private fun encodeProduct(product: Product): JSONObject {
+        val json = JSONObject()
+            .put("id", product.id)
+            .put("category_id", product.categoryId)
+            .put("name", product.name)
+            .put("description", product.description)
+            .put("price", product.price)
+            .put("emoji", product.emoji)
+            .put("available", product.available)
+            .putNullable("image_url", product.imageUrl)
+            .putNullable("vat_rate", product.vatRate)
+            .putNullable("vat_label", product.vatLabel)
+            .put("has_modifiers", product.hasModifiers)
+            .put(
+                "commercial_type",
+                product.commercialType
+            )
+            .putNullable(
+                "composition_type",
+                product.compositionType
+            )
+            .put(
+                "requires_configuration",
+                product.requiresConfiguration
+            )
+
+        product.composition?.let {
+            json.put(
+                "composition",
+                encodeChoiceMenuComposition(it)
+            )
+        } ?: json.put(
+            "composition",
+            JSONObject.NULL
+        )
+
+        return json
+    }
 
     private fun decodeProduct(json: JSONObject) = Product(
         id = json.getLong("id"),
@@ -150,8 +176,285 @@ class OfflineBootstrapStore(context: Context) {
             json.optDouble("vat_rate")
         },
         vatLabel = json.optNullableString("vat_label"),
-        hasModifiers = json.optBoolean("has_modifiers", false)
+        hasModifiers = json.optBoolean("has_modifiers", false),
+        commercialType =
+            json.optString(
+                "commercial_type",
+                "STANDARD"
+            ),
+        compositionType =
+            json.optNullableString(
+                "composition_type"
+            ),
+        requiresConfiguration =
+            json.optBoolean(
+                "requires_configuration",
+                false
+            ),
+        composition =
+            decodeChoiceMenuComposition(
+                json.optJSONObject("composition")
+            )
     )
+
+    private fun encodeChoiceMenuComposition(
+        composition: ChoiceMenuComposition
+    ): JSONObject = JSONObject()
+        .put("id", composition.id)
+        .put("type", composition.type)
+        .put("is_active", composition.isActive)
+        .put(
+            "groups",
+            JSONArray().apply {
+                composition.groups
+                    .sortedWith(
+                        compareBy<ChoiceMenuGroup> {
+                            it.sortOrder
+                        }.thenBy {
+                            it.id
+                        }
+                    )
+                    .forEach { group ->
+                        put(
+                            JSONObject()
+                                .put("id", group.id)
+                                .put("name", group.name)
+                                .put(
+                                    "min_select",
+                                    group.minSelect
+                                )
+                                .put(
+                                    "max_select",
+                                    group.maxSelect
+                                )
+                                .put(
+                                    "sort_order",
+                                    group.sortOrder
+                                )
+                                .put(
+                                    "options",
+                                    JSONArray().apply {
+                                        group.options
+                                            .sortedWith(
+                                                compareBy<ChoiceMenuOption> {
+                                                    it.sortOrder
+                                                }.thenBy {
+                                                    it.id
+                                                }
+                                            )
+                                            .forEach { option ->
+                                                put(
+                                                    JSONObject()
+                                                        .put(
+                                                            "id",
+                                                            option.id
+                                                        )
+                                                        .putNullable(
+                                                            "menu_item_id",
+                                                            option.menuItemId
+                                                        )
+                                                        .put(
+                                                            "name",
+                                                            option.name
+                                                        )
+                                                        .put(
+                                                            "quantity",
+                                                            option.quantity
+                                                        )
+                                                        .put(
+                                                            "price_delta",
+                                                            option.priceDelta
+                                                        )
+                                                        .put(
+                                                            "is_available",
+                                                            option.isAvailable
+                                                        )
+                                                        .put(
+                                                            "in_stock",
+                                                            option.inStock
+                                                        )
+                                                        .putNullable(
+                                                            "item_photo_url",
+                                                            option.imageUrl
+                                                        )
+                                                        .put(
+                                                            "sort_order",
+                                                            option.sortOrder
+                                                        )
+                                                )
+                                            }
+                                    }
+                                )
+                        )
+                    }
+            }
+        )
+
+    private fun decodeChoiceMenuComposition(
+        json: JSONObject?
+    ): ChoiceMenuComposition? {
+        val obj = json ?: return null
+        val id = obj.optLong("id", -1L)
+        val type =
+            obj.optString("type", "")
+                .trim()
+
+        if (id <= 0L || type.isBlank()) {
+            return null
+        }
+
+        val groupsJson =
+            obj.optJSONArray("groups")
+                ?: JSONArray()
+
+        val groups = buildList {
+            for (
+                groupIndex in
+                0 until groupsJson.length()
+            ) {
+                val groupJson =
+                    groupsJson.optJSONObject(
+                        groupIndex
+                    ) ?: continue
+
+                val groupId =
+                    groupJson.optLong(
+                        "id",
+                        -1L
+                    )
+
+                if (groupId <= 0L) {
+                    continue
+                }
+
+                val optionsJson =
+                    groupJson.optJSONArray(
+                        "options"
+                    ) ?: JSONArray()
+
+                val options = buildList {
+                    for (
+                        optionIndex in
+                        0 until optionsJson.length()
+                    ) {
+                        val optionJson =
+                            optionsJson.optJSONObject(
+                                optionIndex
+                            ) ?: continue
+
+                        val optionId =
+                            optionJson.optLong(
+                                "id",
+                                -1L
+                            )
+
+                        if (optionId <= 0L) {
+                            continue
+                        }
+
+                        val menuItemId =
+                            optionJson.optLong(
+                                "menu_item_id",
+                                -1L
+                            ).takeIf {
+                                it > 0L
+                            }
+
+                        add(
+                            ChoiceMenuOption(
+                                id = optionId,
+                                menuItemId = menuItemId,
+                                name =
+                                    optionJson.optString(
+                                        "name",
+                                        "Option $optionId"
+                                    ),
+                                quantity =
+                                    optionJson.optDouble(
+                                        "quantity",
+                                        1.0
+                                    ),
+                                priceDelta =
+                                    optionJson.optDouble(
+                                        "price_delta",
+                                        0.0
+                                    ),
+                                isAvailable =
+                                    optionJson.optBoolean(
+                                        "is_available",
+                                        true
+                                    ),
+                                inStock =
+                                    optionJson.optBoolean(
+                                        "in_stock",
+                                        true
+                                    ),
+                                imageUrl =
+                                    optionJson.optNullableString(
+                                        "item_photo_url"
+                                    ),
+                                sortOrder =
+                                    optionJson.optInt(
+                                        "sort_order",
+                                        0
+                                    )
+                            )
+                        )
+                    }
+                }.sortedWith(
+                    compareBy<ChoiceMenuOption> {
+                        it.sortOrder
+                    }.thenBy {
+                        it.id
+                    }
+                )
+
+                add(
+                    ChoiceMenuGroup(
+                        id = groupId,
+                        name =
+                            groupJson.optString(
+                                "name",
+                                "Groupe $groupId"
+                            ),
+                        minSelect =
+                            groupJson.optInt(
+                                "min_select",
+                                0
+                            ),
+                        maxSelect =
+                            groupJson.optInt(
+                                "max_select",
+                                1
+                            ),
+                        sortOrder =
+                            groupJson.optInt(
+                                "sort_order",
+                                0
+                            ),
+                        options = options
+                    )
+                )
+            }
+        }.sortedWith(
+            compareBy<ChoiceMenuGroup> {
+                it.sortOrder
+            }.thenBy {
+                it.id
+            }
+        )
+
+        return ChoiceMenuComposition(
+            id = id,
+            type = type,
+            isActive =
+                obj.optBoolean(
+                    "is_active",
+                    true
+                ),
+            groups = groups
+        )
+    }
 
     private fun encodeOrder(order: PosOrder) = JSONObject()
         .put("id", order.id)

@@ -64,7 +64,47 @@ data class Product(
     val imageUrl: String? = null,
     val vatRate: Double? = null,
     val vatLabel: String? = null,
-    val hasModifiers: Boolean = false
+    val hasModifiers: Boolean = false,
+    val commercialType: String = "STANDARD",
+    val compositionType: String? = null,
+    val requiresConfiguration: Boolean = false,
+    val composition: ChoiceMenuComposition? = null
+)
+
+data class ChoiceMenuOption(
+    val id: Long,
+    val menuItemId: Long?,
+    val name: String,
+    val quantity: Double = 1.0,
+    val priceDelta: Double = 0.0,
+    val isAvailable: Boolean = true,
+    val inStock: Boolean = true,
+    val imageUrl: String? = null,
+    val sortOrder: Int = 0
+) {
+    val available: Boolean
+        get() = isAvailable && inStock
+}
+
+data class ChoiceMenuGroup(
+    val id: Long,
+    val name: String,
+    val minSelect: Int,
+    val maxSelect: Int,
+    val sortOrder: Int = 0,
+    val options: List<ChoiceMenuOption> = emptyList()
+)
+
+data class ChoiceMenuComposition(
+    val id: Long,
+    val type: String,
+    val isActive: Boolean,
+    val groups: List<ChoiceMenuGroup> = emptyList()
+)
+
+data class ChoiceMenuSelectionGroup(
+    val groupId: Long,
+    val optionIds: List<Long>
 )
 
 data class NativeModifierOption(
@@ -97,16 +137,56 @@ data class CartLine(
     val remoteLineId: Long? = null,
     val amountOverride: Double? = null,
     val freeItem: Boolean = false,
-    val modifiers: List<SelectedModifier> = emptyList()
+    val modifiers: List<SelectedModifier> = emptyList(),
+    val compositionSelection: List<ChoiceMenuSelectionGroup> = emptyList()
 ) {
     val modifierUnitTotal: Double get() = modifiers.sumOf { it.price }
-    val configuredUnitPrice: Double get() = product.price + modifierUnitTotal
-    val total: Double get() = amountOverride ?: configuredUnitPrice * quantity
+
+    val choiceUnitDelta: Double
+        get() = compositionSelection.sumOf { selectedGroup ->
+            val group = product.composition
+                ?.groups
+                ?.firstOrNull { it.id == selectedGroup.groupId }
+
+            selectedGroup.optionIds
+                .distinct()
+                .sumOf { optionId ->
+                    group
+                        ?.options
+                        ?.firstOrNull { it.id == optionId }
+                        ?.priceDelta
+                        ?: 0.0
+                }
+        }
+
+    val configuredUnitPrice: Double
+        get() = product.price + modifierUnitTotal + choiceUnitDelta
+
+    val total: Double
+        get() = amountOverride ?: configuredUnitPrice * quantity
+
     val modifierKey: String
         get() = modifiers.map { it.id }.sorted().joinToString("-")
+
+    val choiceKey: String
+        get() = compositionSelection
+            .sortedBy { it.groupId }
+            .joinToString("|") { group ->
+                "${group.groupId}:${group.optionIds.distinct().sorted().joinToString(",")}"
+            }
+
     val stableKey: String
-        get() = remoteLineId?.let { "remote:$it" }
-            ?: "product:${product.id}:mods:$modifierKey"
+        get() {
+            remoteLineId?.let { return "remote:$it" }
+
+            val base = "product:${product.id}:mods:$modifierKey"
+
+            return if (compositionSelection.isEmpty()) {
+                base
+            } else {
+                "$base:choice:$choiceKey"
+            }
+        }
 }
 
 data class PosOrder(
@@ -320,7 +400,8 @@ data class RemoteOrderLine(
     val orderItemId: Long? = null,
     val amount: Double? = null,
     val freeItem: Boolean = false,
-    val modifiers: List<SelectedModifier> = emptyList()
+    val modifiers: List<SelectedModifier> = emptyList(),
+    val compositionSelection: List<ChoiceMenuSelectionGroup> = emptyList()
 )
 
 data class CommercialDiscountState(

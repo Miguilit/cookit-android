@@ -12,10 +12,16 @@ data class DraftModifier(
     val price: Double
 )
 
+data class DraftChoiceSelectionGroup(
+    val groupId: Long,
+    val optionIds: List<Long>
+)
+
 data class DraftEntry(
     val productId: Long,
     val quantity: Int,
-    val modifiers: List<DraftModifier> = emptyList()
+    val modifiers: List<DraftModifier> = emptyList(),
+    val compositionSelection: List<DraftChoiceSelectionGroup> = emptyList()
 )
 
 data class PersistedDraft(
@@ -57,7 +63,72 @@ class DraftOrderStore(context: Context) {
                         }
                     }
 
-                    add(DraftEntry(id, qty, modifiers))
+                    val compositionSelection = buildList {
+                        val selectionArray =
+                            item.optJSONArray("composition_selection")
+                                ?: JSONArray()
+
+                        for (
+                            selectionIndex in
+                            0 until selectionArray.length()
+                        ) {
+                            val selection =
+                                selectionArray.optJSONObject(
+                                    selectionIndex
+                                ) ?: continue
+
+                            val groupId =
+                                selection.optLong(
+                                    "group_id",
+                                    -1L
+                                )
+
+                            if (groupId <= 0L) continue
+
+                            val optionIdsArray =
+                                selection.optJSONArray(
+                                    "option_ids"
+                                ) ?: JSONArray()
+
+                            val optionIds = buildList {
+                                for (
+                                    optionIndex in
+                                    0 until optionIdsArray.length()
+                                ) {
+                                    val optionId =
+                                        optionIdsArray.optLong(
+                                            optionIndex,
+                                            -1L
+                                        )
+
+                                    if (optionId > 0L) {
+                                        add(optionId)
+                                    }
+                                }
+                            }
+                                .distinct()
+                                .sorted()
+
+                            add(
+                                DraftChoiceSelectionGroup(
+                                    groupId = groupId,
+                                    optionIds = optionIds
+                                )
+                            )
+                        }
+                    }
+                        .distinctBy { it.groupId }
+                        .sortedBy { it.groupId }
+
+                    add(
+                        DraftEntry(
+                            productId = id,
+                            quantity = qty,
+                            modifiers = modifiers,
+                            compositionSelection =
+                                compositionSelection
+                        )
+                    )
                 }
             }
             val orderType = runCatching {
@@ -87,11 +158,40 @@ class DraftOrderStore(context: Context) {
                         .put("price", modifier.price)
                 )
             }
+            val compositionSelection = JSONArray()
+
+            entry.compositionSelection
+                .sortedBy { it.groupId }
+                .forEach { selectedGroup ->
+                    compositionSelection.put(
+                        JSONObject()
+                            .put(
+                                "group_id",
+                                selectedGroup.groupId
+                            )
+                            .put(
+                                "option_ids",
+                                JSONArray().apply {
+                                    selectedGroup.optionIds
+                                        .distinct()
+                                        .sorted()
+                                        .forEach { optionId ->
+                                            put(optionId)
+                                        }
+                                }
+                            )
+                    )
+                }
+
             items.put(
                 JSONObject()
                     .put("product_id", entry.productId)
                     .put("quantity", entry.quantity)
                     .put("modifiers", modifiers)
+                    .put(
+                        "composition_selection",
+                        compositionSelection
+                    )
             )
         }
         val json = JSONObject()

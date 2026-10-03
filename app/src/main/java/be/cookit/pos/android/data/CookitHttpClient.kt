@@ -439,6 +439,29 @@ class CookitHttpClient {
                 val vatLabel = extractVatLabel(obj)
                 val hasModifiers = (obj.longAny("modifier_groups_count") ?: 0L) > 0L ||
                     ((obj.optJSONArray("modifier_groups")?.length() ?: 0) > 0)
+
+                val composition = parseChoiceMenuComposition(
+                    obj.optJSONObject("composition")
+                )
+                val commercialType =
+                    obj.optText("commercial_type")
+                        ?: "STANDARD"
+                val compositionType =
+                    obj.optText("composition_type")
+                        ?: composition?.type
+                val requiresConfiguration =
+                    obj.boolAny("requires_configuration")
+                        ?: (
+                            commercialType.equals(
+                                "COMPOSITE_MENU",
+                                ignoreCase = true
+                            ) &&
+                                (compositionType ?: "").equals(
+                                    "CHOICE_MENU",
+                                    ignoreCase = true
+                                )
+                            )
+
                 add(
                     Product(
                         id = id,
@@ -451,7 +474,11 @@ class CookitHttpClient {
                         imageUrl = imageUrl,
                         vatRate = vatRate,
                         vatLabel = vatLabel,
-                        hasModifiers = hasModifiers
+                        hasModifiers = hasModifiers,
+                        commercialType = commercialType,
+                        compositionType = compositionType,
+                        requiresConfiguration = requiresConfiguration,
+                        composition = composition
                     )
                 )
             }
@@ -893,6 +920,11 @@ class CookitHttpClient {
                         )
                     }
                 }
+                val compositionSelection =
+                    parseChoiceMenuSelection(
+                        item.optJSONArray("composition_selection")
+                    )
+
                 add(
                     RemoteOrderLine(
                         menuItemId = menuItemId,
@@ -905,7 +937,8 @@ class CookitHttpClient {
                         orderItemId = orderItemId,
                         amount = amount,
                         freeItem = freeItem,
-                        modifiers = modifiers
+                        modifiers = modifiers,
+                        compositionSelection = compositionSelection
                     )
                 )
             }
@@ -1212,6 +1245,54 @@ class CookitHttpClient {
         if (lines.isEmpty()) throw CookitApiException(422, "Panier vide")
         val items = JSONArray()
         lines.forEach { line ->
+            val isChoiceMenu =
+                line.product.requiresConfiguration &&
+                    line.product.commercialType.equals(
+                        "COMPOSITE_MENU",
+                        ignoreCase = true
+                    ) &&
+                    line.product.compositionType.equals(
+                        "CHOICE_MENU",
+                        ignoreCase = true
+                    )
+
+            if (
+                isChoiceMenu &&
+                line.compositionSelection.isEmpty()
+            ) {
+                throw CookitApiException(
+                    422,
+                    "CHOICE_MENU requires composition_selection."
+                )
+            }
+
+            if (
+                isChoiceMenu &&
+                line.modifiers.isNotEmpty()
+            ) {
+                throw CookitApiException(
+                    422,
+                    "CHOICE_MENU cannot contain modifiers."
+                )
+            }
+
+            if (
+                !isChoiceMenu &&
+                line.compositionSelection.isNotEmpty()
+            ) {
+                throw CookitApiException(
+                    422,
+                    "composition_selection is only valid for CHOICE_MENU."
+                )
+            }
+
+            if (line.quantity <= 0) {
+                throw CookitApiException(
+                    422,
+                    "Order item quantity must be positive."
+                )
+            }
+
             val item = JSONObject()
                 .put("id", line.product.id)
                 .put("menu_item_id", line.product.id)
@@ -1231,8 +1312,38 @@ class CookitHttpClient {
                 item.put("modifiers", modifiers)
             }
 
-            // Product/modifier prices are deliberately not authoritative on Android.
-            // The backend resolves the item price and every selected modifier by ID.
+            if (line.compositionSelection.isNotEmpty()) {
+                val selection = JSONArray()
+
+                line.compositionSelection
+                    .sortedBy { it.groupId }
+                    .forEach { selectedGroup ->
+                        val optionIds = JSONArray()
+
+                        selectedGroup.optionIds
+                            .distinct()
+                            .sorted()
+                            .forEach { optionId ->
+                                optionIds.put(optionId)
+                            }
+
+                        selection.put(
+                            JSONObject()
+                                .put("group_id", selectedGroup.groupId)
+                                .put("option_ids", optionIds)
+                        )
+                    }
+
+                item.put(
+                    "composition_selection",
+                    selection
+                )
+            }
+
+            // Product/modifier/CHOICE_MENU prices are deliberately not
+            // authoritative on Android. Cookit resolves the item, selected
+            // modifiers and composition_selection by identifier.
+            // Canonical selection identity remains server-side only.
             items.put(item)
         }
         val body = JSONObject()
@@ -3121,6 +3232,200 @@ class CookitHttpClient {
             else -> "🍽️"
         }
     }
+}
+
+private fun parseChoiceMenuComposition(
+    raw: JSONObject?
+): ChoiceMenuComposition? {
+    val obj = raw ?: return null
+    val id = obj.longAny("id") ?: return null
+    val type =
+        obj.optText(
+            "type",
+            "composition_type"
+        ) ?: return null
+
+    val groupsJson =
+        obj.optJSONArray("groups")
+            ?: JSONArray()
+
+    val groups = buildList {
+        for (groupIndex in 0 until groupsJson.length()) {
+            val groupJson =
+                groupsJson.optJSONObject(groupIndex)
+                    ?: continue
+
+            val groupId =
+                groupJson.longAny("id")
+                    ?: continue
+
+            val optionsJson =
+                groupJson.optJSONArray("options")
+                    ?: JSONArray()
+
+            val options = buildList {
+                for (
+                    optionIndex in
+                    0 until optionsJson.length()
+                ) {
+                    val optionJson =
+                        optionsJson.optJSONObject(
+                            optionIndex
+                        ) ?: continue
+
+                    val optionId =
+                        optionJson.longAny("id")
+                            ?: continue
+
+                    add(
+                        ChoiceMenuOption(
+                            id = optionId,
+                            menuItemId =
+                                optionJson.longAny(
+                                    "menu_item_id",
+                                    "component_menu_item_id"
+                                ),
+                            name =
+                                optionJson.optText(
+                                    "name"
+                                ) ?: "Option $optionId",
+                            quantity =
+                                optionJson.doubleAny(
+                                    "quantity"
+                                ) ?: 1.0,
+                            priceDelta =
+                                optionJson.doubleAny(
+                                    "price_delta"
+                                ) ?: 0.0,
+                            isAvailable =
+                                optionJson.boolAny(
+                                    "is_available",
+                                    "available"
+                                ) ?: true,
+                            inStock =
+                                optionJson.boolAny(
+                                    "in_stock"
+                                ) ?: true,
+                            imageUrl =
+                                optionJson.optText(
+                                    "item_photo_url",
+                                    "image_url"
+                                ),
+                            sortOrder =
+                                (
+                                    optionJson.longAny(
+                                        "sort_order"
+                                    ) ?: 0L
+                                ).toInt()
+                        )
+                    )
+                }
+            }.sortedWith(
+                compareBy<ChoiceMenuOption> {
+                    it.sortOrder
+                }.thenBy {
+                    it.id
+                }
+            )
+
+            add(
+                ChoiceMenuGroup(
+                    id = groupId,
+                    name =
+                        groupJson.optText("name")
+                            ?: "Groupe $groupId",
+                    minSelect =
+                        (
+                            groupJson.longAny(
+                                "min_select"
+                            ) ?: 0L
+                        ).toInt(),
+                    maxSelect =
+                        (
+                            groupJson.longAny(
+                                "max_select"
+                            ) ?: 1L
+                        ).toInt(),
+                    sortOrder =
+                        (
+                            groupJson.longAny(
+                                "sort_order"
+                            ) ?: 0L
+                        ).toInt(),
+                    options = options
+                )
+            )
+        }
+    }.sortedWith(
+        compareBy<ChoiceMenuGroup> {
+            it.sortOrder
+        }.thenBy {
+            it.id
+        }
+    )
+
+    return ChoiceMenuComposition(
+        id = id,
+        type = type,
+        isActive =
+            obj.boolAny(
+                "is_active",
+                "active"
+            ) ?: true,
+        groups = groups
+    )
+}
+
+private fun parseChoiceMenuSelection(
+    raw: JSONArray?
+): List<ChoiceMenuSelectionGroup> {
+    val array = raw ?: return emptyList()
+
+    return buildList {
+        for (index in 0 until array.length()) {
+            val row =
+                array.optJSONObject(index)
+                    ?: continue
+
+            val groupId =
+                row.longAny(
+                    "group_id",
+                    "id"
+                ) ?: continue
+
+            val rawOptionIds =
+                row.optJSONArray("option_ids")
+                    ?: JSONArray()
+
+            val optionIds = buildList {
+                for (
+                    optionIndex in
+                    0 until rawOptionIds.length()
+                ) {
+                    val optionId =
+                        rawOptionIds.optLong(
+                            optionIndex,
+                            -1L
+                        )
+
+                    if (optionId > 0L) {
+                        add(optionId)
+                    }
+                }
+            }
+                .distinct()
+                .sorted()
+
+            add(
+                ChoiceMenuSelectionGroup(
+                    groupId = groupId,
+                    optionIds = optionIds
+                )
+            )
+        }
+    }
+        .distinctBy { it.groupId }
+        .sortedBy { it.groupId }
 }
 
 private fun JSONObject.optText(vararg keys: String): String? {

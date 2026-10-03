@@ -137,6 +137,10 @@ data class PosUiState(
     val modifierProduct: Product? = null,
     val modifierGroups: List<NativeModifierGroup> = emptyList(),
     val selectedModifierIds: Set<Long> = emptySet(),
+    val choiceDialogOpen: Boolean = false,
+    val choiceError: String? = null,
+    val choiceProduct: Product? = null,
+    val selectedChoiceOptionIds: Map<Long, Set<Long>> = emptyMap(),
     val commercialSheetOpen: Boolean = false,
     val commercialBusy: Boolean = false,
     val commercialError: String? = null,
@@ -1435,6 +1439,23 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         if (guardPendingOrderEdit()) return
 
         val state = _ui.value
+
+        val isChoiceMenu =
+            product.requiresConfiguration &&
+                product.commercialType.equals(
+                    "COMPOSITE_MENU",
+                    ignoreCase = true
+                ) &&
+                product.compositionType.equals(
+                    "CHOICE_MENU",
+                    ignoreCase = true
+                )
+
+        if (isChoiceMenu) {
+            openChoiceMenuConfigurator(product)
+            return
+        }
+
         if (!state.certificationCapabilities.modifiers || !product.hasModifiers) {
             addConfiguredProduct(product, emptyList())
             return
@@ -1598,6 +1619,227 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun openChoiceMenuConfigurator(
+        product: Product
+    ) {
+        val composition = product.composition
+
+        if (
+            composition == null ||
+            !composition.isActive ||
+            !composition.type.equals(
+                "CHOICE_MENU",
+                ignoreCase = true
+            ) ||
+            composition.groups.isEmpty()
+        ) {
+            _ui.update {
+                it.copy(
+                    choiceDialogOpen = true,
+                    choiceError = "configuration_unavailable",
+                    choiceProduct = product,
+                    selectedChoiceOptionIds = emptyMap()
+                )
+            }
+            return
+        }
+
+        val preselected = buildMap<Long, Set<Long>> {
+            composition.groups.forEach { group ->
+                val availableOptions =
+                    group.options.filter { it.available }
+
+                if (
+                    group.minSelect == 1 &&
+                    group.maxSelect == 1 &&
+                    availableOptions.size == 1
+                ) {
+                    put(
+                        group.id,
+                        setOf(availableOptions.first().id)
+                    )
+                }
+            }
+        }
+
+        _ui.update {
+            it.copy(
+                choiceDialogOpen = true,
+                choiceError = null,
+                choiceProduct = product,
+                selectedChoiceOptionIds = preselected
+            )
+        }
+    }
+
+    fun dismissChoiceMenuDialog() {
+        _ui.update {
+            it.copy(
+                choiceDialogOpen = false,
+                choiceError = null,
+                choiceProduct = null,
+                selectedChoiceOptionIds = emptyMap()
+            )
+        }
+    }
+
+    fun toggleChoiceMenuOption(
+        groupId: Long,
+        optionId: Long
+    ) {
+        val state = _ui.value
+        val product = state.choiceProduct ?: return
+        val composition = product.composition ?: return
+
+        val group =
+            composition.groups.firstOrNull {
+                it.id == groupId
+            } ?: return
+
+        val option =
+            group.options.firstOrNull {
+                it.id == optionId && it.available
+            } ?: return
+
+        if (group.maxSelect <= 0) return
+
+        val next =
+            state.selectedChoiceOptionIds
+                .mapValues { (_, value) ->
+                    value.toMutableSet()
+                }
+                .toMutableMap()
+
+        val selected =
+            next.getOrPut(group.id) {
+                mutableSetOf()
+            }
+
+        if (group.maxSelect == 1) {
+            if (option.id in selected) {
+                if (group.minSelect == 0) {
+                    selected.clear()
+                }
+            } else {
+                selected.clear()
+                selected.add(option.id)
+            }
+        } else {
+            if (option.id in selected) {
+                selected.remove(option.id)
+            } else if (selected.size < group.maxSelect) {
+                selected.add(option.id)
+            }
+        }
+
+        if (selected.isEmpty()) {
+            next.remove(group.id)
+        }
+
+        _ui.update {
+            it.copy(
+                selectedChoiceOptionIds =
+                    next.mapValues { (_, value) ->
+                        value.toSet()
+                    },
+                choiceError = null
+            )
+        }
+    }
+
+    fun confirmChoiceMenuSelection() {
+        val state = _ui.value
+        val product = state.choiceProduct ?: return
+        val composition = product.composition
+
+        if (
+            composition == null ||
+            !composition.isActive ||
+            !composition.type.equals(
+                "CHOICE_MENU",
+                ignoreCase = true
+            )
+        ) {
+            _ui.update {
+                it.copy(
+                    choiceError = "configuration_unavailable"
+                )
+            }
+            return
+        }
+
+        val invalidGroup =
+            composition.groups.firstOrNull { group ->
+                val selectedIds =
+                    state.selectedChoiceOptionIds[
+                        group.id
+                    ].orEmpty()
+
+                val validSelectedIds =
+                    selectedIds.filter { optionId ->
+                        group.options.any { option ->
+                            option.id == optionId &&
+                                option.available
+                        }
+                    }
+
+                validSelectedIds.size != selectedIds.size ||
+                    validSelectedIds.size < group.minSelect ||
+                    validSelectedIds.size > group.maxSelect
+            }
+
+        if (invalidGroup != null) {
+            _ui.update {
+                it.copy(
+                    choiceError = "required"
+                )
+            }
+            return
+        }
+
+        val selection =
+            composition.groups
+                .sortedWith(
+                    compareBy<ChoiceMenuGroup> {
+                        it.sortOrder
+                    }.thenBy {
+                        it.id
+                    }
+                )
+                .mapNotNull { group ->
+                    val optionIds =
+                        state.selectedChoiceOptionIds[
+                            group.id
+                        ]
+                            .orEmpty()
+                            .distinct()
+                            .sorted()
+
+                    if (optionIds.isEmpty()) {
+                        null
+                    } else {
+                        ChoiceMenuSelectionGroup(
+                            groupId = group.id,
+                            optionIds = optionIds
+                        )
+                    }
+                }
+
+        addConfiguredChoiceProduct(
+            product = product,
+            selection = selection
+        )
+
+        _ui.update {
+            it.copy(
+                choiceDialogOpen = false,
+                choiceError = null,
+                choiceProduct = null,
+                selectedChoiceOptionIds = emptyMap()
+            )
+        }
+    }
+
     fun incrementProduct(lineKey: String) {
         if (guardPendingOrderEdit()) return
         val next = _ui.value.draftCart.map {
@@ -1627,7 +1869,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 modifierError = null,
                 modifierProduct = null,
                 modifierGroups = emptyList(),
-                selectedModifierIds = emptySet()
+                selectedModifierIds = emptySet(),
+                choiceDialogOpen = false,
+                choiceError = null,
+                choiceProduct = null,
+                selectedChoiceOptionIds = emptyMap()
             )
         }
         updateDraft(orderType = type, tableId = tableId)
@@ -2565,7 +2811,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             remoteLineId = line.orderItemId,
             amountOverride = line.amount,
             freeItem = line.freeItem,
-            modifiers = line.modifiers.sortedBy { it.id }
+            modifiers = line.modifiers.sortedBy { it.id },
+            compositionSelection =
+                line.compositionSelection
+                    .sortedBy { it.groupId }
         )
     }
 
@@ -3484,6 +3733,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 modifierProduct = null,
                 modifierGroups = emptyList(),
                 selectedModifierIds = emptySet(),
+                choiceDialogOpen = false,
+                choiceError = null,
+                choiceProduct = null,
+                selectedChoiceOptionIds = emptyMap(),
                 commercialSheetOpen = false,
                 commercialBusy = false,
                 commercialError = null,
@@ -3541,6 +3794,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 modifierProduct = null,
                 modifierGroups = emptyList(),
                 selectedModifierIds = emptySet(),
+                choiceDialogOpen = false,
+                choiceError = null,
+                choiceProduct = null,
+                selectedChoiceOptionIds = emptyMap(),
                 commercialSheetOpen = false,
                 commercialBusy = false,
                 commercialError = null,
@@ -3618,7 +3875,59 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         updateDraft(cart = next)
     }
 
-    private fun draftEntryFromLine(line: CartLine): DraftEntry = DraftEntry(
+    private fun addConfiguredChoiceProduct(
+        product: Product,
+        selection: List<ChoiceMenuSelectionGroup>
+    ) {
+        val candidate = CartLine(
+            product = product,
+            quantity = 1,
+            modifiers = emptyList(),
+            compositionSelection =
+                selection
+                    .sortedBy { it.groupId }
+                    .map { selectedGroup ->
+                        selectedGroup.copy(
+                            optionIds =
+                                selectedGroup.optionIds
+                                    .distinct()
+                                    .sorted()
+                        )
+                    }
+        )
+
+        val next =
+            _ui.value.draftCart.let { cart ->
+                val existing =
+                    cart.firstOrNull {
+                        it.stableKey == candidate.stableKey
+                    }
+
+                if (existing == null) {
+                    cart + candidate
+                } else {
+                    cart.map {
+                        if (
+                            it.stableKey ==
+                            candidate.stableKey
+                        ) {
+                            it.copy(
+                                quantity =
+                                    it.quantity + 1
+                            )
+                        } else {
+                            it
+                        }
+                    }
+                }
+            }
+
+        updateDraft(cart = next)
+    }
+
+    private fun draftEntryFromLine(
+        line: CartLine
+    ): DraftEntry = DraftEntry(
         productId = line.product.id,
         quantity = line.quantity,
         modifiers = line.modifiers.map {
@@ -3628,10 +3937,25 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 name = it.name,
                 price = it.price
             )
-        }
+        },
+        compositionSelection =
+            line.compositionSelection
+                .sortedBy { it.groupId }
+                .map { selectedGroup ->
+                    DraftChoiceSelectionGroup(
+                        groupId = selectedGroup.groupId,
+                        optionIds =
+                            selectedGroup.optionIds
+                                .distinct()
+                                .sorted()
+                    )
+                }
     )
 
-    private fun cartLineFromDraftEntry(product: Product, entry: DraftEntry): CartLine = CartLine(
+    private fun cartLineFromDraftEntry(
+        product: Product,
+        entry: DraftEntry
+    ): CartLine = CartLine(
         product = product,
         quantity = entry.quantity.coerceAtLeast(1),
         modifiers = entry.modifiers.map {
@@ -3641,7 +3965,19 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 name = it.name,
                 price = it.price
             )
-        }.sortedBy { it.id }
+        }.sortedBy { it.id },
+        compositionSelection =
+            entry.compositionSelection
+                .sortedBy { it.groupId }
+                .map { selectedGroup ->
+                    ChoiceMenuSelectionGroup(
+                        groupId = selectedGroup.groupId,
+                        optionIds =
+                            selectedGroup.optionIds
+                                .distinct()
+                                .sorted()
+                    )
+                }
     )
 
     fun advanceKitchenTicket(ticket: KotTicket) {
