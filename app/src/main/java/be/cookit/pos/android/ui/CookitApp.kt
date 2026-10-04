@@ -327,15 +327,36 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
 
                 vm.closeNotificationCenter()
 
-                val order = notification.orderId?.let { orderId ->
-                    state.orders.firstOrNull { it.id == orderId }
-                }
+                val order =
+                    notification.orderId?.let { orderId ->
+                        state.orders.firstOrNull {
+                            it.id == orderId
+                        }
+                    }
 
                 if (order != null) {
                     screen = Screen.POS
                     vm.openOrderForPos(order)
                 } else {
                     screen = Screen.ORDERS
+                }
+            },
+            onOpenWaiter = { notification ->
+                if (!notification.read) {
+                    vm.markNotificationRead(
+                        notification.id
+                    )
+                }
+
+                val focused =
+                    vm.focusWaiterTable(
+                        notification.tableId
+                    )
+
+                vm.closeNotificationCenter()
+
+                if (focused) {
+                    screen = Screen.POS
                 }
             },
             onDismiss = vm::closeNotificationCenter
@@ -349,6 +370,7 @@ private fun NotificationCenterDialog(
     onRefresh: () -> Unit,
     onMarkRead: (String) -> Unit,
     onOpenOrder: (PosNotificationItem) -> Unit,
+    onOpenWaiter: (PosNotificationItem) -> Unit,
     onDismiss: () -> Unit
 ) {
     Dialog(
@@ -509,6 +531,21 @@ private fun NotificationCenterDialog(
                                         ignoreCase = true
                                     )
 
+                            val isWaiter =
+                                notification.tableId != null &&
+                                    (
+                                        notification.eventKey
+                                            ?.contains(
+                                                "waiter",
+                                                ignoreCase = true
+                                            ) == true ||
+                                            notification.action
+                                                ?.equals(
+                                                    "open_waiter_request",
+                                                    ignoreCase = true
+                                                ) == true
+                                    )
+
                             val icon = when {
                                 notification.eventKey
                                     ?.startsWith(
@@ -532,10 +569,21 @@ private fun NotificationCenterDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        if (isOrder) {
-                                            onOpenOrder(notification)
-                                        } else if (!notification.read) {
-                                            onMarkRead(notification.id)
+                                        when {
+                                            isOrder ->
+                                                onOpenOrder(
+                                                    notification
+                                                )
+
+                                            isWaiter ->
+                                                onOpenWaiter(
+                                                    notification
+                                                )
+
+                                            !notification.read ->
+                                                onMarkRead(
+                                                    notification.id
+                                                )
                                         }
                                     },
                                 shape = RoundedCornerShape(18.dp),

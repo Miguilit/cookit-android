@@ -350,6 +350,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private var fiscalSyncJob: Job? = null
     private var fiscalAgentStateMirrorJob: Job? = null
     private val knownOrderIds = linkedSetOf<Long>()
+    private val knownNotificationIds = linkedSetOf<String>()
+    private var notificationFeedPrimed = false
     private val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
 
     init {
@@ -1516,17 +1518,30 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 )
             }.onSuccess {
                 _ui.update { state ->
-                    val updated = state.notifications.map { notification ->
-                        if (notification.id == notificationId) {
-                            notification.copy(read = true)
-                        } else {
-                            notification
+                    val wasUnread =
+                        state.notifications.any { notification ->
+                            notification.id == notificationId &&
+                                !notification.read
                         }
-                    }
+
+                    val updated =
+                        state.notifications.map { notification ->
+                            if (notification.id == notificationId) {
+                                notification.copy(read = true)
+                            } else {
+                                notification
+                            }
+                        }
 
                     state.copy(
                         notifications = updated,
-                        notificationsUnread = updated.count { !it.read },
+                        notificationsUnread =
+                            if (wasUnread) {
+                                (state.notificationsUnread - 1)
+                                    .coerceAtLeast(0)
+                            } else {
+                                state.notificationsUnread
+                            },
                         notificationsError = null
                     )
                 }
@@ -1550,6 +1565,48 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     page.unreadCount.coerceAtLeast(0)
             )
         }
+    }
+
+    fun focusWaiterTable(
+        tableId: Long?
+    ): Boolean {
+        val resolvedTableId =
+            tableId ?: return false
+
+        val state = _ui.value
+
+        if (
+            state.tables.none {
+                it.id == resolvedTableId
+            }
+        ) {
+            return false
+        }
+
+        val conflictingDraft =
+            state.draftCart.isNotEmpty() &&
+                (
+                    state.draftOrderType !=
+                        OrderType.DINE_IN ||
+                        state.draftTableId !=
+                        resolvedTableId
+                )
+
+        if (conflictingDraft) {
+            return false
+        }
+
+        _ui.update {
+            it.copy(
+                draftOrderType = OrderType.DINE_IN,
+                draftTableId = resolvedTableId,
+                error = null
+            )
+        }
+
+        persistCurrentDraft()
+
+        return true
     }
 
     fun addProduct(product: Product) {
@@ -5932,9 +5989,64 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         _ui.value.user.branchId
                     )
                 }.onSuccess { page ->
+                    val incomingIds =
+                        page.items
+                            .map { it.id }
+                            .toSet()
+
+                    if (!notificationFeedPrimed) {
+                        /*
+                         * Historical unread notifications must populate
+                         * the durable badge without replaying old sounds
+                         * when the POS starts.
+                         */
+                        knownNotificationIds.addAll(
+                            incomingIds
+                        )
+                        notificationFeedPrimed = true
+                    } else {
+                        val newWaiterNotifications =
+                            page.items.filter { notification ->
+                                !notification.read &&
+                                    notification.id !in
+                                        knownNotificationIds &&
+                                    (
+                                        notification.eventKey
+                                            ?.contains(
+                                                "waiter",
+                                                ignoreCase = true
+                                            ) == true ||
+                                            notification.action
+                                                ?.equals(
+                                                    "open_waiter_request",
+                                                    ignoreCase = true
+                                                ) == true
+                                    )
+                            }
+
+                        if (
+                            newWaiterNotifications
+                                .isNotEmpty()
+                        ) {
+                            runCatching {
+                                tone.startTone(
+                                    ToneGenerator.TONE_PROP_BEEP2,
+                                    420
+                                )
+                            }
+                        }
+
+                        knownNotificationIds.addAll(
+                            incomingIds
+                        )
+                    }
+
                     applyNotifications(page)
+
                     _ui.update {
-                        it.copy(notificationsError = null)
+                        it.copy(
+                            notificationsError = null
+                        )
                     }
                 }.onFailure {
                     /*
