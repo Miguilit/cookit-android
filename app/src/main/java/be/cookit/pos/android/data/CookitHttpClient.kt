@@ -621,7 +621,28 @@ class CookitHttpClient {
                 val obj = array.optJSONObject(i) ?: continue
                 val id = obj.longAny("id", "order_id") ?: continue
                 val codeRaw = obj.optText("formatted_order_number", "order_number", "order_no", "code", "uuid") ?: id.toString()
-                val channel = channelLabel(obj.optText("placed_via", "channel", "source") ?: "POS")
+                val rawChannel =
+                    obj.optText(
+                        "placed_via",
+                        "channel",
+                        "source"
+                    ) ?: "POS"
+
+                val hasTableContext =
+                    obj.longAny(
+                        "table_id",
+                        "dining_table_id"
+                    ) != null ||
+                        obj.optJSONObject(
+                            "table"
+                        ) != null
+
+                val channel =
+                    channelLabel(
+                        rawChannel,
+                        hasTableContext
+                    )
+
                 val type = mapOrderType(obj.optText("order_type", "type") ?: "dine_in")
 
                 // Cookit has two independent axes. A12.1 prefers the explicit API aliases
@@ -3291,8 +3312,13 @@ class CookitHttpClient {
         )
         for (formatter in candidates) {
             try {
-                return LocalDateTime.parse(value, formatter)
-                    .atZone(ZoneId.systemDefault())
+                return LocalDateTime.parse(
+                    value,
+                    formatter
+                )
+                    .atZone(
+                        ZoneId.of("UTC")
+                    )
                     .toInstant()
                     .toEpochMilli()
             } catch (_: DateTimeParseException) {
@@ -3448,12 +3474,51 @@ class CookitHttpClient {
         else -> OrderType.DINE_IN
     }
 
-    private fun channelLabel(raw: String): String = when (raw.lowercase(Locale.ROOT)) {
-        "customer", "qr", "qr_table", "table_qr" -> "QR Table"
-        "web", "website", "online" -> "Site web"
-        "platform" -> "Plateforme"
-        "delivery" -> "Delivery"
-        else -> "POS"
+    private fun channelLabel(
+        raw: String,
+        hasTableContext: Boolean = false
+    ): String = when (
+        raw.lowercase(Locale.ROOT)
+    ) {
+        "customer",
+        "qr",
+        "qr_table",
+        "table_qr" ->
+            "QR Table"
+
+        "shop" ->
+            if (hasTableContext) {
+                "QR Table"
+            } else {
+                "Site web"
+            }
+
+        "web",
+        "website",
+        "online",
+        "customer_site" ->
+            "Site web"
+
+        "platform" ->
+            "Plateforme"
+
+        "delivery" ->
+            "Delivery"
+
+        "kiosk" ->
+            "Kiosk"
+
+        "mobile_app",
+        "app" ->
+            "App"
+
+        "pos" ->
+            "POS"
+
+        else ->
+            raw.replaceFirstChar {
+                it.uppercase()
+            }
     }
 
     private fun humanStatus(raw: String): String = when (raw.lowercase(Locale.ROOT)) {
