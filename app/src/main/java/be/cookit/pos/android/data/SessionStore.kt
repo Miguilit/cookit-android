@@ -18,6 +18,36 @@ class SessionStore(context: Context) {
         prefs.edit().putString("language", language.code).apply()
     }
 
+    fun notificationFeedInitialized(scope: String): Boolean =
+        prefs.getBoolean(
+            "notification_feed_initialized::$scope",
+            false
+        )
+
+    fun notificationIds(scope: String): Set<String> =
+        prefs.getStringSet(
+            "notification_feed_ids::$scope",
+            emptySet()
+        )
+            ?.toSet()
+            .orEmpty()
+
+    fun saveNotificationFeed(
+        scope: String,
+        ids: Set<String>
+    ) {
+        prefs.edit()
+            .putBoolean(
+                "notification_feed_initialized::$scope",
+                true
+            )
+            .putStringSet(
+                "notification_feed_ids::$scope",
+                ids.toSet()
+            )
+            .apply()
+    }
+
     fun clearSession() {
         prefs.edit().remove("token").remove("email").apply()
     }

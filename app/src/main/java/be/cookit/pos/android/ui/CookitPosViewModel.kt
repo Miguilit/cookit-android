@@ -6052,7 +6052,41 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private fun startNotificationPolling() {
         notificationPollingJob?.cancel()
 
+        /*
+         * Persist only the current server feed, scoped by operator and branch.
+         *
+         * This gives a cold-start watermark without relying on UUID ordering
+         * or replaying the complete unread history after every restart.
+         */
+        val notificationScope =
+            "${_ui.value.user.id}:${_ui.value.user.branchId ?: 0L}"
+
+        val persistedFeedInitialized =
+            sessionStore.notificationFeedInitialized(
+                notificationScope
+            )
+
+        knownNotificationIds.clear()
+        knownNotificationIds.addAll(
+            sessionStore.notificationIds(
+                notificationScope
+            )
+        )
+
+        notificationFeedPrimed =
+            persistedFeedInitialized
+
         notificationPollingJob = viewModelScope.launch {
+            /*
+             * Only the first successful notification fetch after a real
+             * process restart may recover missed order alerts.
+             *
+             * Afterwards, normal 2-second order polling remains responsible
+             * for live order beeps so the same order never sounds twice.
+             */
+            var coldStartRecoveryPending =
+                persistedFeedInitialized
+
             while (isActive) {
                 val currentToken = token ?: break
 
@@ -6069,42 +6103,136 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
                     if (!notificationFeedPrimed) {
                         /*
-                         * Historical unread notifications must populate
-                         * the durable badge without replaying old sounds
-                         * when the POS starts.
+                         * First-ever baseline on this user/branch:
+                         * populate badge/history silently.
                          */
                         knownNotificationIds.addAll(
                             incomingIds
                         )
+
+                        sessionStore.saveNotificationFeed(
+                            notificationScope,
+                            incomingIds
+                        )
+
                         notificationFeedPrimed = true
+                        coldStartRecoveryPending = false
                     } else {
-                        val newWaiterNotifications =
+                        val unseenUnreadNotifications =
                             page.items.filter { notification ->
                                 !notification.read &&
                                     notification.id !in
-                                        knownNotificationIds &&
+                                        knownNotificationIds
+                            }
+
+                        /*
+                         * Recover orders which arrived while this Android
+                         * process was absent.
+                         *
+                         * This block intentionally runs only for the first
+                         * successful fetch after cold start.
+                         */
+                        val recoveredOrderNotifications =
+                            if (coldStartRecoveryPending) {
+                                unseenUnreadNotifications.filter {
+                                    notification ->
                                     (
                                         notification.eventKey
-                                            ?.contains(
-                                                "waiter",
+                                            ?.equals(
+                                                "order.created",
                                                 ignoreCase = true
                                             ) == true ||
                                             notification.action
                                                 ?.equals(
-                                                    "open_waiter_request",
+                                                    "open_order",
                                                     ignoreCase = true
                                                 ) == true
-                                    )
+                                    ) &&
+                                        notification.orderId != null
+                                }
+                            } else {
+                                emptyList()
                             }
 
+                        val recoveredOrderIds =
+                            recoveredOrderNotifications
+                                .mapNotNull {
+                                    it.orderId
+                                }
+                                .toSet()
+
                         if (
+                            recoveredOrderNotifications
+                                .isNotEmpty()
+                        ) {
+                            /*
+                             * Restore the transient POS banner from the
+                             * durable server notifications.
+                             */
+                            _ui.update { state ->
+                                state.copy(
+                                    orders =
+                                        state.orders.map {
+                                            order ->
+                                            if (
+                                                order.id in
+                                                    recoveredOrderIds
+                                            ) {
+                                                order.copy(
+                                                    unread = true
+                                                )
+                                            } else {
+                                                order
+                                            }
+                                        },
+                                    unreadInbound =
+                                        state.unreadInbound +
+                                            recoveredOrderNotifications
+                                                .size
+                                )
+                            }
+                        }
+
+                        val newWaiterNotifications =
+                            unseenUnreadNotifications.filter {
+                                notification ->
+                                (
+                                    notification.eventKey
+                                        ?.contains(
+                                            "waiter",
+                                            ignoreCase = true
+                                        ) == true ||
+                                    notification.action
+                                        ?.equals(
+                                            "open_waiter_request",
+                                            ignoreCase = true
+                                        ) == true
+                                )
+                            }
+
+                        /*
+                         * One recovery sound maximum for this fetch.
+                         *
+                         * Live orders are NOT sounded here after the first
+                         * fetch because startPolling() already owns that path.
+                         */
+                        if (
+                            recoveredOrderNotifications
+                                .isNotEmpty() ||
                             newWaiterNotifications
                                 .isNotEmpty()
                         ) {
                             runCatching {
                                 tone.startTone(
                                     ToneGenerator.TONE_PROP_BEEP2,
-                                    420
+                                    if (
+                                        newWaiterNotifications
+                                            .isNotEmpty()
+                                    ) {
+                                        420
+                                    } else {
+                                        240
+                                    }
                                 )
                             }
                         }
@@ -6112,6 +6240,18 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                         knownNotificationIds.addAll(
                             incomingIds
                         )
+
+                        /*
+                         * The endpoint is already bounded to the recent feed;
+                         * persisting incomingIds keeps the local watermark
+                         * bounded as well.
+                         */
+                        sessionStore.saveNotificationFeed(
+                            notificationScope,
+                            incomingIds
+                        )
+
+                        coldStartRecoveryPending = false
                     }
 
                     applyNotifications(page)
