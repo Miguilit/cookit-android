@@ -37,6 +37,27 @@ data class PlatformSnapshot(
     val certificationCapabilities: NativeCertificationCapabilities = NativeCertificationCapabilities()
 )
 
+data class PosNotificationItem(
+    val id: String,
+    val title: String,
+    val body: String,
+    val eventKey: String?,
+    val type: String?,
+    val branchId: Long?,
+    val orderId: Long?,
+    val tableId: Long?,
+    val waiterRequestId: Long?,
+    val source: String?,
+    val action: String?,
+    val read: Boolean,
+    val createdAt: String?
+)
+
+data class PosNotificationPage(
+    val items: List<PosNotificationItem>,
+    val unreadCount: Int
+)
+
 
 data class NativePosMachineBinding(
     val id: Long,
@@ -650,6 +671,246 @@ class CookitHttpClient {
                 )
             }
         }
+    }
+
+    suspend fun notifications(
+        token: String,
+        branchId: Long? = null
+    ): PosNotificationPage = withContext(Dispatchers.IO) {
+        /*
+         * Only the durable operational POS stream belongs in the native bell.
+         *
+         * surface=pos excludes legacy/general Laravel notifications.
+         * branch_id isolates the physical POS branch.
+         * per_page=100 provides enough local history while unread_count remains
+         * authoritative even if the server eventually contains more rows.
+         */
+        val path = buildString {
+            append(CookitApiContract.NOTIFICATIONS)
+            append("?surface=pos")
+            append("&per_page=100")
+
+            if (branchId != null && branchId > 0L) {
+                append("&branch_id=")
+                append(branchId)
+            }
+        }
+
+        val root = request(
+            path,
+            token = token
+        )
+
+        val rows =
+            root.optJSONArray("data")
+                ?: root.optJSONArray("notifications")
+                ?: JSONArray()
+
+        val items = buildList {
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+
+                val id =
+                    row.optString("id", "")
+                        .trim()
+
+                if (id.isBlank()) {
+                    continue
+                }
+
+                /*
+                 * Laravel database notification envelope:
+                 *
+                 * row.data = {
+                 *   title,
+                 *   body,
+                 *   data: {
+                 *     surface,
+                 *     schema_version,
+                 *     event_key,
+                 *     branch_id,
+                 *     ...
+                 *   }
+                 * }
+                 */
+                val envelope =
+                    row.optJSONObject("data")
+                        ?: JSONObject()
+
+                val metadata =
+                    envelope.optJSONObject("data")
+                        ?: JSONObject()
+
+                /*
+                 * Defensive client-side guard as well.
+                 * Even if a future backend accidentally broadens the query,
+                 * unrelated notifications stay outside the POS center.
+                 */
+                val surface =
+                    metadata.optString(
+                        "surface",
+                        ""
+                    ).trim()
+
+                if (
+                    surface.isNotBlank() &&
+                    !surface.equals(
+                        "pos",
+                        ignoreCase = true
+                    )
+                ) {
+                    continue
+                }
+
+                val eventKey =
+                    metadata
+                        .optString(
+                            "event_key",
+                            ""
+                        )
+                        .trim()
+                        .ifBlank {
+                            metadata
+                                .optString(
+                                    "type",
+                                    ""
+                                )
+                                .trim()
+                        }
+                        .takeIf {
+                            it.isNotBlank()
+                        }
+
+                val type =
+                    metadata
+                        .optString(
+                            "type",
+                            ""
+                        )
+                        .trim()
+                        .ifBlank {
+                            eventKey.orEmpty()
+                        }
+                        .takeIf {
+                            it.isNotBlank()
+                        }
+
+                val readAt =
+                    row.opt("read_at")
+
+                val isRead =
+                    readAt != null &&
+                        readAt != JSONObject.NULL &&
+                        readAt
+                            .toString()
+                            .isNotBlank() &&
+                        !readAt
+                            .toString()
+                            .equals(
+                                "null",
+                                ignoreCase = true
+                            )
+
+                add(
+                    PosNotificationItem(
+                        id = id,
+                        title =
+                            envelope.optString(
+                                "title",
+                                "Notification Cookit"
+                            ),
+                        body =
+                            envelope.optString(
+                                "body",
+                                ""
+                            ),
+                        eventKey = eventKey,
+                        type = type,
+                        branchId =
+                            metadata.longAny(
+                                "branch_id"
+                            ),
+                        orderId =
+                            metadata.longAny(
+                                "order_id"
+                            ),
+                        tableId =
+                            metadata.longAny(
+                                "table_id"
+                            ),
+                        waiterRequestId =
+                            metadata.longAny(
+                                "waiter_request_id",
+                                "request_id"
+                            ),
+                        source =
+                            metadata
+                                .optString(
+                                    "source",
+                                    ""
+                                )
+                                .trim()
+                                .takeIf {
+                                    it.isNotBlank()
+                                },
+                        action =
+                            metadata
+                                .optString(
+                                    "action",
+                                    ""
+                                )
+                                .trim()
+                                .takeIf {
+                                    it.isNotBlank()
+                                },
+                        read = isRead,
+                        createdAt =
+                            row
+                                .optString(
+                                    "created_at",
+                                    ""
+                                )
+                                .trim()
+                                .takeIf {
+                                    it.isNotBlank()
+                                }
+                    )
+                )
+            }
+        }
+
+        val serverUnread =
+            if (root.has("unread_count")) {
+                root.optInt(
+                    "unread_count",
+                    0
+                ).coerceAtLeast(0)
+            } else {
+                items.count {
+                    !it.read
+                }
+            }
+
+        PosNotificationPage(
+            items = items,
+            unreadCount = serverUnread
+        )
+    }
+
+    suspend fun markNotificationRead(
+        token: String,
+        notificationId: String
+    ) = withContext(Dispatchers.IO) {
+        require(notificationId.isNotBlank()) {
+            "Notification id is required"
+        }
+
+        request(
+            "${CookitApiContract.NOTIFICATIONS}/${URLEncoder.encode(notificationId, StandardCharsets.UTF_8.toString())}/read",
+            method = "POST",
+            token = token,
+            body = JSONObject()
+        )
     }
 
     suspend fun orderHistoryDetail(token: String, orderId: Long): OrderHistoryDetail = withContext(Dispatchers.IO) {

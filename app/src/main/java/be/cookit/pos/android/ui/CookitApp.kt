@@ -47,6 +47,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanner
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import be.cookit.pos.android.BuildConfig
+import be.cookit.pos.android.data.PosNotificationItem
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeState
 import be.cookit.pos.android.data.fiscal.FiscalAgentRuntimeStateStore
 import be.cookit.pos.android.domain.*
@@ -240,13 +241,24 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
         Row(Modifier.fillMaxSize().background(CookitCanvas)) {
             SideNavigation(screen = screen, state = state, t = t, onSelect = { screen = it })
             Column(Modifier.weight(1f).fillMaxHeight().navigationBarsPadding()) {
-                TopBar(state = state, t = t)
+                TopBar(
+                    state = state,
+                    t = t,
+                    onNotifications = vm::openNotificationCenter
+                )
                 ScreenContent(screen, state, vm, t, onNavigate = { screen = it })
             }
         }
     } else {
         Scaffold(
-            topBar = { TopBar(state = state, t = t, compact = true) },
+            topBar = {
+                TopBar(
+                    state = state,
+                    t = t,
+                    onNotifications = vm::openNotificationCenter,
+                    compact = true
+                )
+            },
             bottomBar = {
                 NavigationBar(containerColor = CookitSurface) {
                     mobileScreens(state.policy).forEach {
@@ -301,6 +313,383 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
             onConfirm = vm::confirmOrderRefund,
             onDismiss = vm::closeOrderRefund
         )
+    }
+
+    if (state.notificationCenterOpen) {
+        NotificationCenterDialog(
+            state = state,
+            onRefresh = vm::refreshNotifications,
+            onMarkRead = vm::markNotificationRead,
+            onOpenOrder = { notification ->
+                if (!notification.read) {
+                    vm.markNotificationRead(notification.id)
+                }
+
+                vm.closeNotificationCenter()
+
+                val order = notification.orderId?.let { orderId ->
+                    state.orders.firstOrNull { it.id == orderId }
+                }
+
+                if (order != null) {
+                    screen = Screen.POS
+                    vm.openOrderForPos(order)
+                } else {
+                    screen = Screen.ORDERS
+                }
+            },
+            onDismiss = vm::closeNotificationCenter
+        )
+    }
+}
+
+@Composable
+private fun NotificationCenterDialog(
+    state: PosUiState,
+    onRefresh: () -> Unit,
+    onMarkRead: (String) -> Unit,
+    onOpenOrder: (PosNotificationItem) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .widthIn(max = 760.dp)
+                .heightIn(max = 720.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = CookitSurface
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = CookitSoftOrange
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.Notifications,
+                                contentDescription = null,
+                                tint = CookitOrange
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.width(12.dp))
+
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            "Notifications",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Black,
+                            color = CookitInk
+                        )
+
+                        Text(
+                            when (state.notificationsUnread) {
+                                0 -> "Aucune notification non lue"
+                                1 -> "1 notification non lue"
+                                else -> "${state.notificationsUnread} notifications non lues"
+                            },
+                            color = CookitMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onRefresh,
+                        enabled = !state.notificationsBusy
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Actualiser"
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDismiss
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Fermer"
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    color = CookitLine
+                )
+
+                if (state.notificationsBusy) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                state.notificationsError?.let { error ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Text(
+                            error,
+                            modifier = Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+
+                if (
+                    state.notifications.isEmpty() &&
+                    !state.notificationsBusy
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 220.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.NotificationsNone,
+                                contentDescription = null,
+                                tint = CookitMuted,
+                                modifier = Modifier.size(42.dp)
+                            )
+
+                            Text(
+                                "Aucune notification",
+                                fontWeight = FontWeight.Bold,
+                                color = CookitInk
+                            )
+
+                            Text(
+                                "Les nouvelles commandes et demandes opérationnelles apparaîtront ici.",
+                                color = CookitMuted,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(
+                            items = state.notifications,
+                            key = { it.id }
+                        ) { notification ->
+                            val isOrder =
+                                notification.orderId != null &&
+                                    notification.action.equals(
+                                        "open_order",
+                                        ignoreCase = true
+                                    )
+
+                            val icon = when {
+                                notification.eventKey
+                                    ?.startsWith(
+                                        "order.",
+                                        ignoreCase = true
+                                    ) == true ->
+                                    Icons.Default.ReceiptLong
+
+                                notification.eventKey
+                                    ?.contains(
+                                        "waiter",
+                                        ignoreCase = true
+                                    ) == true ->
+                                    Icons.Default.NotificationsActive
+
+                                else ->
+                                    Icons.Default.Notifications
+                            }
+
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isOrder) {
+                                            onOpenOrder(notification)
+                                        } else if (!notification.read) {
+                                            onMarkRead(notification.id)
+                                        }
+                                    },
+                                shape = RoundedCornerShape(18.dp),
+                                color = if (notification.read) {
+                                    CookitSurface
+                                } else {
+                                    CookitSurfaceRaised
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (notification.read) {
+                                        CookitLine
+                                    } else {
+                                        CookitOrange.copy(alpha = 0.55f)
+                                    }
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Surface(
+                                        modifier = Modifier.size(40.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (notification.read) {
+                                            CookitCanvas
+                                        } else {
+                                            CookitSoftOrange
+                                        }
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                icon,
+                                                contentDescription = null,
+                                                tint = if (notification.read) {
+                                                    CookitMuted
+                                                } else {
+                                                    CookitOrange
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.width(12.dp))
+
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                notification.title,
+                                                modifier = Modifier.weight(1f),
+                                                fontWeight = if (notification.read) {
+                                                    FontWeight.SemiBold
+                                                } else {
+                                                    FontWeight.ExtraBold
+                                                },
+                                                color = CookitInk,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+
+                                            if (!notification.read) {
+                                                Spacer(Modifier.width(8.dp))
+
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(CookitOrange)
+                                                )
+                                            }
+                                        }
+
+                                        if (notification.body.isNotBlank()) {
+                                            Text(
+                                                notification.body,
+                                                color = CookitMuted,
+                                                fontSize = 12.sp,
+                                                maxLines = 3,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            notification.source
+                                                ?.takeIf { it.isNotBlank() }
+                                                ?.let { source ->
+                                                    Text(
+                                                        source
+                                                            .replace("_", " ")
+                                                            .replaceFirstChar {
+                                                                if (
+                                                                    it.isLowerCase()
+                                                                ) {
+                                                                    it.titlecase()
+                                                                } else {
+                                                                    it.toString()
+                                                                }
+                                                            },
+                                                        color = CookitMuted,
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
+
+                                            notification.createdAt
+                                                ?.takeIf { it.isNotBlank() }
+                                                ?.let { createdAt ->
+                                                    Text(
+                                                        createdAt,
+                                                        color = CookitMuted,
+                                                        fontSize = 10.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                        }
+                                    }
+
+                                    if (isOrder) {
+                                        Spacer(Modifier.width(8.dp))
+
+                                        Icon(
+                                            Icons.Default.ChevronRight,
+                                            contentDescription = "Ouvrir la commande",
+                                            tint = CookitMuted
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    color = CookitLine
+                )
+
+                Text(
+                    "Synchronisation automatique toutes les 8 secondes",
+                    color = CookitMuted,
+                    fontSize = 10.sp
+                )
+            }
+        }
     }
 }
 
@@ -487,7 +876,12 @@ private fun iconFor(screen: Screen) = when (screen) {
 }
 
 @Composable
-private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
+private fun TopBar(
+    state: PosUiState,
+    t: UiStrings,
+    onNotifications: () -> Unit,
+    compact: Boolean = false
+) {
     Surface(modifier = Modifier.statusBarsPadding(), color = CookitSidebar, contentColor = CookitInk, shadowElevation = 0.dp) {
         Row(
             modifier = Modifier.fillMaxWidth().height(if (compact) 60.dp else 64.dp).padding(horizontal = 16.dp),
@@ -533,13 +927,31 @@ private fun TopBar(state: PosUiState, t: UiStrings, compact: Boolean = false) {
                     )
                 }
             }
-            if (!compact) {
-                Spacer(Modifier.width(10.dp))
-                IconButton(onClick = {}) {
-                    BadgedBox(
-                        badge = { if (state.unreadInbound > 0) Badge { Text(state.unreadInbound.toString()) } }
-                    ) { Icon(Icons.Default.Notifications, null) }
+            Spacer(Modifier.width(if (compact) 4.dp else 10.dp))
+            IconButton(onClick = onNotifications) {
+                BadgedBox(
+                    badge = {
+                        if (state.notificationsUnread > 0) {
+                            Badge {
+                                Text(
+                                    if (state.notificationsUnread > 99) {
+                                        "99+"
+                                    } else {
+                                        state.notificationsUnread.toString()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Icon(
+                        Icons.Default.Notifications,
+                        contentDescription = "Notifications"
+                    )
                 }
+            }
+
+            if (!compact) {
                 Surface(
                     modifier = Modifier.size(38.dp),
                     shape = RoundedCornerShape(12.dp),

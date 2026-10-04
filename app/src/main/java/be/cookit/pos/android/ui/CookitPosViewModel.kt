@@ -75,6 +75,17 @@ data class PosUiState(
     val orders: List<PosOrder> = emptyList(),
     val tables: List<DiningTable> = emptyList(),
     val unreadInbound: Int = 0,
+
+    // N1C: persistent operational notifications come from Laravel's
+    // database notification channel. This state is intentionally
+    // separate from unreadInbound, which remains the transient
+    // new-order detector owned by the 2-second order polling loop.
+    val notifications: List<PosNotificationItem> = emptyList(),
+    val notificationsUnread: Int = 0,
+    val notificationsBusy: Boolean = false,
+    val notificationsError: String? = null,
+    val notificationCenterOpen: Boolean = false,
+
     val lastSyncEpochMs: Long? = null,
     val language: AppLanguage = AppLanguage.FR,
     val cashRegisters: List<CashRegister> = emptyList(),
@@ -335,6 +346,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var token: String? = null
     private var pollingJob: Job? = null
+    private var notificationPollingJob: Job? = null
     private var fiscalSyncJob: Job? = null
     private var fiscalAgentStateMirrorJob: Job? = null
     private val knownOrderIds = linkedSetOf<Long>()
@@ -369,6 +381,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun logout() {
         pollingJob?.cancel()
+        notificationPollingJob?.cancel()
         fiscalSyncJob?.cancel()
         token = null
         knownOrderIds.clear()
@@ -1432,7 +1445,111 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun markInboundRead() {
-        _ui.update { state -> state.copy(unreadInbound = 0, orders = state.orders.map { it.copy(unread = false) }) }
+        _ui.update { state ->
+            state.copy(
+                unreadInbound = 0,
+                orders = state.orders.map { it.copy(unread = false) }
+            )
+        }
+    }
+
+    fun openNotificationCenter() {
+        _ui.update {
+            it.copy(
+                notificationCenterOpen = true,
+                notificationsError = null
+            )
+        }
+        refreshNotifications()
+    }
+
+    fun closeNotificationCenter() {
+        _ui.update {
+            it.copy(notificationCenterOpen = false)
+        }
+    }
+
+    fun refreshNotifications() {
+        val currentToken = token ?: return
+
+        viewModelScope.launch {
+            _ui.update {
+                it.copy(
+                    notificationsBusy = true,
+                    notificationsError = null
+                )
+            }
+
+            runCatching {
+                api.notifications(
+                    currentToken,
+                    _ui.value.user.branchId
+                )
+            }.onSuccess { page ->
+                applyNotifications(page)
+                _ui.update {
+                    it.copy(
+                        notificationsBusy = false,
+                        notificationsError = null
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        notificationsBusy = false,
+                        notificationsError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
+    fun markNotificationRead(notificationId: String) {
+        val currentToken = token ?: return
+        if (notificationId.isBlank()) return
+
+        viewModelScope.launch {
+            runCatching {
+                api.markNotificationRead(
+                    currentToken,
+                    notificationId
+                )
+            }.onSuccess {
+                _ui.update { state ->
+                    val updated = state.notifications.map { notification ->
+                        if (notification.id == notificationId) {
+                            notification.copy(read = true)
+                        } else {
+                            notification
+                        }
+                    }
+
+                    state.copy(
+                        notifications = updated,
+                        notificationsUnread = updated.count { !it.read },
+                        notificationsError = null
+                    )
+                }
+            }.onFailure { error ->
+                _ui.update {
+                    it.copy(
+                        notificationsError = readableError(error)
+                    )
+                }
+            }
+        }
+    }
+
+    private fun applyNotifications(
+        page: PosNotificationPage
+    ) {
+        _ui.update {
+            it.copy(
+                notifications = page.items,
+                notificationsUnread =
+                    page.unreadCount.coerceAtLeast(0)
+            )
+        }
     }
 
     fun addProduct(product: Product) {
@@ -5798,6 +5915,38 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                     .onFailure { error -> _ui.update { it.copy(online = false, error = readableError(error)) } }
             }
         }
+
+        startNotificationPolling()
+    }
+
+    private fun startNotificationPolling() {
+        notificationPollingJob?.cancel()
+
+        notificationPollingJob = viewModelScope.launch {
+            while (isActive) {
+                val currentToken = token ?: break
+
+                runCatching {
+                    api.notifications(
+                        currentToken,
+                        _ui.value.user.branchId
+                    )
+                }.onSuccess { page ->
+                    applyNotifications(page)
+                    _ui.update {
+                        it.copy(notificationsError = null)
+                    }
+                }.onFailure {
+                    /*
+                     * Notification availability must never mark the whole POS
+                     * offline. Order/KDS polling remains the operational
+                     * connectivity authority.
+                     */
+                }
+
+                delay(8_000L)
+            }
+        }
     }
 
     private fun readableError(error: Throwable): String = when (error) {
@@ -5812,6 +5961,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
 
     override fun onCleared() {
         pollingJob?.cancel()
+        notificationPollingJob?.cancel()
         fiscalSyncJob?.cancel()
         tone.release()
         super.onCleared()
