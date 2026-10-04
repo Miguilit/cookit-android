@@ -358,7 +358,36 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         api.languageCode = sessionStore.language().code
         startFiscalAgentStateMirror()
         viewModelScope.launch { initializeFiscalRuntime() }
-        sessionStore.clearSession()
+
+        val restoredToken = sessionStore.token()
+        val restoredEmail = sessionStore.email()
+
+        if (
+            !restoredToken.isNullOrBlank() &&
+            !restoredEmail.isNullOrBlank()
+        ) {
+            token = restoredToken
+
+            _ui.update {
+                it.copy(
+                    loading = true,
+                    error = null
+                )
+            }
+
+            viewModelScope.launch {
+                bootstrap(restoredEmail)
+            }
+        } else if (
+            !restoredToken.isNullOrBlank() ||
+            !restoredEmail.isNullOrBlank()
+        ) {
+            /*
+             * Incomplete legacy session: never keep a half-valid identity.
+             * A normal login will recreate token + email atomically.
+             */
+            sessionStore.clearSession()
+        }
     }
 
     fun login(email: String, password: String) {
@@ -372,6 +401,11 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 val newToken = api.login(email, password)
                 token = newToken
                 sessionStore.save(newToken, email.trim())
+
+                knownOrderIds.clear()
+                knownNotificationIds.clear()
+                notificationFeedPrimed = false
+
                 bootstrap(email.trim())
             }.onFailure { throwable ->
                 token = null
@@ -387,6 +421,8 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         fiscalSyncJob?.cancel()
         token = null
         knownOrderIds.clear()
+        knownNotificationIds.clear()
+        notificationFeedPrimed = false
         sessionStore.clearSession()
         offlineBootstrapStore.clear()
         draftStore.clear()
@@ -5698,6 +5734,43 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         val error = liveResult.exceptionOrNull() ?: IllegalStateException("Cookit bootstrap failed")
+
+        val sessionRejected =
+            error is CookitApiException &&
+                error.statusCode in setOf(
+                    401,
+                    403
+                )
+
+        if (sessionRejected) {
+            pollingJob?.cancel()
+            notificationPollingJob?.cancel()
+            fiscalSyncJob?.cancel()
+
+            token = null
+            knownOrderIds.clear()
+            knownNotificationIds.clear()
+            notificationFeedPrimed = false
+            sessionStore.clearSession()
+
+            _ui.update {
+                it.copy(
+                    authenticated = false,
+                    demoMode = false,
+                    loading = false,
+                    online = true,
+                    error = readableError(error)
+                )
+            }
+
+            return
+        }
+
+        /*
+         * Transport failure / temporary cloud outage:
+         * preserve the valid local session and reuse the existing
+         * last-known-good offline bootstrap.
+         */
         val restored = restoreOfflineBootstrap(error)
         if (!restored) {
             _ui.update {
