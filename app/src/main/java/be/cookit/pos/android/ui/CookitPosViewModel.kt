@@ -2992,6 +2992,34 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun openOrderForPosById(
+        orderId: Long
+    ) {
+        if (orderId <= 0L) {
+            return
+        }
+
+        val existing =
+            _ui.value.orders.firstOrNull {
+                it.id == orderId
+            }
+
+        if (existing != null) {
+            openOrderForPos(existing)
+            return
+        }
+
+        val currentToken = token ?: return
+
+        viewModelScope.launch {
+            loadRemoteOrderForPos(
+                currentToken,
+                orderId,
+                "Commande #$orderId"
+            )
+        }
+    }
+
     fun refreshOpenedOrder() {
         val currentToken = token ?: return
         val state = _ui.value

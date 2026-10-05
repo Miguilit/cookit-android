@@ -220,7 +220,12 @@ private fun fiscalRetryLabel(epochMs: Long?): String {
 }
 
 @Composable
-fun CookitApp(vm: CookitPosViewModel = viewModel()) {
+fun CookitApp(
+    vm: CookitPosViewModel = viewModel(),
+    pushNavigation:
+        be.cookit.pos.android.data.PushNavigationRequest? = null,
+    onPushNavigationConsumed: () -> Unit = {}
+) {
     val state by vm.ui.collectAsState()
     val t = strings(state.language)
 
@@ -234,6 +239,72 @@ fun CookitApp(vm: CookitPosViewModel = viewModel()) {
     }
 
     var screen by remember(state.user.role, state.policy) { mutableStateOf(defaultScreen(state.policy)) }
+
+    /*
+     * A native FCM tap may arrive before cold-start authentication
+     * has completed. Keep the request pending in MainActivity until
+     * the POS is authenticated, then reuse the same navigation
+     * semantics as the in-app notification center.
+     */
+    androidx.compose.runtime.LaunchedEffect(
+        pushNavigation?.action,
+        pushNavigation?.notificationId,
+        pushNavigation?.orderId,
+        pushNavigation?.tableId,
+        pushNavigation?.waiterRequestId,
+        state.authenticated
+    ) {
+        val request =
+            pushNavigation
+                ?: return@LaunchedEffect
+
+        if (!state.authenticated) {
+            return@LaunchedEffect
+        }
+
+        when {
+            request.action.equals(
+                "open_order",
+                ignoreCase = true
+            ) &&
+                request.orderId != null -> {
+
+                request.notificationId
+                    ?.let(vm::markNotificationRead)
+
+                screen = Screen.POS
+
+                vm.openOrderForPosById(
+                    request.orderId
+                )
+
+                onPushNavigationConsumed()
+            }
+
+            request.action.equals(
+                "open_waiter_request",
+                ignoreCase = true
+            ) -> {
+                request.notificationId
+                    ?.let(vm::markNotificationRead)
+
+                val focused =
+                    vm.focusWaiterTable(
+                        request.tableId
+                    )
+
+                if (focused) {
+                    screen = Screen.POS
+                }
+
+                onPushNavigationConsumed()
+            }
+
+            else -> {
+                onPushNavigationConsumed()
+            }
+        }
+    }
     val widthDp = LocalConfiguration.current.screenWidthDp
     val tablet = widthDp >= 840
 
