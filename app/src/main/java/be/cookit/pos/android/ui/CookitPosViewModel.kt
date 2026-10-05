@@ -250,6 +250,11 @@ data class PosUiState(
 class CookitPosViewModel(application: Application) : AndroidViewModel(application) {
     private val api = CookitHttpClient()
     private val sessionStore = SessionStore(application)
+    private val pushRegistrationManager =
+        be.cookit.pos.android.data.PushRegistrationManager(
+            application,
+            api
+        )
     private val offlineBootstrapStore = OfflineBootstrapStore(application)
     private val draftStore = DraftOrderStore(application)
     private val printerStore = PrinterSettingsStore(application)
@@ -5952,6 +5957,22 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 catalog = catalog.copy(products = liveProducts),
                 orders = liveOrders,
                 tables = tables
+            )
+        }
+
+        /*
+         * FCM registration is best-effort.
+         * POS bootstrap must remain successful even if Firebase or
+         * token registration is temporarily unavailable.
+         */
+        runCatchingPreservingCancellation {
+            pushRegistrationManager.registerIfAvailable(
+                bearerToken = currentToken,
+                branchId = platform.user.branchId,
+                deviceId =
+                    fiscalIdentityResult
+                        .getOrNull()
+                        ?.deviceId
             )
         }
 

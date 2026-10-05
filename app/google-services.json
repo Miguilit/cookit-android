@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "380330761522",
+    "project_id": "cookit-pos",
+    "storage_bucket": "cookit-pos.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:380330761522:android:c7a12c9395e50354dc4b2b",
+        "android_client_info": {
+          "package_name": "be.cookit.pos.android"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDc2qsHwR9L22MyNENOLLtaDDiXPFCx2Wo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

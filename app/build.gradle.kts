@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("androidx.room")
+    id("com.google.gms.google-services")
 }
 
 val cookitSigningStoreFile = System.getenv("COOKIT_SIGNING_STORE_FILE")?.takeIf { it.isNotBlank() }
@@ -98,6 +99,10 @@ dependencies {
     // Customer identity: Google Code Scanner UI (QR) without direct camera permission handling.
     implementation("com.google.android.gms:play-services-base:18.11.0")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+
+    // N1F: native Firebase Cloud Messaging transport.
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation("com.google.firebase:firebase-messaging")
 
     // CookitPad parity: native Star Micronics provider.
     implementation("com.starmicronics:stario10:1.13.0")

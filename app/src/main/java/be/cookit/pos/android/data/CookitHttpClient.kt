@@ -694,6 +694,34 @@ class CookitHttpClient {
         }
     }
 
+    suspend fun registerNotificationToken(
+        bearerToken: String,
+        pushToken: String,
+        branchId: Long,
+        deviceId: String
+    ) = withContext(Dispatchers.IO) {
+        require(pushToken.isNotBlank()) {
+            "Push token is required"
+        }
+        require(branchId > 0L) {
+            "Branch id is required"
+        }
+        require(deviceId.isNotBlank()) {
+            "Device id is required"
+        }
+
+        request(
+            CookitApiContract.REGISTER_NOTIFICATION_TOKEN,
+            method = "POST",
+            token = bearerToken,
+            body = JSONObject()
+                .put("token", pushToken.trim())
+                .put("platform", "android")
+                .put("device_id", deviceId.trim())
+                .put("branch_id", branchId)
+        )
+    }
+
     suspend fun notifications(
         token: String,
         branchId: Long? = null
