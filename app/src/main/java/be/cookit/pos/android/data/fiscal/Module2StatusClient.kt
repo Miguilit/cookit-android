@@ -132,7 +132,11 @@ class Module2StatusClient(private val context: Context) {
             "signPreBill",
             "signMoneyInOut",
             "signWorkIn",
-            "signWorkOut"
+            "signWorkOut",
+            "signReportTurnoverX",
+            "signReportTurnoverZ",
+            "signReportUserX",
+            "signReportUserZ"
         )
 
         val preparedOperation =
