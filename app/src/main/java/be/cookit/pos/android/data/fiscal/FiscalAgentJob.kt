@@ -81,7 +81,9 @@ data class FiscalAgentJob(
             "signOrder",
             "signCostCenterChange",
             "signPreBill",
-            "signMoneyInOut"
+            "signMoneyInOut",
+            "signWorkIn",
+            "signWorkOut"
         )
 
         if (operation !in supportedPreparedOperations) {

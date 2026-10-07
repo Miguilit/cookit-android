@@ -656,7 +656,9 @@ class FiscalAgentRunner(
                 "signOrder",
                 "signCostCenterChange",
                 "signPreBill",
-                "signMoneyInOut"
+                "signMoneyInOut",
+                "signWorkIn",
+                "signWorkOut"
             )
 
         /*
