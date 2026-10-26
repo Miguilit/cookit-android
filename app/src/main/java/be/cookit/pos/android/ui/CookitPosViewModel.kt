@@ -1282,18 +1282,53 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         val state =
             _ui.value
 
-        val branchId =
-            state.user.branchId
-
         val identity =
             state.fiscalIdentity
 
+        val branchId =
+            state.user.branchId
+                ?.takeIf { it > 0L }
+                ?: identity
+                    ?.branchId
+                    ?.takeIf { it > 0L }
+
         if (
             branchId == null
-            || branchId <= 0L
             || identity == null
             || identity.deviceId.isBlank()
         ) {
+            _ui.update {
+                it.copy(
+                    posMachineStatus = "unavailable",
+                    posDeviceBindingBusy = false,
+                    posDeviceBindingError =
+                        "POS binding scope unavailable: branch=${state.user.branchId}, fiscalBranch=${identity?.branchId}"
+                )
+            }
+            return
+        }
+
+        val userBranchId =
+            state.user.branchId
+                ?.takeIf { it > 0L }
+
+        val fiscalBranchId =
+            identity.branchId
+                ?.takeIf { it > 0L }
+
+        if (
+            userBranchId != null
+            && fiscalBranchId != null
+            && userBranchId != fiscalBranchId
+        ) {
+            _ui.update {
+                it.copy(
+                    posMachineStatus = "unavailable",
+                    posDeviceBindingBusy = false,
+                    posDeviceBindingError =
+                        "POS binding scope mismatch: session=$userBranchId fiscal=$fiscalBranchId"
+                )
+            }
             return
         }
 
@@ -5893,14 +5928,20 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             )
         }
 
+        val resolvedFiscalIdentity =
+            fiscalIdentityResult.getOrNull()
+                ?: _ui.value.fiscalIdentity
+
         val posDeviceBindingResult =
             platform.user.branchId
                 ?.takeIf {
                     it > 0L
                 }
                 ?.let { branchId ->
-                    fiscalIdentityResult
-                        .getOrNull()
+                    resolvedFiscalIdentity
+                        ?.takeIf {
+                            it.deviceId.isNotBlank()
+                        }
                         ?.let { identity ->
                             runCatchingPreservingCancellation {
                                 api.checkNativePosDevice(
