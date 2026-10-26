@@ -177,7 +177,10 @@ private fun allowedTabletScreens(state: PosUiState): List<Screen> = buildList {
     if (policy.canViewKds) add(Screen.KDS)
     if (policy.canViewDelivery) add(Screen.DELIVERY)
     if (policy.canUsePos) add(Screen.CASH)
-    val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured
+    val fiscalAvailable =
+        state.fiscalAgentConfigured ||
+        state.fdmSettings.configured ||
+        state.fiscalIdentity != null
     if (policy.canManageSettings && fiscalAvailable) add(Screen.FISCALITY)
     add(Screen.SETTINGS)
 }
@@ -5406,7 +5409,10 @@ private fun SettingsScreen(
         SettingsRow(Icons.Default.Security, t.permissions, "${state.policy.profile.name.lowercase()}")
 
         val fiscalUi = fiscalStrings(state.language)
-        val fiscalAvailable = state.fiscalAgentConfigured || state.fdmSettings.configured
+        val fiscalAvailable =
+            state.fiscalAgentConfigured ||
+            state.fdmSettings.configured ||
+            state.fiscalIdentity != null
         if (fiscalAvailable) Card(
             colors = CardDefaults.cardColors(containerColor = CookitSurface),
             shape = RoundedCornerShape(18.dp),
