@@ -3,6 +3,7 @@ package be.cookit.pos.android.data.fiscal
 import be.cookit.pos.android.data.CookitApiException
 import be.cookit.pos.android.domain.FiscalRuntimeIdentity
 import be.cookit.pos.android.domain.RemoteOrderDraft
+import org.json.JSONObject
 
 class FiscalSyncEngine(
     private val outbox: FiscalOutboxRepository,
@@ -49,7 +50,14 @@ class FiscalSyncEngine(
                 outbox.markCloudQueued(entity, result.publicId)
                 queued++
             } catch (error: CookitApiException) {
-                outbox.recordRetry(entity, error.message ?: "Fiscal cloud queue failed")
+                val message = error.message ?: "Fiscal cloud queue failed"
+
+                if (isTerminalStructuralFailure(error)) {
+                    outbox.markFailed(entity, message)
+                } else {
+                    outbox.recordRetry(entity, message)
+                }
+
                 failed++
             } catch (error: Throwable) {
                 outbox.recordRetry(entity, error.message ?: "Fiscal cloud queue failed")
@@ -58,6 +66,18 @@ class FiscalSyncEngine(
         }
 
         return SyncResult(attempted, queued, profileOff, failed)
+    }
+
+    private fun isTerminalStructuralFailure(
+        error: CookitApiException
+    ): Boolean {
+        if (error.statusCode != 422) return false
+
+        return runCatching {
+            JSONObject(error.responseBody)
+                .optJSONObject("errors")
+                ?.has("android_pos_machine") == true
+        }.getOrDefault(false)
     }
 
     private fun isTerminalSettlement(status: String?): Boolean = status

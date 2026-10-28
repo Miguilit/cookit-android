@@ -2773,8 +2773,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
 
-        if (state.policy.cashSessionRequired &&
-            state.activeCashSession?.status?.lowercase() != "open") {
+        if (state.activeCashSession?.status?.lowercase() != "open") {
             _ui.update {
                 it.copy(
                     checkoutMessage = "cash_required",
@@ -3842,10 +3841,20 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun paySplitBill(billId: Long, method: PosPaymentMethod) {
+        val state = _ui.value
         val currentToken = token ?: return
-        val context = _ui.value.billingContext ?: return
+        val context = state.billingContext ?: return
         val bill = context.splitBills.firstOrNull { it.id == billId } ?: return
         if (bill.amountDue <= 0.0) return
+
+        if (state.activeCashSession?.status?.lowercase() != "open") {
+            _ui.update {
+                it.copy(
+                    billingError = "Ouvrez d'abord le fond de caisse."
+                )
+            }
+            return
+        }
 
         viewModelScope.launch {
             _ui.update { it.copy(billingBusy = true, billingError = null) }
@@ -3904,8 +3913,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
 
-        if (state.policy.cashSessionRequired &&
-            state.activeCashSession?.status?.lowercase() != "open") {
+        if (state.activeCashSession?.status?.lowercase() != "open") {
             _ui.update { it.copy(billingError = "Ouvrez d'abord le fond de caisse.") }
             return
         }

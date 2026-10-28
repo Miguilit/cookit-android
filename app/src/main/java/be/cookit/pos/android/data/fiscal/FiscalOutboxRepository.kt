@@ -171,6 +171,20 @@ class FiscalOutboxRepository(
         )
     }
 
+    suspend fun markFailed(
+        entity: FiscalOutboxEntity,
+        error: String,
+        nowEpochMs: Long = System.currentTimeMillis()
+    ) {
+        dao.recordAttempt(
+            localDbId = entity.localDbId,
+            nowEpochMs = nowEpochMs,
+            status = FiscalOutboxEntity.STATUS_FAILED,
+            nextAttemptAtEpochMs = Long.MAX_VALUE,
+            error = error.take(1000)
+        )
+    }
+
     suspend fun markCloudQueued(
         entity: FiscalOutboxEntity,
         cloudTransactionId: String?,
