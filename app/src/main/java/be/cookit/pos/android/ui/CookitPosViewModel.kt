@@ -14,6 +14,7 @@ import be.cookit.pos.android.data.fiscal.*
 import be.cookit.pos.android.domain.*
 import be.cookit.pos.android.service.FiscalAgentServiceController
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -242,6 +243,9 @@ data class PosUiState(
     val discoveredPrinters: List<DiscoveredPrinter> = emptyList(),
     val printerDiscoveryBusy: Boolean = false,
     val printerMessage: String? = null,
+    val drawerOpenBusy: Boolean = false,
+    val drawerOpenMessage: String? = null,
+    val drawerOpenError: Boolean = false,
     val hardwareMode: HardwareMode = HardwareMode.REAL,
     val hardwareSimulationEvents: List<HardwareSimulationEvent> = emptyList(),
     val hardwareSimulationPreview: String? = null
@@ -291,6 +295,9 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
     private val storedFiscalAgentRuntimeState = fiscalAgentRuntimeStateStore.load()
     private val fiscalAgentClient = FiscalAgentClient()
     private val fiscalAgentRunner = FiscalAgentRunner(fiscalAgentClient, fdmRuntime, localDatabase.fiscalAgentOutcomeDao())
+    private val drawerOpenPrefs = application.getSharedPreferences(
+        "cookit.m131.drawer-open.v1", android.content.Context.MODE_PRIVATE
+    )
     private val printerService = EscPosPrinterService()
     private val starPrinterService = StarPrinterService(application)
     private val starDiscoveryService = StarDiscoveryService(application)
@@ -1208,68 +1215,186 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    /**
+     * M131 permanent manual drawer-opening workflow. Not an impression/test pulse.
+     * A durable UUID survives network failure or process restart; repeats of the
+     * same pending user action never create a second fiscal transaction.
+     * A physical pulse is possible only AFTER a one-use server claim. If claim
+     * times out or the app dies, it is NOT retried automatically.
+     */
     fun openDrawer() {
-        val state =
-            _ui.value
+        val state = _ui.value
+        if (state.drawerOpenBusy) return
 
-        if (
-            state.hardwareMode ==
-            HardwareMode.SIMULATED
-        ) {
-            recordHardwareSimulationEvent(
-                action =
-                    "drawer_open",
-                detail =
-                    state.printerProvider.name
-            )
-
+        val session = state.activeCashSession
+        val deviceId = state.fiscalIdentity?.deviceId?.trim().orEmpty()
+        val currentToken = token
+        val operatorId = state.user.id
+        val machineId = state.posMachineId
+        if (session?.status?.lowercase() != "open" ||
+            state.user.restaurantId == null || state.user.restaurantId <= 0 ||
+            state.user.branchId == null || state.user.branchId <= 0 ||
+            deviceId.isBlank() || operatorId <= 0 || machineId == null ||
+            machineId <= 0 || currentToken.isNullOrBlank()) {
             _ui.update {
                 it.copy(
-                    printerMessage =
-                        "simulated_drawer_ok"
+                    drawerOpenMessage = "Session ouverte et terminal MultiPOS actif requis.",
+                    drawerOpenError = true,
+                    printerMessage = "failed"
                 )
             }
-
             return
         }
 
-        viewModelScope.launch {
-            val ok =
-                when (
-                    state.printerProvider
-                ) {
-                    PrinterProviderType.ESC_POS ->
-                        runCatching {
-                            printerService.pulseDrawer(
-                                state.printerHost,
-                                state.printerPort
-                            )
-                        }.getOrDefault(
-                            false
-                        )
-
-                    PrinterProviderType.STAR ->
-                        runCatching {
-                            starPrinterService.pulseDrawer(
-                                state.starIdentifier,
-                                state.starInterface
-                            )
-                        }.getOrDefault(
-                            false
-                        )
-                }
-
+        if (state.hardwareMode != HardwareMode.REAL) {
             _ui.update {
                 it.copy(
-                    printerMessage =
-                        if (
-                            ok
-                        ) {
-                            "drawer_ok"
-                        } else {
-                            "failed"
-                        }
+                    drawerOpenMessage = "Ouverture réelle indisponible en mode simulation.",
+                    drawerOpenError = true,
+                    printerMessage = "failed"
                 )
+            }
+            return
+        }
+
+        // Persist before the first POST. If its response is lost, replay the
+        // SAME UUID rather than minting another fiscal event.
+        val scope = listOf(
+            state.user.restaurantId, state.user.branchId, operatorId,
+            session.id, machineId, deviceId
+        ).joinToString(":")
+        val existingScope = drawerOpenPrefs.getString("scope", "")
+        val storedId = drawerOpenPrefs.getString("client_request_id", "")
+        val validStoredId = storedId?.takeIf { value ->
+            value.isNotBlank() &&
+                runCatching { java.util.UUID.fromString(value) }.isSuccess
+        }
+        val clientRequestId = if (existingScope == scope) {
+            validStoredId ?: java.util.UUID.randomUUID().toString()
+        } else {
+            java.util.UUID.randomUUID().toString()
+        }
+        val persisted = drawerOpenPrefs.edit()
+            .putString("scope", scope)
+            .putString("client_request_id", clientRequestId)
+            .commit()
+        if (!persisted) {
+            _ui.update {
+                it.copy(drawerOpenMessage = "Journal local M131 indisponible.", drawerOpenError = true)
+            }
+            return
+        }
+
+        _ui.update {
+            it.copy(
+                drawerOpenBusy = true,
+                drawerOpenMessage = "Fiscalisation de l'ouverture en cours…",
+                drawerOpenError = false,
+                printerMessage = null
+            )
+        }
+
+        viewModelScope.launch {
+            var claimAcquired = false
+            try {
+                api.bindNativeDeviceId(deviceId)
+                var fiscal = api.requestFiscalDrawerOpen(currentToken, clientRequestId)
+
+                // No claim until the cloud ledger reports the REAL FDM ACK.
+                var checks = 0
+                while (checks < 45 &&
+                    !(fiscal.status == "fiscal_queued" &&
+                      fiscal.fiscalStatus == "fiscalized" &&
+                      !fiscal.fiscalizedAt.isNullOrBlank())) {
+                    if (fiscal.status in setOf(
+                            "pulse_succeeded", "pulse_failed", "pulse_uncertain"
+                        ) || fiscal.fiscalStatus in setOf(
+                            "failed", "rejected", "cancelled"
+                        )) {
+                        // A confirmed terminal request is NEVER replayed. The
+                        // next explicit click may start a fresh business action.
+                        if (drawerOpenPrefs.getString("scope", "") == scope) {
+                            drawerOpenPrefs.edit().clear().commit()
+                        }
+                        throw IllegalStateException(
+                            "Action fiscale terminée ou rejetée. Aucune ouverture n'a été relancée."
+                        )
+                    }
+                    if (fiscal.status == "pulse_claimed") {
+                        throw IllegalStateException(
+                            "Autorisation déjà consommée. Vérifiez le tiroir avant toute nouvelle demande."
+                        )
+                    }
+                    delay(2_000L)
+                    fiscal = api.fiscalDrawerOpenStatus(currentToken, fiscal.requestId)
+                    checks++
+                }
+                if (fiscal.status != "fiscal_queued" ||
+                    fiscal.fiscalStatus != "fiscalized" ||
+                    fiscal.fiscalizedAt.isNullOrBlank()) {
+                    throw IllegalStateException(
+                        "Le FDM n'a pas confirmé l'ouverture. Demande conservée pour reprise."
+                    )
+                }
+
+                // NEVER retry this POST after a timeout: the claim can already
+                // have been consumed remotely, even when its response is lost.
+                val claim = api.claimFiscalDrawerPulse(currentToken, fiscal.requestId)
+                claimAcquired = true
+                // Once claimed, a restart must never automatically redo a pulse.
+                if (drawerOpenPrefs.getString("scope", "") == scope) {
+                    drawerOpenPrefs.edit().clear().commit()
+                }
+
+                // Complete/report the claimed action despite ViewModel cancellation.
+                val result = withContext(NonCancellable) {
+                    val pulsed = runCatching {
+                        when (state.printerProvider) {
+                            PrinterProviderType.ESC_POS -> printerService.pulseDrawer(
+                                state.printerHost, state.printerPort
+                            )
+                            PrinterProviderType.STAR -> starPrinterService.pulseDrawer(
+                                state.starIdentifier, state.starInterface
+                            )
+                        }
+                    }.getOrDefault(false)
+                    val outcome = if (pulsed) "succeeded" else "uncertain"
+                    val reported = runCatching {
+                        api.reportFiscalDrawerPulse(
+                            currentToken, claim.requestId, claim.claimToken, outcome
+                        )
+                    }.isSuccess
+                    Pair(pulsed, reported)
+                }
+                _ui.update {
+                    it.copy(
+                        drawerOpenMessage = when {
+                            !result.second -> "Pulse tenté ; compte rendu serveur non confirmé. Vérification manuelle requise."
+                            result.first -> "Ouverture du tiroir fiscalisée et enregistrée."
+                            else -> "Impulsion incertaine ; aucune nouvelle ouverture automatique."
+                        },
+                        drawerOpenError = !result.first || !result.second,
+                        printerMessage = if (result.first && result.second) "drawer_ok" else "failed"
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // Before claim: keep UUID for safe idempotent replay.
+                // After an ambiguous claim: never issue another claim/pulse.
+                if (claimAcquired && drawerOpenPrefs.getString("scope", "") == scope) {
+                    drawerOpenPrefs.edit().clear().commit()
+                }
+                _ui.update {
+                    it.copy(
+                        drawerOpenMessage = error.message
+                            ?: "Fiscalisation indisponible. Le tiroir reste verrouillé.",
+                        drawerOpenError = true,
+                        printerMessage = "failed"
+                    )
+                }
+            } finally {
+                _ui.update { it.copy(drawerOpenBusy = false) }
             }
         }
     }

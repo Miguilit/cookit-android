@@ -5752,7 +5752,9 @@ private fun SettingsScreen(
                                 else t.testPrinter
                             )
                         }
-                        OutlinedButton(onClick = {
+                        OutlinedButton(
+                            enabled = !state.drawerOpenBusy,
+                            onClick = {
                             if (
                                 state.printerProvider ==
                                 PrinterProviderType.STAR
@@ -5777,6 +5779,14 @@ private fun SettingsScreen(
                             Spacer(Modifier.width(6.dp))
                             Text(t.drawer)
                         }
+                    }
+
+                    state.drawerOpenMessage?.let { message ->
+                        Text(
+                            message,
+                            color = if (state.drawerOpenError) MaterialTheme.colorScheme.error else CookitGreen,
+                            fontSize = 12.sp
+                        )
                     }
 
                     state.printerMessage

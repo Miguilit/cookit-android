@@ -75,6 +75,19 @@ data class NativePosDeviceCheck(
     val machine: NativePosMachineBinding?
 )
 
+/** M131: fiscal status is authoritative; no receipt or authorization is inferred locally. */
+data class DrawerFiscalOpenState(
+    val requestId: String,
+    val status: String,
+    val fiscalStatus: String?,
+    val fiscalizedAt: String?
+)
+
+data class DrawerFiscalPulseClaim(
+    val requestId: String,
+    val claimToken: String
+)
+
 class CookitHttpClient {
     var languageCode: String = "fr"
 
@@ -2382,6 +2395,87 @@ class CookitHttpClient {
                 splitPay = caps.optBoolean("split_pay", false),
                 mergeTables = caps.optBoolean("merge_tables", false)
             )
+        )
+    }
+
+    // M131: all requests use the native-device header and the session bearer token.
+    // No fiscal identities, mode, or drawer ID are supplied by Android.
+    suspend fun requestFiscalDrawerOpen(
+        token: String,
+        clientRequestId: String
+    ): DrawerFiscalOpenState = withContext(Dispatchers.IO) {
+        parseFiscalDrawerOpenState(
+            request(
+                "pos/cash-register/drawer/open",
+                method = "POST",
+                token = token,
+                body = JSONObject().put("client_request_id", clientRequestId)
+            )
+        )
+    }
+
+    suspend fun fiscalDrawerOpenStatus(
+        token: String,
+        requestId: String
+    ): DrawerFiscalOpenState = withContext(Dispatchers.IO) {
+        parseFiscalDrawerOpenState(
+            request("pos/cash-register/drawer/open/$requestId", token = token)
+        )
+    }
+
+    suspend fun claimFiscalDrawerPulse(
+        token: String,
+        requestId: String
+    ): DrawerFiscalPulseClaim = withContext(Dispatchers.IO) {
+        val response = request(
+            "pos/cash-register/drawer/open/$requestId/claim",
+            method = "POST",
+            token = token,
+            body = JSONObject()
+        )
+        val data = response.optJSONObject("data")
+            ?: throw CookitApiException(200, "Réponse claim M131 sans données.")
+        val tokenValue = data.optString("claim_token", "")
+        if (data.optString("request_id") != requestId ||
+            !Regex("^[a-f0-9]{48}$").matches(tokenValue)) {
+            throw CookitApiException(200, "Autorisation d'ouverture M131 invalide.")
+        }
+        DrawerFiscalPulseClaim(requestId, tokenValue)
+    }
+
+    suspend fun reportFiscalDrawerPulse(
+        token: String,
+        requestId: String,
+        claimToken: String,
+        outcome: String
+    ) = withContext(Dispatchers.IO) {
+        require(outcome in setOf("succeeded", "failed", "uncertain"))
+        val response = request(
+            "pos/cash-register/drawer/open/$requestId/pulse-result",
+            method = "POST",
+            token = token,
+            body = JSONObject()
+                .put("claim_token", claimToken)
+                .put("outcome", outcome)
+        )
+        if (!response.optBoolean("success", false)) {
+            throw CookitApiException(200, "Compte rendu de pulse M131 non confirmé.")
+        }
+    }
+
+    private fun parseFiscalDrawerOpenState(response: JSONObject): DrawerFiscalOpenState {
+        val data = response.optJSONObject("data")
+            ?: throw CookitApiException(200, "Réponse d'ouverture M131 sans données.")
+        val requestId = data.optString("request_id", "")
+        val status = data.optString("status", "")
+        if (requestId.isBlank() || status.isBlank()) {
+            throw CookitApiException(200, "Statut fiscal M131 incomplet.")
+        }
+        return DrawerFiscalOpenState(
+            requestId = requestId,
+            status = status,
+            fiscalStatus = data.optString("fiscal_status").takeIf { it.isNotBlank() && it != "null" },
+            fiscalizedAt = data.optString("fiscalized_at").takeIf { it.isNotBlank() && it != "null" }
         )
     }
 

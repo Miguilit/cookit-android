@@ -82,6 +82,7 @@ data class FiscalAgentJob(
             "signCostCenterChange",
             "signPreBill",
             "signMoneyInOut",
+            "signDrawerOpen",
             "signWorkIn",
             "signWorkOut",
             "signReportTurnoverX",

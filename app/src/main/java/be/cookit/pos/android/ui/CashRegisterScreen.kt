@@ -1419,7 +1419,7 @@ fun PremiumCashRegisterScreen(
                             onClick =
                                 vm::openDrawer,
                             enabled =
-                                ! state.cashBusy,
+                                open && !state.cashBusy && !state.drawerOpenBusy,
                             modifier =
                                 Modifier.weight(
                                     1f
@@ -1457,6 +1457,13 @@ fun PremiumCashRegisterScreen(
                                 s.close
                             )
                         }
+                    }
+                    state.drawerOpenMessage?.let { message ->
+                        Text(
+                            text = message,
+                            color = if (state.drawerOpenError) MaterialTheme.colorScheme.error else CashGreen,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }

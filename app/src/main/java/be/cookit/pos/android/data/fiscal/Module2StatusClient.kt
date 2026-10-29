@@ -131,6 +131,7 @@ class Module2StatusClient(private val context: Context) {
             "signCostCenterChange",
             "signPreBill",
             "signMoneyInOut",
+            "signDrawerOpen",
             "signWorkIn",
             "signWorkOut",
             "signReportTurnoverX",

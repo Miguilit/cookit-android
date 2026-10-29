@@ -657,6 +657,7 @@ class FiscalAgentRunner(
                 "signCostCenterChange",
                 "signPreBill",
                 "signMoneyInOut",
+                "signDrawerOpen",
                 "signWorkIn",
                 "signWorkOut",
                 "signReportTurnoverX",
