@@ -1246,14 +1246,10 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
             return
         }
 
-        if (state.hardwareMode != HardwareMode.REAL) {
-            _ui.update {
-                it.copy(
-                    drawerOpenMessage = "Ouverture réelle indisponible en mode simulation.",
-                    drawerOpenError = true,
-                    printerMessage = "failed"
-                )
-            }
+        // SIMULATED uses the EXISTING device simulator, but only after
+        // actual FDM fiscalization and the one-use server claim below.
+        if (state.hardwareMode !in setOf(HardwareMode.REAL, HardwareMode.SIMULATED)) {
+            _ui.update { it.copy(drawerOpenMessage = "Mode matériel non reconnu.", drawerOpenError = true) }
             return
         }
 
@@ -1307,7 +1303,7 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                       fiscal.fiscalStatus == "fiscalized" &&
                       !fiscal.fiscalizedAt.isNullOrBlank())) {
                     if (fiscal.status in setOf(
-                            "pulse_succeeded", "pulse_failed", "pulse_uncertain"
+                            "pulse_succeeded", "pulse_failed", "pulse_uncertain", "pulse_simulated"
                         ) || fiscal.fiscalStatus in setOf(
                             "failed", "rejected", "cancelled"
                         )) {
@@ -1347,29 +1343,45 @@ class CookitPosViewModel(application: Application) : AndroidViewModel(applicatio
                 }
 
                 // Complete/report the claimed action despite ViewModel cancellation.
+                // The existing simulator is a separate, auditable outcome. Never
+                // send a physical ESC/POS/Star pulse while hardwareMode=SIMULATED.
                 val result = withContext(NonCancellable) {
+                    val simulated = state.hardwareMode == HardwareMode.SIMULATED
                     val pulsed = runCatching {
-                        when (state.printerProvider) {
-                            PrinterProviderType.ESC_POS -> printerService.pulseDrawer(
-                                state.printerHost, state.printerPort
+                        if (simulated) {
+                            recordHardwareSimulationEvent(
+                                action = "drawer_open",
+                                detail = "M131 FDM ACK; request=" + fiscal.requestId
                             )
-                            PrinterProviderType.STAR -> starPrinterService.pulseDrawer(
-                                state.starIdentifier, state.starInterface
-                            )
+                            true
+                        } else {
+                            when (state.printerProvider) {
+                                PrinterProviderType.ESC_POS -> printerService.pulseDrawer(
+                                    state.printerHost, state.printerPort
+                                )
+                                PrinterProviderType.STAR -> starPrinterService.pulseDrawer(
+                                    state.starIdentifier, state.starInterface
+                                )
+                            }
                         }
                     }.getOrDefault(false)
-                    val outcome = if (pulsed) "succeeded" else "uncertain"
+                    val outcome = when {
+                        simulated && pulsed -> "simulated"
+                        pulsed -> "succeeded"
+                        else -> "uncertain"
+                    }
                     val reported = runCatching {
                         api.reportFiscalDrawerPulse(
                             currentToken, claim.requestId, claim.claimToken, outcome
                         )
                     }.isSuccess
-                    Pair(pulsed, reported)
+                    Triple(pulsed, reported, outcome)
                 }
                 _ui.update {
                     it.copy(
                         drawerOpenMessage = when {
                             !result.second -> "Pulse tenté ; compte rendu serveur non confirmé. Vérification manuelle requise."
+                            result.third == "simulated" -> "FDM confirmé ; impulsion enregistrée dans le simulateur Cookit (pas de tiroir physique)."
                             result.first -> "Ouverture du tiroir fiscalisée et enregistrée."
                             else -> "Impulsion incertaine ; aucune nouvelle ouverture automatique."
                         },

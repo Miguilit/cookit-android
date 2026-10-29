@@ -2449,7 +2449,7 @@ class CookitHttpClient {
         claimToken: String,
         outcome: String
     ) = withContext(Dispatchers.IO) {
-        require(outcome in setOf("succeeded", "failed", "uncertain"))
+        require(outcome in setOf("succeeded", "failed", "uncertain", "simulated"))
         val response = request(
             "pos/cash-register/drawer/open/$requestId/pulse-result",
             method = "POST",

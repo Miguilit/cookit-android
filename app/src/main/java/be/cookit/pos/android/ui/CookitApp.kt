@@ -181,7 +181,7 @@ private fun allowedTabletScreens(state: PosUiState): List<Screen> = buildList {
         state.fiscalAgentConfigured ||
         state.fdmSettings.configured ||
         state.fiscalIdentity != null
-    if (policy.canManageSettings && fiscalAvailable) add(Screen.FISCALITY)
+    if ((policy.canManageSettings || policy.canViewCashRegisterReports) && fiscalAvailable) add(Screen.FISCALITY)
     add(Screen.SETTINGS)
 }
 
@@ -5448,7 +5448,7 @@ private fun SettingsScreen(
                         value = state.fiscalAgentPendingOutcomes.toString()
                     )
                 }
-                if (state.policy.canManageSettings) {
+                if (state.policy.canManageSettings || state.policy.canViewCashRegisterReports) {
                     OutlinedButton(onClick = onOpenFiscality) {
                         Icon(Icons.Default.OpenInNew, null)
                         Spacer(Modifier.width(6.dp))
@@ -6312,6 +6312,13 @@ private fun FiscalityScreen(
     ) {
         Text(fs.centerTitle, fontSize = 28.sp, fontWeight = FontWeight.Black, color = CookitInk)
         Text("${state.user.branch} • ${fs.centerSubtitle}", color = CookitMuted)
+        if (state.policy.canViewCashRegisterReports && !state.policy.canManageSettings) {
+            Text(
+                "Consultation fiscale uniquement • matériel: ${state.hardwareMode} • événements simulés: ${state.hardwareSimulationEvents.size}",
+                color = CookitMuted,
+                fontSize = 12.sp
+            )
+        }
 
         Card(
             colors = CardDefaults.cardColors(containerColor = CookitSurface),
